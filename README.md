@@ -215,15 +215,6 @@ Advanced settings are in `config_v3.py` — search delays, proxy config, scan de
 ├── requirements_v3.txt     # Python dependencies
 └── Dockerfile              # Container deployment
 ```
-
----
-
-## Disclaimer
-
-This tool is provided for **authorized security testing and educational purposes only**. Use only on systems you own or have **explicit written permission** to test. Unauthorized access to computer systems is illegal. The authors are not responsible for misuse.
-
----
-
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
