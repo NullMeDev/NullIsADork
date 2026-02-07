@@ -62,31 +62,6 @@ class DorkGenerator:
         'site:*(DE) inurl:panel "(KW)"',
         'site:*(DE) inurl:dashboard "(KW)"',
         'site:*(DE) intitle:"admin" "(KW)"',
-        
-        # === LFI/Path traversal focused ===
-        'inurl:"file=" "(KW)" ext:php',
-        'inurl:"path=" "(KW)" ext:php',
-        'inurl:"include=" "(KW)" ext:php',
-        'inurl:"template=" "(KW)" ext:php',
-        'inurl:"doc=" "(KW)" ext:php',
-        'inurl:"page=" "(KW)" ext:asp',
-        
-        # === API endpoint focused ===
-        'inurl:"/api/" "(KW)" intext:"token" -github',
-        'inurl:"/api/v1/" "(KW)" -github -docs',
-        'inurl:"/graphql" "(KW)" -github -docs',
-        
-        # === Error message focused (SQLi candidate) ===
-        '"(KW)" intext:"mysql_fetch" -github -stackoverflow',
-        '"(KW)" intext:"Warning:" "mysql" -github -stackoverflow',
-        '"(KW)" intext:"syntax error" inurl:"(PP)="',
-        '"(KW)" intext:"ODBC" "driver" -docs',
-        
-        # === Config leak focused ===
-        '"(KW)" inurl:phpinfo -github',
-        '"(KW)" inurl:server-status',
-        '"(KW)" inurl:".git/config" -github',
-        '"(KW)" intitle:"index of" "password"',
     ]
 
     # High-value static dorks (always included)
@@ -346,80 +321,6 @@ class DorkGenerator:
         '"handmade" shop intext:"stripe"',
         '"organic" shop intext:"stripe" -amazon',
         '"vintage" checkout intext:"pk_live_"',
-        
-        # === HEALTHCARE / MEDICAL ===
-        '"patient portal" login -docs -github',
-        '"medical records" inurl:"id=" -docs -github',
-        '"prescription" inurl:".php?id=" -docs -github',
-        '"hipaa" filetype:env -github',
-        '"ehr" inurl:"patient" intext:"api_key" -github',
-        'inurl:"patient" "demographics" inurl:"id="',
-        '"hospital" intext:"stripe" payment -docs',
-        '"pharmacy" checkout intext:"pk_live_"',
-        '"telehealth" payment intext:"stripe"',
-        
-        # === EDUCATION ===
-        'site:*.edu inurl:"id=" intext:"mysql"',
-        'site:*.edu intext:"pk_live_" -docs',
-        'site:*.edu filetype:sql',
-        '"tuition" payment intext:"stripe" -docs',
-        '"enrollment" inurl:"student" inurl:"id="',
-        '"transcript" inurl:".php?id=" -github',
-        
-        # === GOVERNMENT ===
-        'site:*.gov inurl:"id=" ext:php',
-        'site:*.gov inurl:"id=" ext:asp',
-        'site:*.gov filetype:sql -github',
-        'site:*.gov filetype:env -github',
-        'site:*.gov.* intext:"pk_live_"',
-        '"permits" "online payment" intext:"stripe"',
-        '"court records" inurl:"id=" -docs',
-        '"public records" inurl:".php?id="',
-        
-        # === FINTECH / BANKING ===
-        '"loan application" inurl:"id=" -docs',
-        '"credit score" intext:"api_key" -github',
-        '"wire transfer" inurl:".php?id=" -docs',
-        '"mortgage" intext:"stripe" checkout',
-        '"banking" filetype:env "DB_PASSWORD" -github',
-        '"investment" portal intext:"pk_live_"',
-        
-        # === EXPO ENDPOINTS / CONFIG LEAKS ===
-        'inurl:"/api/v1/" intext:"token" -github -docs',
-        'inurl:"/api/v2/" intext:"api_key" -github -docs',
-        'inurl:"graphql" intext:"mutation" "token" -docs -github',
-        'inurl:"/swagger" intext:"api" -docs -github',
-        'inurl:"/api-docs" intext:"key" -docs',
-        'inurl:"debug" intext:"Exception" "traceback" -github',
-        'inurl:".git/config" intext:"github.com" -github',
-        'inurl:"/.well-known/" "security.txt"',
-        '"powered by" "debug mode" intext:"settings"',
-        
-        # === LFI/RFI CANDIDATES ===
-        'inurl:"file=" inurl:".php" -github -docs',
-        'inurl:"page=" inurl:".php" -github -docs',
-        'inurl:"path=" inurl:".php" -github -docs',
-        'inurl:"include=" inurl:".php" -github',
-        'inurl:"template=" inurl:".php" -github',
-        'inurl:"doc=" inurl:".php" -github',
-        'inurl:"load=" inurl:".php" -github',
-        
-        # === EXPOSED ADMIN PANELS / DASHBOARDS ===
-        'intitle:"Dashboard" intext:"admin" inurl:login -github',
-        'intitle:"cPanel" "login" -docs',
-        'intitle:"Webmail" "login" -docs -roundcube.net',
-        'intitle:"Grafana" intext:"login" -github -grafana.com',
-        'intitle:"Jenkins" intext:"dashboard" -github -jenkins.io',
-        'intitle:"Jira" intext:"login" -atlassian.com',
-        'intitle:"GitLab" intext:"sign in" -gitlab.com',
-        
-        # === ERROR PAGES WITH INFO LEAK ===
-        '"Warning:" "mysql_" "on line" -github -stackoverflow',
-        '"Fatal error:" "Uncaught" "Stack trace:" -github -stackoverflow',
-        '"Parse error:" "syntax error" "on line" -github -stackoverflow',
-        '"PDOException" "SQLSTATE" -github -stackoverflow',
-        '"pg_connect" "connection" "failed" -github -stackoverflow',
-        '"ORA-" "error" "at line" -github -stackoverflow',
     ]
 
     def __init__(self, params_dir: str = None):

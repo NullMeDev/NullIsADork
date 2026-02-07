@@ -8,31 +8,15 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
-# Load .env file if present
-try:
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
-except ImportError:
-    # python-dotenv not installed — rely on system env vars
-    _env_path = os.path.join(os.path.dirname(__file__), ".env")
-    if os.path.exists(_env_path):
-        with open(_env_path) as _f:
-            for _line in _f:
-                _line = _line.strip()
-                if _line and not _line.startswith('#') and '=' in _line:
-                    _k, _v = _line.split('=', 1)
-                    os.environ.setdefault(_k.strip(), _v.strip())
-
 
 @dataclass
 class DorkerConfig:
     """Configuration for MedyDorker v3.0."""
     
     # =============== TELEGRAM ===============
-    telegram_bot_token: str = os.getenv("DORKER_BOT_TOKEN", "")
-    telegram_chat_id: str = os.getenv("DORKER_CHAT_ID", "")  # Owner's chat for direct messages
+    telegram_bot_token: str = os.getenv("DORKER_BOT_TOKEN", "8187477232:AAEh3X22b1ddY9ZaVxc0x-j9MZQyTK9Wbp4")
+    telegram_chat_id: str = os.getenv("DORKER_CHAT_ID", "")
     telegram_group_id: str = os.getenv("DORKER_GROUP_ID", "")  # Group for findings
-    telegram_owner_id: str = os.getenv("DORKER_OWNER_ID", "")  # Bot owner (authorized user)
     
     # =============== DORK GENERATOR ===============
     params_dir: str = os.path.join(os.path.dirname(__file__), "params")
@@ -52,7 +36,7 @@ class DorkerConfig:
     engine_fallback: bool = True
     
     # =============== PROXY ===============
-    use_proxies: bool = True
+    use_proxies: bool = False  # Set True only if you have working proxies
     proxy_file: str = os.path.join(os.path.dirname(__file__), "proxies.txt")
     rotate_proxy_every: int = 5
     proxy_timeout: int = 15
@@ -119,6 +103,30 @@ class DorkerConfig:
     seen_domains_file: str = os.path.join(os.path.dirname(__file__), "seen_domains.txt")
     vulnerable_urls_file: str = os.path.join(os.path.dirname(__file__), "vulnerable_urls.json")
     gateway_keys_file: str = os.path.join(os.path.dirname(__file__), "gateway_keys.json")
+    sqlite_db_path: str = os.path.join(os.path.dirname(__file__), "dorker.db")
+    use_sqlite: bool = True  # Use SQLite instead of JSON files
+    
+    # =============== SEARCH PAGINATION ===============
+    search_max_pages: int = 3  # Search pages 1-3 per engine per dork
+    engine_health_cooldown: int = 300  # Seconds to cool down a failing engine
+    
+    # =============== CONCURRENT PROCESSING ===============
+    concurrent_url_limit: int = 5  # Max URLs processed in parallel
+    
+    # =============== CIRCUIT BREAKER ===============
+    circuit_breaker_threshold: int = 3  # Failures before blocking domain
+    circuit_breaker_timeout: int = 1800  # 30 minutes block
+    
+    # =============== COOKIE EXTRACTION ===============
+    cookie_extraction_enabled: bool = True  # Extract cookies from every scanned URL
+    cookie_injection_enabled: bool = True  # Test cookies for SQLi
+    header_injection_enabled: bool = True  # Test headers for SQLi
+    post_discovery_enabled: bool = True  # Discover & test POST forms
+    b3_extraction_enabled: bool = True  # Prioritize b3 tracing cookies
+    
+    # =============== SOFT-404 DETECTION ===============
+    soft404_detection: bool = True
+    soft404_similarity_threshold: float = 0.85  # Pages >85% similar to 404 are soft-404s
     
     # =============== SKIP DOMAINS ===============
     skip_domains: List[str] = field(default_factory=lambda: [

