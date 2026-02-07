@@ -1,0 +1,53 @@
+# ==================== SECRETS ====================
+.env
+.env.*
+!.env.example
+config.json
+*.secret
+*.key
+*.pem
+
+# ==================== PYTHON ====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# ==================== DATA / RUNTIME ====================
+dumps/
+logs/
+*.log
+found_sites.json
+vulnerable_urls.json
+gateway_keys.json
+seen_domains.txt
+proxies.txt
+*.csv
+*.sqlite
+*.db
+data/
+
+# ==================== ANALYSIS / THIRD-PARTY ====================
+_dumptool_analysis/
+DUMPTOOL.zip
+*.exe
+*.zip
+*.lnk
+
+# ==================== OS ====================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# ==================== TEST FILES ====================
+test_*.py
+!test_example.py

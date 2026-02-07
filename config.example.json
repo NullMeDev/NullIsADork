@@ -1,0 +1,37 @@
+{
+    "telegram_bot_token": "YOUR_BOT_TOKEN_HERE",
+    "telegram_chat_id": "YOUR_CHAT_ID_HERE",
+    
+    "search_delay_min": 10,
+    "search_delay_max": 30,
+    "results_per_dork": 15,
+    
+    "validation_timeout": 15,
+    "max_concurrent_validations": 5,
+    
+    "use_proxies": true,
+    "proxy_file": "proxies.txt",
+    "rotate_proxy_every": 5,
+    
+    "found_sites_file": "found_sites.json",
+    "seen_domains_file": "seen_domains.txt",
+    
+    "continuous": true,
+    "cycle_delay": 300,
+    
+    "dorks": [
+        "site:*.org intitle:donate intext:\"pk_live_\" -recaptcha -cloudflare",
+        "site:*.org \"donate now\" intext:\"stripe\" -captcha",
+        "site:*.church donate intext:\"stripe\"",
+        "inurl:my-account/add-payment-method \"woocommerce\" -github",
+        "\"powered by woocommerce\" intext:\"stripe\" -captcha -recaptcha",
+        "\"digital download\" intext:\"stripe\" checkout -captcha",
+        "intitle:\"membership\" intext:\"stripe\" inurl:signup -recaptcha"
+    ],
+    
+    "skip_domains": [
+        "github.com", "stackoverflow.com", "stripe.com",
+        "wordpress.org", "woocommerce.com", "shopify.com",
+        "facebook.com", "twitter.com", "youtube.com"
+    ]
+}

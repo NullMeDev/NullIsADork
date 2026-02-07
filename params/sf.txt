@@ -1,0 +1,12 @@
+inurl:
+intitle:
+intext:
+allinurl:
+allintitle:
+allintext:
+site:
+filetype:
+ext:
+cache:
+related:
+link:

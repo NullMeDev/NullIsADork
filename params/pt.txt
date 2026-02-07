@@ -1,0 +1,17 @@
+.php
+.asp
+.aspx
+.jsp
+.cfm
+.cgi
+.pl
+.do
+.action
+.htm
+.html
+.shtml
+.nsf
+.xhtml
+.jspx
+.py
+.rb
