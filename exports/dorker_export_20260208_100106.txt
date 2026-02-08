@@ -1,0 +1,973 @@
+======================================================================
+  MedyDorker v3.15 — Hourly Export #1
+  Generated: 2026-02-08 10:01:06
+  Uptime: 0h 6m
+======================================================================
+
+--- SUMMARY ---
+Cycles completed: 1
+URLs scanned: 29
+Domains seen: 180
+SQLi vulns: 313
+Secrets found: 21
+Gateways found: 20
+Cards found: 0
+Cookies: 0 (B3: 0)
+
+--- VULNERABLE URLs (SQLi) ---
+  [UNION ALL SELECT/mysql] param=pic
+    http://testphp.vulnweb.com/product.php?pic=3
+  [UNION ALL SELECT/mysql] param=cat
+    http://testphp.vulnweb.com/listproducts.php?cat=4
+  [UNION ALL SELECT/mysql] param=cat
+    http://testphp.vulnweb.com/listproducts.php?cat=3
+  [EXTRACTVALUE/mysql] param=test
+    http://testphp.vulnweb.com/search.php?test=query
+  [UNION ALL SELECT/mysql] param=pic
+    http://testphp.vulnweb.com/product.php?pic=5
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://dev.to/users/auth/facebook?callback_url=https%3A%2F%2Fdev.to%2Fusers%2Fauth%2Ffacebook%2Fcallback&amp;state=navbar_basic
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    http://www.htcmfg.com/index.php?route=information/sitemap
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    http://www.htcmfg.com/index.php?route=information/sitemap
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=147
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=147
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=147
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=147
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=147
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=147
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=147
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=147
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    http://www.htcmfg.com/index.php?route=product/product&amp;path=7_1&amp;product_id=19460&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    http://www.htcmfg.com/index.php?route=product/product&amp;path=7_1&amp;product_id=19460&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=218
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=218
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=218
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    http://www.htcmfg.com/index.php?route=product/category&amp;path=7_1&amp;filter=&amp;sort=pd.name&amp;order=DESC&amp;limit=25&amp;page=218
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://www.htcmfg.com/index.php?route=product/category&path=7_1&filter=&sort=pd.name&order=DESC&limit=25&page=152
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.htcmfg.com/index.php?route=product/category&path=7_1&filter=&sort=pd.name&order=DESC&limit=25&page=152
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.htcmfg.com/index.php?route=product/category&path=7_1&filter=&sort=pd.name&order=DESC&limit=25&page=152
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.htcmfg.com/index.php?route=product/category&path=7_1&filter=&sort=pd.name&order=DESC&limit=25&page=152
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.htcmfg.com/index.php?route=product/category&path=7_1&filter=&sort=pd.name&order=DESC&limit=25&page=152
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://www.htcmfg.com/index.php?route=product/category&path=7_1&filter=&sort=pd.name&order=DESC&limit=25&page=152
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://www.htcmfg.com/index.php?route=product/category&path=7_1&filter=&sort=pd.name&order=DESC&limit=25&page=152
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://www.speakerhardware.com/?p=769
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.speakerhardware.com/?p=769
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://www.speakerhardware.com/?p=769
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.speakerhardware.com/?p=769
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.speakerhardware.com/?p=769
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.speakerhardware.com/?p=769
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.speakerhardware.com/?p=769
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://www.speakerhardware.com/?p=769
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://www.speakerhardware.com/?p=769
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://www.speakerhardware.com/?p=769
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://www.speakerhardware.com/products?cat=Acoustic+Foam%2FPorts
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.speakerhardware.com/products?cat=Acoustic+Foam%2FPorts
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://www.speakerhardware.com/products?cat=Acoustic+Foam%2FPorts
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.speakerhardware.com/products?cat=Acoustic+Foam%2FPorts
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.speakerhardware.com/products?cat=Acoustic+Foam%2FPorts
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.speakerhardware.com/products?cat=Acoustic+Foam%2FPorts
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.speakerhardware.com/products?cat=Acoustic+Foam%2FPorts
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://www.speakerhardware.com/products?cat=Acoustic+Foam%2FPorts
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://www.speakerhardware.com/products?cat=Acoustic+Foam%2FPorts
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.speakerhardware.com/proddetail?prod=Statements+Tower+Flat+Pack+II
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://www.speakerhardware.com/proddetail?prod=Statements+Tower+Flat+Pack+II
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.speakerhardware.com/proddetail?prod=Statements+Tower+Flat+Pack+II
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.speakerhardware.com/proddetail?prod=Statements+Tower+Flat+Pack+II
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.speakerhardware.com/proddetail?prod=Statements+Tower+Flat+Pack+II
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.speakerhardware.com/proddetail?prod=Statements+Tower+Flat+Pack+II
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://www.speakerhardware.com/proddetail?prod=Deep+D+Handle
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.speakerhardware.com/proddetail?prod=Deep+D+Handle
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://www.speakerhardware.com/proddetail?prod=Deep+D+Handle
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.speakerhardware.com/proddetail?prod=Deep+D+Handle
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.speakerhardware.com/proddetail?prod=Deep+D+Handle
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.speakerhardware.com/proddetail?prod=Deep+D+Handle
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.speakerhardware.com/proddetail?prod=Deep+D+Handle
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://www.speakerhardware.com/proddetail?prod=Deep+D+Handle
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://www.speakerhardware.com/proddetail?prod=Deep+D+Handle
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://www.speakerhardware.com/proddetail?prod=Deep+D+Handle
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://www.speakerhardware.com/cart
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.speakerhardware.com/cart
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://www.speakerhardware.com/cart
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.speakerhardware.com/cart
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.speakerhardware.com/cart
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.speakerhardware.com/cart
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.speakerhardware.com/cart
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://www.speakerhardware.com/cart
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://www.speakerhardware.com/cart
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://www.speakerhardware.com/cart
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://www.speakerhardware.com/high-pass-filter-2k-8-ohm.php
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.speakerhardware.com/high-pass-filter-2k-8-ohm.php
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://www.speakerhardware.com/high-pass-filter-2k-8-ohm.php
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.speakerhardware.com/high-pass-filter-2k-8-ohm.php
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.speakerhardware.com/high-pass-filter-2k-8-ohm.php
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.speakerhardware.com/high-pass-filter-2k-8-ohm.php
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.speakerhardware.com/high-pass-filter-2k-8-ohm.php
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://www.speakerhardware.com/high-pass-filter-2k-8-ohm.php
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://www.speakerhardware.com/high-pass-filter-2k-8-ohm.php
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://www.speakerhardware.com/high-pass-filter-2k-8-ohm.php
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.fag-consult.ch/login?redirect_to=https%3A%2F%2Fwww.fag-consult.ch%2Fotter%2F
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.fag-consult.ch/?p=5074
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://eprints.ost.ch/id/eprint/1139/1/FS%202023-BA-EP-Pfister-Knecht-Kalchofner-Flatfeestack.pdf
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://eprints.ost.ch/id/eprint/1139/1/FS%202023-BA-EP-Pfister-Knecht-Kalchofner-Flatfeestack.pdf
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://eprints.ost.ch/id/eprint/1139/1/FS%202023-BA-EP-Pfister-Knecht-Kalchofner-Flatfeestack.pdf
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://eprints.ost.ch/id/eprint/1139/1/FS%202023-BA-EP-Pfister-Knecht-Kalchofner-Flatfeestack.pdf
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://eprints.ost.ch/id/eprint/1139/1/FS%202023-BA-EP-Pfister-Knecht-Kalchofner-Flatfeestack.pdf
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://eprints.ost.ch/id/eprint/1139/1/FS%202023-BA-EP-Pfister-Knecht-Kalchofner-Flatfeestack.pdf
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://eprints.ost.ch/id/eprint/1139/1/FS%202023-BA-EP-Pfister-Knecht-Kalchofner-Flatfeestack.pdf
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://eprints.ost.ch/id/eprint/1139/1/FS%202023-BA-EP-Pfister-Knecht-Kalchofner-Flatfeestack.pdf
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.fag-consult.ch/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fwww.fag-consult.ch%2F
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.fag-consult.ch/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fwww.fag-consult.ch%2F
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://www.zhaw.ch/storage/hochschule/medien/news/2021/210908-zhaw-studie-onlinehaendlerbefragung-2021-EN.pdf
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.zhaw.ch/storage/hochschule/medien/news/2021/210908-zhaw-studie-onlinehaendlerbefragung-2021-EN.pdf
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.zhaw.ch/storage/hochschule/medien/news/2021/210908-zhaw-studie-onlinehaendlerbefragung-2021-EN.pdf
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.zhaw.ch/storage/hochschule/medien/news/2021/210908-zhaw-studie-onlinehaendlerbefragung-2021-EN.pdf
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.zhaw.ch/storage/hochschule/medien/news/2021/210908-zhaw-studie-onlinehaendlerbefragung-2021-EN.pdf
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.zhaw.ch/storage/hochschule/medien/news/2021/210908-zhaw-studie-onlinehaendlerbefragung-2021-EN.pdf
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://www.zhaw.ch/storage/hochschule/medien/news/2021/210908-zhaw-studie-onlinehaendlerbefragung-2021-EN.pdf
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://www.zhaw.ch/storage/hochschule/medien/news/2021/210908-zhaw-studie-onlinehaendlerbefragung-2021-EN.pdf
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://hub.hslu.ch/retailbanking/wp-content/uploads/sites/7/2021/03/IFZ-FinTech-Study-2021-1.pdf
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://hub.hslu.ch/retailbanking/wp-content/uploads/sites/7/2021/03/IFZ-FinTech-Study-2021-1.pdf
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://hub.hslu.ch/retailbanking/wp-content/uploads/sites/7/2021/03/IFZ-FinTech-Study-2021-1.pdf
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://hub.hslu.ch/retailbanking/wp-content/uploads/sites/7/2021/03/IFZ-FinTech-Study-2021-1.pdf
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://hub.hslu.ch/retailbanking/wp-content/uploads/sites/7/2021/03/IFZ-FinTech-Study-2021-1.pdf
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://hub.hslu.ch/retailbanking/wp-content/uploads/sites/7/2021/03/IFZ-FinTech-Study-2021-1.pdf
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://hub.hslu.ch/retailbanking/wp-content/uploads/sites/7/2021/03/IFZ-FinTech-Study-2021-1.pdf
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://hub.hslu.ch/retailbanking/wp-content/uploads/sites/7/2021/03/IFZ-FinTech-Study-2021-1.pdf
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://hub.hslu.ch/retailbanking/wp-content/uploads/sites/7/2021/03/IFZ-FinTech-Study-2021-1.pdf
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://hub.hslu.ch/retailbanking/wp-content/uploads/sites/7/2021/03/IFZ-FinTech-Study-2021-1.pdf
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.zgraggi.ch/projects
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://ugpayments.ch/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fugpayments.ch%2Fblog%2Fwordpress-payment-options%2F&
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://ugpayments.ch/blog/wordpress-payment-options/
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://ugpayments.ch/blog/wordpress-payment-options/
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://webgate.ec.europa.eu/funding-tenders-opportunities/display/IT/Using+the+Dashboard
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://sgse.eu/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fsgse.eu%2Fdashboard-intrusion-y-voip%2F
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://sgse.eu/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fsgse.eu%2Fdashboard-intrusion-y-voip%2F
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.pinterest.dk/search/pins?q=Web%20ui%20design&amp;rs=blp
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://cetaceans.ices.dk/dashboard
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://cetaceans.ices.dk/dashboard
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://cetaceans.ices.dk/dashboard
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://cetaceans.ices.dk/dashboard
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://cetaceans.ices.dk/dashboard
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://cetaceans.ices.dk/dashboard
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://cetaceans.ices.dk/dashboard
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://cetaceans.ices.dk/dashboard
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://cetaceans.ices.dk/dashboard
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://cetaceans.ices.dk/dashboard
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://www.pinterest.dk/creativedesigner07033/ui-ux-layout-admin-dashboard/
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.pinterest.dk/sharpnotions/dashboard-application-ui/
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://www.pinterest.dk/maffattone/dashboard/
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.pinterest.dk/maffattone/dashboard/
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://www.sevelstedviborg.dk/prop/templates/admin-dashboard/index.html
+  [/mssql] param=Header:X-Originating-IP
+    https://shopify.dev/docs/api/admin-graphql/latest/scalars/ID
+  [/mssql] param=Header:X-Forwarded-For
+    https://shopify.dev/docs/api/admin-graphql/latest/interfaces/Node
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://pkg.go.dev/search
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://pkg.go.dev/search
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://www.lewisdoes.dev/blog/5-power-platform-cli-admin-hacks/
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://pkg.go.dev/google.golang.org/api/admin/directory/v1
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://pkg.go.dev/google.golang.org/api/admin/directory/v1
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://pkg.go.dev/google.golang.org/api/admin/directory/v1
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://pkg.go.dev/google.golang.org/api/admin/directory/v1
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://pkg.go.dev/google.golang.org/api/admin/directory/v1
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://pkg.go.dev/google.golang.org/api/admin/directory/v1
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://pkg.go.dev/google.golang.org/api/admin/directory/v1
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://pkg.go.dev/google.golang.org/api/admin/directory/v1
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://mundialis.dev/time/timeline?tags[]=Example+Pages
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://mundialis.dev/time/timeline?tags[]=Example+Pages
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://mundialis.dev/time/timeline?tags[]=Example+Pages
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://mundialis.dev/time/timeline?tags[]=Example+Pages
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://mundialis.dev/time/timeline?tags[]=Example+Pages
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://blog.platformatic.dev/_next/image?url=https%3A%2F%2Fcdn.hashnode.com%2Fres%2Fhashnode%2Fimage%2Fupload%2Fv1761586909731%2Fa7900f5f-024b-4d55-ba46-a9fa3394f331.png&amp;w=3840&amp;q=75
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://blog.platformatic.dev/_next/image?url=https%3A%2F%2Fcdn.hashnode.com%2Fres%2Fhashnode%2Fimage%2Fupload%2Fv1761586909731%2Fa7900f5f-024b-4d55-ba46-a9fa3394f331.png&amp;w=3840&amp;q=75
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://blog.platformatic.dev/_next/image?url=https%3A%2F%2Fcdn.hashnode.com%2Fres%2Fhashnode%2Fimage%2Fupload%2Fv1761586909731%2Fa7900f5f-024b-4d55-ba46-a9fa3394f331.png&amp;w=3840&amp;q=75
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://mundialis.dev/user/Admin/page-revisions?page=2
+  [POST param injection (POST)/mssql] param=POST:password
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [POST param injection (POST)/mssql] param=POST:username
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [Header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [Header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [Header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [Header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [Header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [Header injection (Referer)/mssql] param=Header:Referer
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [Header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [Header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [Header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [Header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://discuss.google.dev/c/google-workspace/workspace-developer/119?page=1
+  [POST param injection (POST)/mssql] param=POST:password
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [POST param injection (POST)/mssql] param=POST:username
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [Header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [Header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [Header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [Header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [Header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [Header injection (Referer)/mssql] param=Header:Referer
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [Header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [Header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [Header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [Header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://discuss.google.dev/tag/admin?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin
+  [POST param injection (POST)/mssql] param=POST:password
+    https://discuss.google.dev/login
+  [POST param injection (POST)/mssql] param=POST:username
+    https://discuss.google.dev/login
+  [Header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://discuss.google.dev/login
+  [Header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://discuss.google.dev/login
+  [Header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://discuss.google.dev/login
+  [Header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://discuss.google.dev/login
+  [Header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://discuss.google.dev/login
+  [Header injection (Referer)/mssql] param=Header:Referer
+    https://discuss.google.dev/login
+  [Header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://discuss.google.dev/login
+  [Header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://discuss.google.dev/login
+  [Header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://discuss.google.dev/login
+  [Header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://discuss.google.dev/login
+  [POST param injection (POST)/mssql] param=POST:password
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [POST param injection (POST)/mssql] param=POST:username
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [Header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [Header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [Header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [Header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [Header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [Header injection (Referer)/mssql] param=Header:Referer
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [Header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [Header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [Header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [Header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://discuss.google.dev/tag/add-ons?match_all_tags=true&amp;page=1&amp;tags%5B%5D=add-ons
+  [Header injection (Client-IP)/postgresql] param=Header:Client-IP
+    https://makerkit.dev/docs/nextjs-drizzle/admin/overview
+  [Header injection (True-Client-IP)/postgresql] param=Header:True-Client-IP
+    https://makerkit.dev/docs/nextjs-drizzle/admin/overview
+  [Header injection (CF-Connecting-IP)/postgresql] param=Header:CF-Connecting-IP
+    https://makerkit.dev/docs/nextjs-drizzle/admin/overview
+  [Header injection (X-Originating-IP)/postgresql] param=Header:X-Originating-IP
+    https://makerkit.dev/docs/nextjs-drizzle/admin/overview
+  [Header injection (X-Custom-IP-Authorization)/postgresql] param=Header:X-Custom-IP-Authorization
+    https://makerkit.dev/docs/nextjs-drizzle/admin/overview
+  [Header injection (Referer)/postgresql] param=Header:Referer
+    https://makerkit.dev/docs/nextjs-drizzle/admin/overview
+  [Header injection (X-Real-IP)/postgresql] param=Header:X-Real-IP
+    https://makerkit.dev/docs/nextjs-drizzle/admin/overview
+  [Header injection (X-Client-IP)/postgresql] param=Header:X-Client-IP
+    https://makerkit.dev/docs/nextjs-drizzle/admin/overview
+  [Header injection (X-Forwarded-Host)/postgresql] param=Header:X-Forwarded-Host
+    https://makerkit.dev/docs/nextjs-drizzle/admin/overview
+  [Header injection (X-Forwarded-For)/postgresql] param=Header:X-Forwarded-For
+    https://makerkit.dev/docs/nextjs-drizzle/admin/overview
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://mundialis.dev/js/app-secondary.js?id=5e53cf244f7b8cc45815b851a4c35a45
+  [POST param injection (POST)/mssql] param=POST:password
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [POST param injection (POST)/mssql] param=POST:username
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [Header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [Header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [Header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [Header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [Header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [Header injection (Referer)/mssql] param=Header:Referer
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [Header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [Header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [Header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [Header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://discuss.google.dev/tag/admin-console?match_all_tags=true&amp;page=1&amp;tags%5B%5D=admin-console
+  [POST param injection (POST)/mssql] param=POST:password
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [POST param injection (POST)/mssql] param=POST:username
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [Header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [Header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [Header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [Header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [Header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [Header injection (Referer)/mssql] param=Header:Referer
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [Header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [Header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [Header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [Header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://discuss.google.dev/t/feature-request-admin-directory-setting-user-profile-picture-visibility/252754
+  [/mssql] param=Header:X-Real-IP
+    https://www.genxgarage.co.uk/?add-to-cart=1
+  [/mssql] param=Header:Client-IP
+    https://genxgarage.co.uk/wp-admin/admin-ajax.php?action=test&id=1
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.genxgarage.co.uk/\/\/www.genxgarage.co.uk\/wp-admin\/admin-ajax.php?action=test&id=1
+  [/mssql] param=Header:Client-IP
+    https://genxgarage.co.uk/\/\/www.genxgarage.co.uk\/wp-admin\/admin-ajax.php?action=test&id=1
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://forum.kvinneguiden.no/topic/1842682-hvordan-fjerne-seg-selv-som-admin-p%C3%A5-fbside/
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://forum.kvinneguiden.no/topic/1842682-hvordan-fjerne-seg-selv-som-admin-p%C3%A5-fbside/
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://blogs.loc.gov/thesignal/2014/07/preserving-and-curating-research-data-panel-preview-for-dp2014/
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.montgomerycountypa.gov/3616/Youth-Aid-Panel-Program
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.nga.gov/artworks/37635-deacon-saint-saint-anthony-abbot-right-panel
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://biblioteche.unipv.it/wp-content/uploads/2020/06/MOBILUS-Admin-Guide-2018.pdf
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://biblioteche.unipv.it/wp-content/uploads/2020/06/MOBILUS-Admin-Guide-2018.pdf
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://www.milamaurizi.it/en/author/admin/
+  [Header injection (Client-IP)/mysql] param=Header:Client-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (True-Client-IP)/mysql] param=Header:True-Client-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (CF-Connecting-IP)/mysql] param=Header:CF-Connecting-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (X-Originating-IP)/mysql] param=Header:X-Originating-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (X-Custom-IP-Authorization)/mysql] param=Header:X-Custom-IP-Authorization
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (Referer)/mysql] param=Header:Referer
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (X-Real-IP)/mysql] param=Header:X-Real-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (X-Client-IP)/mysql] param=Header:X-Client-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [UNION ALL SELECT/mysql] param=pic
+    http://testphp.vulnweb.com/product.php?pic=4
+  [UNION ALL SELECT/mysql] param=artist
+    http://testphp.vulnweb.com/artists.php?artist=2
+  [POST param injection (POST)/mysql] param=POST:pass
+    http://testphp.vulnweb.com/userinfo.php
+  [POST param injection (POST)/mysql] param=POST:uname
+    http://testphp.vulnweb.com/userinfo.php
+  [UNION ALL SELECT/mysql] param=artist
+    http://testphp.vulnweb.com/artists.php?artist=1
+  [UNION ALL SELECT/mysql] param=artist
+    http://testphp.vulnweb.com/artists.php?artist=3
+  [UNION ALL SELECT/mysql] param=cat
+    http://testphp.vulnweb.com/listproducts.php?cat=2
+  [UNION ALL SELECT/mysql] param=pic
+    http://testphp.vulnweb.com/product.php?pic=2
+  [Boolean-based blind/mysql] param=artist
+    http://testphp.vulnweb.com/artists.php?artist=1
+  [UNION ALL SELECT/mysql] param=cat
+    http://testphp.vulnweb.com/listproducts.php?cat=1
+  [Header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (Referer)/mssql] param=Header:Referer
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+
+--- SECRETS ---
+  [twilio_sid] acf37e5849a88671ac88ffa58253d31255
+    Source: https://changelog.contentstudio.io/new-facebook-competitor-analytics-+-admin-access-to-billing-improvements-278955
+  [twilio_sid] aced642e353830d56836b701db47b3f1b0
+    Source: https://changelog.contentstudio.io/new-facebook-competitor-analytics-+-admin-access-to-billing-improvements-278955
+  [twilio_sid] ac80a7fe69f5b4bec48338e7e4cb95cd4f
+    Source: https://changelog.contentstudio.io/new-facebook-competitor-analytics-+-admin-access-to-billing-improvements-278955
+  [jwt] eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJyZXR1cm5fdG8iOiJodHRwczovL3N1cHBvcnQuY2x
+    Source: https://support.cloudm.io/hc/en-us/articles/21799709777180-How-to-find-the-SharePoint-Admin-Url
+  [jwt] eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJyZXR1cm5fdG8iOiJodHRwczovL3N1cHBvcnQuY2x
+    Source: https://support.cloudm.io/hc/en-us/articles/21799709777180-How-to-find-the-SharePoint-Admin-Url
+  [jwt] eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJyZXR1cm5fdG8iOiJodHRwczovL3N1cHBvcnQuY2x
+    Source: https://support.cloudm.io/hc/en-us/articles/21799709777180-How-to-find-the-SharePoint-Admin-Url
+  [jwt] eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJyZXR1cm5fdG8iOiJodHRwczovL3N1cHBvcnQuY2x
+    Source: https://support.cloudm.io/hc/en-us/articles/21799709777180-How-to-find-the-SharePoint-Admin-Url
+  [jwt] eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJyZXR1cm5fdG8iOiJodHRwczovL3N1cHBvcnQuY2x
+    Source: https://support.cloudm.io/hc/en-us/articles/21799709777180-How-to-find-the-SharePoint-Admin-Url
+  [jwt] eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJyZXR1cm5fdG8iOiJodHRwczovL3N1cHBvcnQuY2x
+    Source: https://support.cloudm.io/hc/en-us/articles/21799709777180-How-to-find-the-SharePoint-Admin-Url
+  [wp_nonce] 51f33422ec
+    Source: https://sandbag.be/eu-ets-dashboard/
+  [wp_nonce] b428509595
+    Source: https://sandbag.be/eu-ets-dashboard/
+  [wp_nonce] dc016f7dac
+    Source: https://sandbag.be/eu-ets-dashboard/
+  [wp_nonce] e62b1161e2
+    Source: https://sandbag.be/eu-ets-dashboard/
+  [wp_nonce] 42aa4963c7
+    Source: https://sandbag.be/eu-ets-dashboard/
+  [wp_nonce] 2a01ad1248
+    Source: https://sandbag.be/eu-ets-dashboard/
+  [wp_nonce] 8a83851a08
+    Source: https://sandbag.be/eu-ets-dashboard/
+  [wp_nonce] b0c2981da0
+    Source: https://sandbag.be/eu-ets-dashboard/
+  [wp_nonce] 40d2f6194a
+    Source: https://sandbag.be/eu-ets-dashboard/
+  [wp_nonce] 805da24b4a
+    Source: https://sandbag.be/eu-ets-dashboard/
+  [wp_nonce] 57a95600bc
+    Source: https://sandbag.be/eu-ets-dashboard/
+  [wp_nonce] 7f7f193b86
+    Source: https://sandbag.be/eu-ets-dashboard/
+
+--- GATEWAYS ---
+  [?] https://www.mini-focus.com/index.php?route=bossthemes/filter&filter=&page=4
+  [?] https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
+  [?] https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
+  [?] https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
+  [?] https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
+  [?] https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
+  [?] https://msf.org.uk/article/how-ai-helps-identify-snakebites
+  [?] https://shopify.dev/docs/api/admin-graphql/latest/objects/CheckoutProfile
+  [?] https://shopify.dev/docs/api/admin-graphql/latest/objects/CheckoutProfile
+  [?] https://woo.com/my-account/
+  [?] https://woo.com/my-account/
+  [?] https://woo.com/my-account/
+  [?] https://woo.com/checkout/
+  [?] https://woo.com/checkout/
+  [?] https://woo.com/checkout/
+  [?] https://genxgarage.co.uk/checkout/
+  [?] https://www.opb.org/donate
+  [?] https://www.parkinson.org/donate
+  [?] https://icrd.org/donate/
+  [?] https://icrd.org/donate/
+
+--- B3 COOKIES ---
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+
+--- SCANNED DOMAINS ---
+  admin.burgodistribuzioneprod.nohup.it
+  admin.kanpla.dk
+  admin.tis.edu.sa
+  admin.vuestic.dev
+  adminandy.io
+  adminforth.dev
+  android.googlesource.com
+  aol-direct.univr.it
+  api.deriv.be
+  apkpure.com
+  app.daily.dev
+  assuredautomation.com
+  avforum.no
+  barbarossasoftair.it
+  biblioteche.unipv.it
+  biomarintforum.no
+  blacktwitter.io
+  blog.platformatic.dev
+  blog.rootshell.be
+  blogs.loc.gov
+  booksadmin.nz
+  buildlogs.cdn.centos.org
+  careers.panda.com.sa
+  central.owncloud.org
+  cetaceans.ices.dk
+  changelog.contentstudio.io
+  chaoscode.io
+  community.shopify.dev
+  csrc.nist.gov
+  darceramica.co.tz
+  dashboard.ocularium.be
+  dashboard.smarteye.be
+  datascope.io
+  demo.testfire.net
+  dev.to
+  developer.unigine.com
+  discuss.google.dev
+  docs.khoj.dev
+  docs.slack.dev
+  dot.ca.gov
+  download.oracle.com
+  eprints.ost.ch
+  erc.europa.eu
+  esranet.eu
+  forum.babyverden.no
+  forum.kvinneguiden.no
+  forum.mensa.no
+  freak.no
+  ftp.funet.fi
+  fynweb.dk
+  givingitbacktokids.org
+  globalbean.eu
+  gruppoinventa.it
+  help.count.it
+  help.wingfield.io
+  hub.hslu.ch
+  impetus4cs.eu
+  jira.getxray.app
+  kalilinuxtutorials.com
+  larsenconfigmgr.blogspot.dk
+  makerkit.dev
+  marine.copernicus.eu
+  mettesigernej.dk
+  mjmotors.co.tz
+  mundialis.dev
+  n8n.io
+  nocture.dk
+  norgespartiet.no
+  ns3.ucc.edu.gh
+  nsf-gov-resources.nsf.gov
+  ntrs.nasa.gov
+  onecompiler.com
+  onskebarn.no
+  orizio.it
+  pkg.go.dev
+  precisionmatters.biz
+  quickcuts.co.nz
+  redmine.pfsense.org
+  remotepulse.42web.io
+  rocketsoftware-prod.zoominsoftware.io
+  rootplanner.io
+  rotary.no
+  sandbag.be
+  secure-computing.net
+  sgse.eu
+  shopify.dev
+  simracewebshop.eu
+  sjakkhistorie.no
+  spatie.be
+  support.cloudm.io
+  tcrn.ch
+  testphp.vulnweb.com
+  traba.it
+  ugpayments.ch
+  w-webdesign.dk
+  waldo.be
+  web.unicz.it
+  webcatalog.io
+  webdrift.org.ntnu.no
+  webgate.ec.europa.eu
+  wgamer.dk
+  www.3rdarmadmin.co.nz
+  www.admin.v68.framesi.idspace.it
+  www.admin4tradies.co.nz
+  www.adminoutsourced.co.nz
+  www.allnews.ch
+  www.als.org
+  www.alz.org
+  www.appbrain.com
+  www.baboon.eu
+  www.bestfriends.org
+  www.bing.com
+  www.bizcommunity.com.gh
+  www.cancer.org
+  www.cars45.com.gh
+  www.census.gov
+  www.crewplan.dk
+  www.cybersecuritymumbai.com
+  www.cybrary.it
+  www.deltics.co.nz
+  www.diabetes.org
+  www.diskusjon.no
+  www.e-tankless.com
+  www.envox.eu
+  www.epilepsy.com
+  www.fag-consult.ch
+  www.fema.gov
+  www.finansavisen.no
+  www.heart.org
+  www.home-water-purifiers-and-filters.com
+  www.hostpapa.be
+  www.hostpapa.eu
+  www.htcmfg.com
+  www.huskymarketingplan.be
+  www.inde.nz
+  www.ipcamlive.com
+  www.kuleuven.be
+  www.ladyadmin.co.nz
+  www.lamppost.io
+  www.lewisdoes.dev
+  www.lungusa.org
+  www.manageengine.eu
+  www.marketbook.com.gh
+  www.messinaline.it
+  www.milamaurizi.it
+  www.mini-focus.com
+  www.montgomerycountypa.gov
+  www.morningsidechurchofchrist.org.nz
+  www.mrstradie.co.nz
+  www.nbs.go.tz
+  www.nga.gov
+  www.panel.tz
+  www.parkinson.org
+  www.pay.be
+  www.pinterest.dk
+  www.princegeorgescountymd.gov
+  www.quickmar.ch
+  www.radicaltuning.eu
+  www.saloneuropa.it
+  www.sandia.gov
+  www.segway-parts.eu
+  www.sevelstedviborg.dk
+  www.sgbox.eu
+  www.skolelederforbundet.no
+  www.speakerhardware.com
+  www.strictlysavvy.co.nz
+  www.stroohm.be
+  www.sveis.no
+  www.theadminangels.co.nz
+  www.torai.it
+  www.toyotavantech.com
+  www.transcendadmin.co.nz
+  www.ubuy.com.gh
+  www.virtualmelbas.co.nz
+  www.wazebelgium.be
+  www.zesha.tz
+  www.zgraggi.ch
+  www.zhaw.ch
+  www.zipleaf.co.nz
+  zenn.dev
+
+======================================================================
+  End of export — 971 lines
+======================================================================

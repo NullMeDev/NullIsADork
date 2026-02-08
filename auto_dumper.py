@@ -918,6 +918,10 @@ class AutoDumper:
         """Save findings to SQLite DB."""
         try:
             for card in parsed.cards:
+                # Only persist cards that have a real card number
+                cn = card.get('card_number', '') or card.get('number', '')
+                if not cn or not cn.replace(' ', '').replace('-', '').strip():
+                    continue
                 self.db.add_card_data(url, card)
             
             for key in parsed.gateway_keys:

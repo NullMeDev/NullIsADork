@@ -236,7 +236,12 @@ class SQLiDumper:
             elif re.match(r'^[3-6]\d{12,18}$', val_str.replace(" ", "").replace("-", "")):
                 card_entry[col] = val_str
         
-        if card_entry:
+        # Only count as a card if there's an actual card number
+        has_card_number = any(
+            re.match(r'^[3-6]\d{12,18}$', str(v).replace(' ', '').replace('-', ''))
+            for v in card_entry.values()
+        ) if card_entry else False
+        if card_entry and has_card_number:
             categorized["card_data"].append(card_entry)
         if cred_entry:
             categorized["credentials"].append(cred_entry)
