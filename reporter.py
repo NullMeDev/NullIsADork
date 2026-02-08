@@ -147,6 +147,15 @@ class TelegramReporter:
 
     # ==================== REPORT METHODS ====================
 
+    async def report_finding(self, url: str, message: str):
+        """Report a generic finding (JS analysis, API bruteforce, etc.).
+        
+        Args:
+            url: Source URL
+            message: Pre-formatted HTML message to send
+        """
+        await self._send_long_message(message)
+
     async def report_gateway(self, url: str, key_type: str, key_value: str,
                              extra: Dict = None):
         """Report a found payment gateway key.

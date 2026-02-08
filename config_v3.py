@@ -188,6 +188,10 @@ class DorkerConfig:
     report_dumps: bool = True
     report_secrets: bool = True
     
+    # =============== JS ANALYSIS & API BRUTEFORCE (autonomous pipeline) ===============
+    js_analysis_enabled: bool = True   # JS bundle analysis in process_url()
+    api_bruteforce_enabled: bool = True  # API endpoint bruteforce in process_url()
+    
     # =============== MADY BOT INTEGRATION ===============
     mady_bot_feed: bool = True  # Auto-feed found gateways to Mady bot
     mady_bot_path: str = os.getenv("MADY_BOT_PATH", "/home/null/Desktop/Mady7.0.2/Mady_Version7.0.0")
