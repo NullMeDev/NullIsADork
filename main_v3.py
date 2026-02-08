@@ -2992,6 +2992,23 @@ async def _do_scan(update: Update, url: str):
                 if api_brute_result.graphql_introspection:
                     bf_msg += "  📊 <b>GraphQL introspection OPEN!</b>\n"
                 
+                # OpenAPI / Swagger spec discovery
+                if api_brute_result.openapi_spec_url:
+                    bf_msg += f"\n  📋 <b>OpenAPI Spec Found!</b>\n"
+                    bf_msg += f"    <code>{api_brute_result.openapi_spec_url[:80]}</code>\n"
+                    bf_msg += f"    Endpoints parsed: <b>{len(api_brute_result.openapi_endpoints)}</b>\n"
+                    for oep in api_brute_result.openapi_endpoints[:10]:
+                        params_str = ""
+                        if oep.get("parameters"):
+                            pnames = [p["name"] for p in oep["parameters"][:4]]
+                            params_str = f" ({', '.join(pnames)})"
+                        auth_icon = "🔒" if oep.get("auth_required") else "✅"
+                        bf_msg += f"    {auth_icon} {oep['method']} <code>{oep['path'][:60]}</code>{params_str}\n"
+                        if oep.get("summary"):
+                            bf_msg += f"       → {oep['summary'][:60]}\n"
+                    if len(api_brute_result.openapi_endpoints) > 10:
+                        bf_msg += f"    ... +{len(api_brute_result.openapi_endpoints) - 10} more\n"
+
                 await update.message.reply_text(bf_msg, parse_mode="HTML")
                 
                 # Add discovered endpoints as scan targets
@@ -3631,6 +3648,9 @@ async def _do_scan(update: Update, url: str):
         text += f"  Auth-required: {len(api_brute_result.auth_endpoints)}\n"
         if api_brute_result.graphql_introspection:
             text += "  📊 GraphQL introspection OPEN\n"
+        if api_brute_result.openapi_spec_url:
+            text += f"  📋 OpenAPI spec: {api_brute_result.openapi_spec_url[:60]}\n"
+            text += f"  📋 Parsed endpoints: {len(api_brute_result.openapi_endpoints)}\n"
         text += "\n"
     
     if spa_result and not spa_result.error:

@@ -59,6 +59,8 @@ class BruteforceResult:
     graphql_found: bool = False
     graphql_introspection: bool = False  # If introspection query succeeds
     interesting_headers: Dict[str, str] = field(default_factory=dict)
+    openapi_spec_url: str = ""       # URL of discovered OpenAPI/Swagger spec
+    openapi_endpoints: List[Dict] = field(default_factory=list)  # Parsed API endpoints from spec
     error: str = ""
 
 
@@ -111,12 +113,21 @@ COMMON_API_PATHS = [
     "/graphql/playground", "/graphql/console",
     "/graphiql", "/altair",
 
-    # Swagger / API Docs
+    # Swagger / API Docs (expanded)
     "/swagger.json", "/openapi.json", "/api-docs",
+    "/api-docs/openapi.json", "/api-docs/swagger.json",
     "/swagger", "/swagger-ui", "/swagger-ui.html",
     "/docs", "/api/docs", "/redoc",
-    "/v1/swagger.json", "/v2/swagger.json",
+    "/v1/swagger.json", "/v2/swagger.json", "/v3/swagger.json",
+    "/v1/openapi.json", "/v2/openapi.json", "/v3/openapi.json",
     "/.well-known/openapi.json",
+    "/api/swagger.json", "/api/openapi.json",
+    "/api/v1/openapi.json", "/api/v2/openapi.json",
+    "/api-docs/", "/api-docs.json",
+    "/swagger/v1/swagger.json", "/swagger/v2/swagger.json",
+    "/api/swagger/v1/swagger.json", "/api/swagger/v2/swagger.json",
+    "/openapi/v3/api-docs", "/openapi/v3/api-docs.json",
+    "/api/schema", "/api/schema.json", "/schema.json",
 
     # Debug / Internal
     "/debug", "/api/debug", "/_debug",
@@ -339,6 +350,40 @@ class APIBruteforcer:
                 f"{len(result.auth_endpoints)} auth-required)"
             )
 
+            # Phase 1.5: OpenAPI / Swagger spec discovery
+            # Try fetching homepage HTML to detect Swagger UI
+            try:
+                homepage_html = ""
+                async with session.get(base_url + "/", allow_redirects=True) as resp:
+                    if resp.status == 200:
+                        homepage_html = await resp.text(errors="replace")
+                await self._discover_and_parse_spec(session, base_url, homepage_html, result)
+            except Exception as e:
+                logger.debug(f"[APIBrute] OpenAPI discovery error: {e}")
+
+            # Also check if any Phase-1 probe returned a spec body
+            if not result.openapi_spec_url:
+                for probe in list(result.endpoints_found):
+                    preview = probe.body_preview.lower()
+                    if preview and any(kw in preview for kw in ('"openapi"', '"swagger"', '"paths"')):
+                        try:
+                            # Re-fetch full body to parse spec
+                            async with session.get(probe.url, allow_redirects=True) as resp2:
+                                if resp2.status == 200:
+                                    import json as _json
+                                    full_body = await resp2.text(errors="replace")
+                                    spec_data = _json.loads(full_body)
+                                    if spec_data.get("openapi") or spec_data.get("swagger") or spec_data.get("paths"):
+                                        result.openapi_spec_url = probe.url
+                                        result.openapi_endpoints = self._parse_openapi_spec(spec_data, base_url)
+                                        logger.info(
+                                            f"[APIBrute] 📋 OpenAPI spec from probe {probe.url}: "
+                                            f"{len(result.openapi_endpoints)} endpoints"
+                                        )
+                                        break
+                        except Exception:
+                            pass
+
             # Phase 2: GraphQL introspection
             if try_graphql_introspection:
                 graphql_urls = [base_url + p for p in ("/graphql", "/api/graphql", "/__graphql", "/graphiql")]
@@ -370,7 +415,8 @@ class APIBruteforcer:
             f"[APIBrute] Complete for {parsed.netloc}: "
             f"{len(result.endpoints_found)} endpoints found, "
             f"{len(result.open_endpoints)} open, "
-            f"graphql={'yes' if result.graphql_found else 'no'}"
+            f"graphql={'yes' if result.graphql_found else 'no'}, "
+            f"openapi={'yes (' + str(len(result.openapi_endpoints)) + ' endpoints)' if result.openapi_spec_url else 'no'}"
         )
         return result
 
@@ -493,6 +539,168 @@ class APIBruteforcer:
             return True, f"{status} success response"
 
         return False, ""
+
+    # ── OpenAPI / Swagger spec parsing ────────────────────────────────────
+
+    def _extract_swagger_spec_url(self, html: str, base_url: str) -> Optional[str]:
+        """Extract OpenAPI/Swagger spec URL from Swagger UI HTML pages."""
+        from urllib.parse import urljoin
+        patterns = [
+            # SwaggerUIBundle({ url: "..." })
+            re.compile(r'SwaggerUIBundle\s*\(\s*\{[^}]*?url\s*:\s*["\']([^"\']+)["\']', re.DOTALL | re.I),
+            # swaggerUi.url = "..."
+            re.compile(r'swagger(?:Ui|UI)\s*\.\s*url\s*=\s*["\']([^"\']+)["\']', re.I),
+            # spec-url="..." or specUrl="..."
+            re.compile(r'(?:spec[_-]?url|specUrl|configUrl)\s*[=:]\s*["\']([^"\']+)["\']', re.I),
+            # url: "/api-docs/openapi.json"  (generic JS object)
+            re.compile(r'["\']?url["\']?\s*:\s*["\']([^"\']*(?:swagger|openapi|api-docs)[^"\']*\.(?:json|yaml|yml))["\']', re.I),
+            # Direct link to spec files
+            re.compile(r'href=["\']([^"\']*(?:swagger|openapi|api-docs)[^"\']*\.(?:json|yaml|yml))["\']', re.I),
+        ]
+        for pat in patterns:
+            m = pat.search(html)
+            if m:
+                spec_url = m.group(1)
+                if not spec_url.startswith(("http://", "https://")):
+                    spec_url = urljoin(base_url, spec_url)
+                return spec_url
+        return None
+
+    def _parse_openapi_spec(self, spec_data: dict, base_url: str) -> List[Dict]:
+        """Parse an OpenAPI/Swagger spec and extract all endpoint definitions.
+
+        Returns list of dicts: {path, method, summary, parameters, auth_required, tags}
+        """
+        from urllib.parse import urljoin
+        endpoints = []
+
+        # Get servers/basePath
+        servers = spec_data.get("servers", [])
+        base_path = ""
+        if servers:
+            server_url = servers[0].get("url", "")
+            if server_url and not server_url.startswith(("http://", "https://")):
+                base_path = server_url.rstrip("/")
+        # Swagger 2.0 basePath
+        if not base_path:
+            base_path = spec_data.get("basePath", "").rstrip("/")
+
+        paths = spec_data.get("paths", {})
+        for path, methods in paths.items():
+            if not isinstance(methods, dict):
+                continue
+            for method, details in methods.items():
+                method_upper = method.upper()
+                if method_upper not in ("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"):
+                    continue
+                if not isinstance(details, dict):
+                    continue
+
+                full_path = base_path + path
+
+                # Check if auth is required
+                auth_required = bool(details.get("security")) or bool(
+                    spec_data.get("security") and not details.get("security") == []
+                )
+
+                # Extract parameters
+                params = []
+                for p in details.get("parameters", []):
+                    if isinstance(p, dict):
+                        params.append({
+                            "name": p.get("name", ""),
+                            "in": p.get("in", ""),
+                            "required": p.get("required", False),
+                            "type": p.get("schema", {}).get("type", "") if isinstance(p.get("schema"), dict) else "",
+                        })
+
+                endpoints.append({
+                    "path": full_path,
+                    "method": method_upper,
+                    "summary": details.get("summary", ""),
+                    "description": details.get("description", "")[:200],
+                    "parameters": params,
+                    "auth_required": auth_required,
+                    "tags": details.get("tags", []),
+                })
+
+        return endpoints
+
+    async def _discover_and_parse_spec(
+        self, session: aiohttp.ClientSession, base_url: str, html_content: str,
+        result: "BruteforceResult",
+    ) -> None:
+        """Discover OpenAPI/Swagger spec and parse endpoints from it."""
+        import json as _json
+
+        # Try to extract spec URL from HTML (Swagger UI detection)
+        spec_url = self._extract_swagger_spec_url(html_content, base_url)
+
+        if not spec_url:
+            # Try common spec file locations
+            spec_paths = [
+                "/api-docs/openapi.json", "/api-docs/swagger.json",
+                "/swagger.json", "/openapi.json",
+                "/api-docs.json", "/api/openapi.json", "/api/swagger.json",
+                "/v1/swagger.json", "/v2/swagger.json", "/v3/swagger.json",
+                "/api-docs/", "/swagger/v1/swagger.json",
+            ]
+            for path in spec_paths:
+                probe_url = base_url + path
+                try:
+                    async with session.get(probe_url, allow_redirects=True) as resp:
+                        if resp.status == 200:
+                            ct = resp.headers.get("Content-Type", "")
+                            if "json" in ct or "yaml" in ct or path.endswith(".json"):
+                                spec_url = probe_url
+                                break
+                except Exception:
+                    continue
+
+        if not spec_url:
+            return
+
+        # Fetch and parse the spec
+        try:
+            async with session.get(spec_url, allow_redirects=True) as resp:
+                if resp.status != 200:
+                    return
+                body = await resp.text(errors="replace")
+                try:
+                    spec_data = _json.loads(body)
+                except (ValueError, _json.JSONDecodeError):
+                    return
+
+                # Validate it looks like an OpenAPI/Swagger spec
+                if not (spec_data.get("openapi") or spec_data.get("swagger") or spec_data.get("paths")):
+                    return
+
+                result.openapi_spec_url = spec_url
+                result.openapi_endpoints = self._parse_openapi_spec(spec_data, base_url)
+
+                logger.info(
+                    f"[APIBrute] 📋 OpenAPI spec found at {spec_url}: "
+                    f"{len(result.openapi_endpoints)} endpoints parsed"
+                )
+
+                # Also create ProbeResult entries for each open endpoint
+                for ep in result.openapi_endpoints:
+                    probe = ProbeResult(
+                        url=base_url + ep["path"],
+                        method=ep["method"],
+                        status=200,
+                        content_type="application/json",
+                        interesting=True,
+                        reason=f"OpenAPI spec: {ep['summary'] or ep['path']}",
+                    )
+                    if ep["auth_required"]:
+                        result.auth_endpoints.append(probe)
+                    else:
+                        result.open_endpoints.append(probe)
+                    result.endpoints_found.append(probe)
+
+        except Exception as e:
+            logger.debug(f"[APIBrute] Spec parse error ({spec_url}): {e}")
 
     # ── GraphQL introspection ─────────────────────────────────────────────
 

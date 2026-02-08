@@ -103,6 +103,10 @@ API_PATTERNS = [
     re.compile(r'''`([^`]*?/api/[^`]*?)`'''),
     # baseURL / apiUrl / endpoint assignments
     re.compile(r'''(?:baseURL|apiUrl|apiBase|endpoint|API_URL|BASE_URL)\s*[:=]\s*["'`]([^"'`]+?)["'`]''', re.IGNORECASE),
+    # Swagger / OpenAPI spec URLs
+    re.compile(r'''SwaggerUIBundle\s*\(\s*\{[^}]*?url\s*:\s*["'`]([^"'`]+?)["'`]''', re.DOTALL | re.IGNORECASE),
+    re.compile(r'''(?:spec[_-]?[Uu]rl|specUrl|configUrl|swaggerUrl)\s*[:=]\s*["'`]([^"'`]+?)["'`]''', re.IGNORECASE),
+    re.compile(r'''["'`]([^"'`]*(?:swagger|openapi|api-docs)[^"'`]*\.(?:json|yaml|yml))["'`]''', re.IGNORECASE),
 ]
 
 # GraphQL patterns

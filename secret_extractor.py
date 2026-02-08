@@ -420,6 +420,13 @@ class SecretExtractor:
         "/feed/", "/sitemap.xml", "/robots.txt",
         "/admin/", "/administrator/", "/login/",
         "/api/", "/graphql",
+        # Swagger / OpenAPI spec discovery
+        "/swagger.json", "/openapi.json",
+        "/api-docs/openapi.json", "/api-docs/swagger.json",
+        "/api-docs/", "/api-docs.json",
+        "/swagger/", "/swagger-ui/", "/swagger-ui.html",
+        "/api/swagger.json", "/api/openapi.json",
+        "/swagger/v1/swagger.json",
         # Political donation platforms
         "/actblue/", "/anedot/", "/winred/",
     ]
@@ -893,6 +900,43 @@ class SecretExtractor:
             if m not in endpoints['api_calls']:
                 endpoints['api_calls'].append(m)
         
+        # 11. Swagger UI / OpenAPI spec discovery
+        swagger_spec_urls = []
+        # SwaggerUIBundle({ url: "..." })
+        swagger_bundle = re.findall(
+            r'SwaggerUIBundle\s*\(\s*\{[^}]*?url\s*:\s*["\']([^"\']+)["\']',
+            html, re.DOTALL | re.I
+        )
+        for m in swagger_bundle:
+            full = urljoin(base_url, m)
+            if full not in swagger_spec_urls:
+                swagger_spec_urls.append(full)
+        # spec-url / specUrl / configUrl
+        spec_url_matches = re.findall(
+            r'(?:spec[_-]?url|specUrl|configUrl)\s*[=:]\s*["\']([^"\']+)["\']',
+            html, re.I
+        )
+        for m in spec_url_matches:
+            full = urljoin(base_url, m)
+            if full not in swagger_spec_urls:
+                swagger_spec_urls.append(full)
+        # Links to swagger/openapi JSON/YAML
+        spec_links = re.findall(
+            r'(?:href|src)=["\']([^"\']*(?:swagger|openapi|api-docs)[^"\']*\.(?:json|yaml|yml))["\']',
+            html, re.I
+        )
+        for m in spec_links:
+            full = urljoin(base_url, m)
+            if full not in swagger_spec_urls:
+                swagger_spec_urls.append(full)
+        # Swagger UI indicators (swagger-ui CSS/JS)
+        if re.search(r'swagger-ui(?:-bundle|-standalone-preset)?(?:\.min)?\.(?:js|css)', html, re.I):
+            # Page is a Swagger UI — mark it
+            if base_url not in swagger_spec_urls:
+                swagger_spec_urls.insert(0, base_url + "/swagger.json")
+                swagger_spec_urls.insert(1, base_url + "/openapi.json")
+        endpoints['swagger_spec_urls'] = swagger_spec_urls
+
         return endpoints
 
     def get_sqli_candidates(self, endpoints: dict, base_url: str) -> list:
