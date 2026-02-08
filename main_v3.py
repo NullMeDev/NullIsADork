@@ -58,8 +58,8 @@ logger.add("medydorker.log", rotation="10 MB", retention=3, level="DEBUG")
 
 # Telegram setup
 try:
-    from telegram import Update
-    from telegram.ext import Application, CommandHandler, ContextTypes, filters
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, filters
     HAS_PTB = True
 except ImportError:
     HAS_PTB = False
@@ -1939,74 +1939,152 @@ def get_pipeline() -> MedyDorkerPipeline:
     return pipeline
 
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command — main menu."""
-    # Get live stats for the header
+def _build_main_menu():
+    """Build the inline keyboard for the main menu."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Pipeline", callback_data="menu_pipeline"),
+         InlineKeyboardButton("🎯 Scanning", callback_data="menu_scanning")],
+        [InlineKeyboardButton("📊 Results", callback_data="menu_results"),
+         InlineKeyboardButton("⚙️ Modules", callback_data="menu_modules")],
+        [InlineKeyboardButton("📈 Live Status", callback_data="menu_status")],
+    ])
+
+
+def _build_stats_header() -> str:
+    """Build the live stats header text."""
     p = get_pipeline()
     stats = p.get_stats()
-    status_dot = "🟢" if stats["running"] else "⚫"
-    
-    text = (
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "    ⚡ <b>MedyDorker v3.16</b> ⚡\n"
-        "   <i>Automated Recon &amp; Exploit</i>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f" {status_dot} Pipeline: {'<b>ACTIVE</b>' if stats['running'] else 'Idle'}  │  "
-        f"🎯 {stats['sqli_vulns']} vulns  │  🔑 {stats['gateways_found']} keys\n"
-        "\n"
-        "┌─── <b>🚀 PIPELINE</b> ─────────────┐\n"
-        "│                                                    │\n"
-        "│  /dorkon — Start 24/7 dorking          │\n"
-        "│  /dorkoff — Stop pipeline                  │\n"
-        "│  /status — Live dashboard                │\n"
-        "│                                                    │\n"
-        "├─── <b>🎯 SCANNING</b> ────────────┤\n"
-        "│                                                    │\n"
-        "│  /scan &lt;url&gt; — Quick scan              │\n"
-        "│  /deepscan &lt;url&gt; — Full audit         │\n"
-        "│  /mass url1 url2 … — Batch (25)     │\n"
-        "│  /authscan &lt;url&gt; cookies               │\n"
-        "│  /target &lt;category&gt; — Focused         │\n"
-        "│  /categories — List targets               │\n"
-        "│  /stopscan — Cancel active scan      │\n"
-        "│                                                    │\n"
-        "├─── <b>📊 RESULTS</b> ─────────────┤\n"
-        "│                                                    │\n"
-        "│  /secrets — Keys &amp; credentials         │\n"
-        "│  /sqlistats — Injection findings          │\n"
-        "│  /dumps — Extracted data                 │\n"
-        "│  /cookies — Session &amp; B3 cookies    │\n"
-        "│  /cookiehunt &lt;url&gt; — Probe site      │\n"
-        "│  /dorkstats — Dork effectiveness       │\n"
-        "│  /export — Download .txt report         │\n"
-        "│                                                    │\n"
-        "├─── <b>⚙️ MODULES</b> ────────────┤\n"
-        "│                                                    │\n"
-        "│  /proxy — Proxy pool health              │\n"
-        "│  /firecrawl — Firecrawl engine           │\n"
-        "│  /captcha — Solver status                 │\n"
-        "│  /browser — Headless browser          │\n"
-        "│  /ecom — E-commerce checker         │\n"
-        "│  /crawlstats — Recursive crawler       │\n"
-        "│  /ports — Port scanner                      │\n"
-        "│  /oob — OOB SQLi injector               │\n"
-        "│  /unionstats — Union dumper             │\n"
-        "│  /keys — API key validator               │\n"
-        "│  /mlfilter — ML false-pos filter           │\n"
-        "│                                                    │\n"
-        "├─── <b>🔧 CONFIG</b> ─────────────┤\n"
-        "│                                                    │\n"
-        "│  /setgroup — Forward findings here  │\n"
-        "│                                                    │\n"
-        "└──────────────────────────┘\n"
-        "\n"
-        "<b>Pipeline:</b> Dork → Search → WAF Detect → SQLi\n"
-        "  → Dump → Secrets → Cards → Report\n"
-        "\n"
-        "<code>26K dorks │ 9 engines │ 8 vuln scanners</code>\n"
-        "<code>5 DBMS │ WAF bypass │ auto-dump</code>\n"
+    running = stats["running"]
+    return (
+        f"⚡ <b>MedyDorker v3.16</b>\n"
+        f"<i>Automated Recon &amp; Exploitation</i>\n"
+        f"\n"
+        f"{'🟢 <b>ACTIVE</b>' if running else '⚫ Idle'}"
+        f"  ·  🎯 <b>{stats['sqli_vulns']}</b> vulns"
+        f"  ·  🔑 <b>{stats['gateways_found']}</b> keys"
+        f"  ·  💳 <b>{stats['cards_found']}</b> cards\n"
     )
-    await update.message.reply_text(text, parse_mode="HTML")
+
+
+# ---- Section content builders ----
+
+_SECTION_PIPELINE = (
+    "\n"
+    "🚀 <b>Pipeline Controls</b>\n"
+    "\n"
+    "/dorkon  ·  Start 24/7 dorking\n"
+    "/dorkoff  ·  Stop pipeline\n"
+    "/status  ·  Live dashboard\n"
+)
+
+_SECTION_SCANNING = (
+    "\n"
+    "🎯 <b>Scanning</b>\n"
+    "\n"
+    "/scan <code>&lt;url&gt;</code>  ·  Quick scan\n"
+    "/deepscan <code>&lt;url&gt;</code>  ·  Full audit\n"
+    "/mass <code>url1 url2 …</code>  ·  Batch up to 25\n"
+    "/authscan <code>&lt;url&gt; cookies</code>  ·  Behind login\n"
+    "/target <code>&lt;category&gt;</code>  ·  Focused scan\n"
+    "/categories  ·  List all targets\n"
+    "/stopscan  ·  Cancel active scan\n"
+)
+
+_SECTION_RESULTS = (
+    "\n"
+    "📊 <b>Results &amp; Data</b>\n"
+    "\n"
+    "/secrets  ·  Keys &amp; credentials\n"
+    "/sqlistats  ·  Injection findings\n"
+    "/dumps  ·  Extracted data\n"
+    "/cookies  ·  Session &amp; B3 cookies\n"
+    "/cookiehunt <code>&lt;url&gt;</code>  ·  Probe a site\n"
+    "/dorkstats  ·  Dork effectiveness\n"
+    "/export  ·  Download .txt report\n"
+)
+
+_SECTION_MODULES = (
+    "\n"
+    "⚙️ <b>Module Status</b>\n"
+    "\n"
+    "/proxy  ·  Proxy pool health\n"
+    "/firecrawl  ·  Firecrawl engine\n"
+    "/captcha  ·  Solver status\n"
+    "/browser  ·  Headless browser\n"
+    "/ecom  ·  E-commerce checker\n"
+    "/crawlstats  ·  Recursive crawler\n"
+    "/ports  ·  Port scanner\n"
+    "/oob  ·  OOB SQLi injector\n"
+    "/unionstats  ·  Union dumper\n"
+    "/keys  ·  API key validator\n"
+    "/mlfilter  ·  ML false-pos filter\n"
+    "/setgroup  ·  Forward findings here\n"
+)
+
+
+async def _send_menu(message, text: str, back_button: bool = True):
+    """Helper to send/edit a menu section."""
+    kb = [[InlineKeyboardButton("« Back to Menu", callback_data="menu_main")]] if back_button else []
+    kb_markup = InlineKeyboardMarkup(kb) if kb else _build_main_menu()
+    await message.edit_text(text, parse_mode="HTML", reply_markup=kb_markup)
+
+
+async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle inline button presses for the main menu."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    header = _build_stats_header()
+
+    if data == "menu_main":
+        text = header + "\nSelect a section below."
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=_build_main_menu())
+
+    elif data == "menu_pipeline":
+        await _send_menu(query.message, header + _SECTION_PIPELINE)
+
+    elif data == "menu_scanning":
+        await _send_menu(query.message, header + _SECTION_SCANNING)
+
+    elif data == "menu_results":
+        await _send_menu(query.message, header + _SECTION_RESULTS)
+
+    elif data == "menu_modules":
+        await _send_menu(query.message, header + _SECTION_MODULES)
+
+    elif data == "menu_status":
+        p = get_pipeline()
+        stats = p.get_stats()
+        running = stats["running"]
+        status_text = (
+            header +
+            "\n"
+            "📈 <b>Live Dashboard</b>\n"
+            "\n"
+            f"⏱ Uptime: <b>{stats.get('uptime', '—')}</b>\n"
+            f"🔄 Cycles: <b>{stats['cycles']}</b>\n"
+            f"📋 Dorks run: <b>{stats.get('dorks_processed', 0):,}</b>\n"
+            f"\n"
+            f"🌐 URLs scanned: <b>{stats['urls_scanned']:,}</b>\n"
+            f"🏷 Domains: <b>{stats['seen_domains']:,}</b>\n"
+            f"🔓 SQLi vulns: <b>{stats['sqli_vulns']}</b>\n"
+            f"🔑 Gateway keys: <b>{stats['gateways_found']}</b>\n"
+            f"🔐 Secrets: <b>{stats['secrets_found']}</b>\n"
+            f"💳 Cards: <b>{stats['cards_found']}</b>\n"
+            f"🍪 Cookies: <b>{stats.get('cookies_total', 0)}</b> (B3: {stats.get('b3_cookies', 0)})\n"
+            f"\n"
+            f"📨 Messages: {stats.get('messages_sent', 0)}  ·  "
+            f"❌ Errors: {stats.get('errors', 0)}  ·  "
+            f"🚫 Blocked: {stats.get('blocked_domains', 0)}\n"
+        )
+        await _send_menu(query.message, status_text)
+
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command — main menu with inline buttons."""
+    header = _build_stats_header()
+    text = header + "\nSelect a section below."
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=_build_main_menu())
 
 
 async def cmd_dorkon(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4443,6 +4521,7 @@ def main():
     
     app.add_handler(CommandHandler("start", cmd_start, filters=chat_filter))
     app.add_handler(CommandHandler("help", cmd_start, filters=chat_filter))
+    app.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu_"))
     app.add_handler(CommandHandler("dorkon", cmd_dorkon, filters=chat_filter))
     app.add_handler(CommandHandler("dorkoff", cmd_dorkoff, filters=chat_filter))
     app.add_handler(CommandHandler("stopscan", cmd_stopscan, filters=chat_filter))
