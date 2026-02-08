@@ -87,6 +87,84 @@ class DorkGenerator:
         # === International injectable ===
         'site:*(DE) inurl:"(PT)?(PP)=" "(KW)" -captcha',
         'site:*(DE) "(KW)" checkout intext:"stripe"',
+        
+        # === Card data in URL/file patterns ===
+        'inurl:"(PP)=" intext:"credit card" "(KW)" -github -docs',
+        'inurl:"(PP)=" intext:"card_number" "(KW)" -github',
+        'inurl:"(PP)=" intext:"cvv" "(KW)" -github -docs',
+        '"(KW)" intext:"card_number" "expiry" -github -tutorial',
+        '"(KW)" intext:"cc_number" "cvv" -github -docs',
+        
+        # === Payment processor credential patterns ===
+        '"(KW)" intext:"rzp_live_" -github -razorpay.com',
+        '"(KW)" intext:"sq0atp-" -github -docs',
+        '"(KW)" intext:"FLWPUBK" -github -docs',
+        '"(KW)" intext:"paystack" "pk_live_" -github',
+        '"(KW)" intext:"mollie" "live_" -github',
+        '"(KW)" intext:"conekta" "key_" -github',
+        '"(KW)" intext:"midtrans" "server_key" -github',
+        '"(KW)" intext:"omise" "pkey_" -github',
+        '"(KW)" intext:"paymongo" "pk_live_" -github',
+        '"(KW)" intext:"2checkout" "merchant_code" -github',
+        '"(KW)" intext:"cybersource" "merchant_id" -github',
+        '"(KW)" intext:"authorize.net" "transaction_key" -github',
+        '"(KW)" intext:"worldpay" "installation_id" -github',
+        '"(KW)" intext:"nmi" "security_key" -github',
+        
+        # === E-commerce platform patterns ===
+        '"(KW)" inurl:"index.php?route=checkout" -demo',
+        '"(KW)" inurl:"onepage/checkout" -docs -demo',
+        '"(KW)" "woocommerce" intext:"pk_live_" -github',
+        '"(KW)" "prestashop" inurl:order -github -demo',
+        '"(KW)" "magento" inurl:checkout -github -demo',
+        '"(KW)" "opencart" checkout -github -demo',
+        '"(KW)" "zen cart" inurl:checkout -github',
+        '"(KW)" "oscommerce" inurl:checkout -github',
+        '"(KW)" "xcart" inurl:cart -github',
+        
+        # === Webhook / API endpoint patterns ===
+        '"(KW)" inurl:"/api/" "payment" -github -docs',
+        '"(KW)" inurl:"/webhook" "stripe" -github -docs',
+        '"(KW)" inurl:"/api/" "charge" "card" -github',
+        '"(KW)" inurl:"/rest/" "payment" "order" -github',
+        '"(KW)" inurl:"/graphql" "payment" -github',
+        
+        # === POS / Terminal patterns ===
+        '"(KW)" intitle:"POS" "terminal" -github -docs',
+        '"(KW)" intext:"point of sale" inurl:login -github',
+        '"(KW)" intext:"card reader" "payment" -github -docs',
+        
+        # === Subscription / Recurring billing patterns ===
+        '"(KW)" inurl:"/subscribe" intext:"pk_live_" -github',
+        '"(KW)" inurl:"/membership" intext:"stripe" -github',
+        '"(KW)" inurl:"/upgrade" intext:"pk_live_" -github',
+        '"(KW)" inurl:"/pricing" intext:"stripe" checkout',
+        '"(KW)" "recurring" "billing" intext:"pk_live_" -github',
+        
+        # === Exposed backup / dump patterns ===
+        '"(KW)" filetype:sql "INSERT INTO" "card" OR "payment"',
+        '"(KW)" filetype:csv "card" "number" "expiry"',
+        '"(KW)" filetype:xls "credit card" "expires"',
+        '"(KW)" filetype:xlsx "card number" "security code"',
+        '"(KW)" intitle:"index of" "payment" ext:sql',
+        '"(KW)" intitle:"index of" "orders" ext:csv',
+        
+        # === Error-based SQLi with payment context ===
+        'inurl:"(PF)(PT)?(PP)=" "(KW)" "checkout" "error"',
+        'inurl:"(PP)=" "(KW)" "cart" intext:"mysql"',
+        'inurl:"(PP)=" "(KW)" "order" intext:"sql syntax"',
+        'inurl:"(PP)=" "(KW)" intext:"payment" "warning"',
+        
+        # === Cloud storage with payment data ===
+        '"(KW)" site:s3.amazonaws.com "payment" OR "card"',
+        '"(KW)" site:blob.core.windows.net "payment"',
+        '"(KW)" site:storage.googleapis.com "payment"',
+        '"(KW)" site:firebaseio.com "payment" OR "order"',
+        
+        # === WHMCS / Hosting billing ===
+        '"(KW)" inurl:"whmcs" "clientarea" -demo',
+        '"(KW)" inurl:"hostbill" payment -github',
+        '"(KW)" inurl:"blesta" order -github',
     ]
 
     # High-value static dorks (always included)
@@ -603,6 +681,411 @@ class DorkGenerator:
         'site:*.th intext:"stripe" OR "omise"',
         'site:*.vn intext:"stripe" payment',
         'site:*.id intext:"stripe" OR "midtrans"',
+        
+        # === 2CHECKOUT / VERIFONE ===
+        'intext:"2checkout" "seller_id" -github -docs',
+        'intext:"2checkout" "secret_key" -github -docs',
+        'intext:"2checkout" "merchant_code" "secret_key" -github',
+        '"2checkout" intext:"INS_SECRET" -github',
+        'filetype:env "TWOCHECKOUT" -github',
+        
+        # === CYBERSOURCE ===
+        'intext:"cybersource" "access_key" "secret_key" -github -docs',
+        'intext:"cybersource" "merchant_id" "transaction_key" -github',
+        '"soap:cybersource" "merchant" -github -docs',
+        'filetype:env "CYBERSOURCE" -github',
+        
+        # === FIRST DATA / FISERV ===
+        'intext:"firstdata" "gateway_id" "password" -github -docs',
+        'intext:"fiserv" "api_key" "api_secret" -github',
+        '"payeezy" "api_key" "api_secret" -github -docs',
+        'filetype:env "PAYEEZY" OR "FIRSTDATA" -github',
+        
+        # === CHASE PAYMENTECH ===
+        'intext:"paymentech" "merchant_id" -github -docs',
+        'intext:"chase" "paymentech" "orbital" -github',
+        '"orbital" "merchant_id" "terminal_id" -github -docs',
+        
+        # === HEARTLAND / GLOBAL PAYMENTS ===
+        'intext:"heartland" "secret_api_key" -github -docs',
+        'intext:"globalpayments" "app_key" -github -docs',
+        'intext:"realex" "merchant_id" "secret" -github -docs',
+        '"heartland" "HPS" "secret" -github -docs',
+        
+        # === WEPAY ===
+        'intext:"wepay" "client_id" "client_secret" -github -docs',
+        'intext:"wepay" "access_token" -github -docs',
+        'filetype:env "WEPAY" -github',
+        
+        # === RECURLY / CHARGEBEE / PADDLE ===
+        'intext:"recurly" "api_key" -github -docs',
+        'intext:"chargebee" "api_key" -github -docs',
+        'intext:"paddle" "vendor_id" "vendor_auth_code" -github -docs',
+        'intext:"fastspring" "api_username" "api_password" -github',
+        'filetype:env "RECURLY" OR "CHARGEBEE" -github',
+        'filetype:env "PADDLE_VENDOR" -github',
+        
+        # === GUMROAD / LEMONSQUEEZY ===
+        'intext:"gumroad" "access_token" -github -docs',
+        'intext:"lemonsqueezy" "api_key" -github -docs',
+        '"gumroad" "seller_id" -github -docs',
+        
+        # === XENDIT (SEA) ===
+        'intext:"xendit" "secret_key" -github -docs',
+        'intext:"xendit" "xnd_" -github -docs',
+        'site:*.id intext:"xendit" payment -github',
+        'site:*.ph intext:"xendit" checkout -github',
+        
+        # === PESAPAL / DUSUPAY (AFRICA) ===
+        'intext:"pesapal" "consumer_key" "consumer_secret" -github -docs',
+        'intext:"dusupay" "api_key" -github -docs',
+        'site:*.ug intext:"pesapal" payment',
+        'site:*.tz intext:"pesapal" payment',
+        'site:*.rw intext:"pesapal" OR "flutterwave"',
+        
+        # === KLARNA / AFTERPAY / AFFIRM ===
+        'intext:"klarna" "api_key" -github -docs',
+        'intext:"klarna" "merchant_id" "shared_secret" -github',
+        'intext:"afterpay" "merchant_id" -github -docs',
+        'intext:"affirm" "public_api_key" -github -docs',
+        '"klarna" checkout intext:"api" -github -docs',
+        'filetype:env "KLARNA" -github',
+        'filetype:env "AFTERPAY" OR "AFFIRM" -github',
+        
+        # === MONERIS (CANADA) ===
+        'intext:"moneris" "store_id" "api_token" -github -docs',
+        'intext:"moneris" "hpp_key" -github -docs',
+        'site:*.ca intext:"moneris" payment',
+        
+        # === EWAY (AUSTRALIA/NZ) ===
+        'intext:"eway" "api_key" "password" -github -docs',
+        'intext:"eway" "rapid" "api" -github -docs',
+        'site:*.com.au intext:"eway" payment',
+        'site:*.co.nz intext:"eway" checkout',
+        
+        # === PAGSEGURO / MERCADOPAGO (LATAM) ===
+        'intext:"pagseguro" "token" -github -docs',
+        'intext:"mercadopago" "access_token" -github -docs',
+        'intext:"mercadopago" "public_key" -github -docs',
+        '"MERCADOPAGO_ACCESS_TOKEN" -github',
+        'filetype:env "PAGSEGURO" -github',
+        
+        # === CONEKTA (MEXICO) ===
+        'intext:"conekta" "key_" -github -docs',
+        'intext:"conekta" "private_key" -github',
+        'site:*.com.mx intext:"conekta" payment',
+        'filetype:env "CONEKTA" -github',
+        
+        # === IYZICO (TURKEY) ===
+        'intext:"iyzico" "api_key" "secret_key" -github -docs',
+        'intext:"iyzipay" "api_key" -github -docs',
+        'site:*.com.tr intext:"iyzico" payment',
+        
+        # === POS / TERMINAL SYSTEMS ===
+        'intitle:"POS" "terminal" inurl:login -demo',
+        'intitle:"point of sale" "login" -github -docs',
+        '"clover" intext:"access_token" -github -docs',
+        '"square" "terminal" intext:"device_id" -github',
+        'intext:"verifone" "terminal" inurl:admin',
+        'intext:"ingenico" "terminal" inurl:login',
+        '"lightspeed" pos intext:"api_key" -github -docs',
+        '"toast" pos intext:"access_token" -github',
+        '"shopkeep" inurl:login -docs',
+        '"revel" pos intext:"api" -github -docs',
+        
+        # === CARD DATA IN SPREADSHEETS / DOCS ===
+        'site:docs.google.com/spreadsheets "card number" "cvv" "expiry"',
+        'site:docs.google.com/spreadsheets "credit card" "cvc"',
+        'site:docs.google.com/spreadsheets "billing" "card" "amount"',
+        'site:docs.google.com/spreadsheets "transaction" "card" "merchant"',
+        'site:docs.google.com/spreadsheets "payment" "method" "card"',
+        'site:docs.google.com/document "card_number" "expiry"',
+        'site:docs.google.com/document "sk_live_" OR "pk_live_"',
+        
+        # === JIRA / CONFLUENCE / WIKI EXPOSED ===
+        'site:*.atlassian.net "stripe" "api" "key"',
+        'site:*.atlassian.net "payment" "credentials"',
+        'inurl:"confluence" "stripe" "secret" -atlassian.com',
+        'inurl:"jira" "payment" "api_key" -atlassian.com',
+        
+        # === GITLAB / BITBUCKET EXPOSED CONFIGS ===
+        'site:gitlab.com "sk_live_" OR "pk_live_" -stripe.com',
+        'site:bitbucket.org "sk_live_" -stripe.com',
+        'site:gitlab.com filetype:env "STRIPE" OR "PAYPAL"',
+        'site:gitlab.com "BRAINTREE_PRIVATE_KEY" OR "BRAINTREE_MERCHANT"',
+        
+        # === EXPOSED DOCKER / K8S CONFIGS ===
+        'filetype:yml "STRIPE_SECRET_KEY" -github',
+        'filetype:yml "PAYPAL_SECRET" -github',
+        'filetype:yaml "api_key" "payment" -github',
+        '"docker-compose" intext:"STRIPE_KEY" -github',
+        '"docker-compose" intext:"PAYPAL" -github',
+        'filetype:yml "kubernetes" "secret" "payment" -github',
+        
+        # === HEROKU / VERCEL / NETLIFY EXPOSED ===
+        'site:herokuapp.com intext:"pk_live_" -github',
+        'site:herokuapp.com "payment" inurl:"/api/" -github',
+        'site:vercel.app intext:"pk_live_" -github',
+        'site:netlify.app intext:"pk_live_" -github',
+        'site:railway.app intext:"stripe" payment',
+        'site:render.com intext:"stripe" checkout',
+        
+        # === AWS / GCP / AZURE EXPOSED ===
+        'site:s3.amazonaws.com "credit_card" OR "card_number"',
+        'site:s3.amazonaws.com filetype:sql "payment"',
+        'site:s3.amazonaws.com filetype:csv "card" "cvv"',
+        'site:s3.amazonaws.com ".env" "STRIPE"',
+        'site:blob.core.windows.net "card" OR "payment" filetype:csv',
+        'site:blob.core.windows.net filetype:sql "INSERT" "card"',
+        'site:storage.googleapis.com "card" "payment" filetype:csv',
+        'site:storage.googleapis.com filetype:sql "credit"',
+        
+        # === EXPOSED JUPYTER / NOTEBOOK ===
+        'intitle:"Jupyter Notebook" intext:"payment" OR "stripe"',
+        'intitle:"Jupyter" intext:"sk_live_" OR "pk_live_"',
+        'inurl:"/notebooks/" "payment" "card" -github',
+        
+        # === CMS PAYMENT PLUGINS ===
+        '"gravity forms" intext:"stripe" payment -github -docs',
+        '"ninja forms" intext:"stripe" payment -github',
+        '"formidable" intext:"pk_live_" -github -docs',
+        '"caldera forms" intext:"stripe" -github',
+        '"wpforms" intext:"stripe" -github -docs',
+        '"give" intext:"pk_live_" donation -github -docs',
+        '"charitable" donation intext:"stripe" -github',
+        '"memberpress" intext:"pk_live_" -github -docs',
+        '"restrict content pro" intext:"stripe" -github',
+        '"paid memberships pro" intext:"pk_live_" -github',
+        '"easy digital downloads" intext:"stripe" -github -docs',
+        '"surecart" intext:"stripe" -github',
+        
+        # === LARAVEL / DJANGO / RAILS EXPOSED ===
+        'inurl:".env" "STRIPE_SECRET" -github -gitlab -bitbucket',
+        'inurl:".env" "PAYPAL_CLIENT_SECRET" -github -gitlab',
+        'inurl:"settings.py" "STRIPE_SECRET_KEY" -github',
+        'inurl:"config/secrets.yml" "stripe" -github',
+        'inurl:"config/credentials" "stripe" -github',
+        'inurl:".env.production" "STRIPE" OR "PAYPAL" -github',
+        'inurl:".env.local" "STRIPE" OR "PAYPAL" -github',
+        
+        # === DEEP CARD PATTERN DORKS ===
+        'intext:"4[0-9]{3}" "expir" "cvv" -github -docs',
+        'intext:"5[1-5][0-9]{2}" "expir" "cvv" -github -docs',
+        'intext:"3[47][0-9]{2}" "expir" "cvv" -github -docs',  # Amex
+        'intext:"6011" "expir" "cvv" -github -docs',  # Discover
+        'intext:"card" "4111111" -github -docs -test -example',
+        'intext:"card" "5500000" -github -docs -test -example',
+        
+        # === INVOICE / RECEIPT EXPOSURE ===
+        'intitle:"index of" "invoice" ext:pdf',
+        'intitle:"index of" "receipt" ext:pdf',
+        'intitle:"index of" "payment" ext:pdf',
+        'inurl:"/invoices/" filetype:pdf -github',
+        'inurl:"/receipts/" filetype:pdf -github',
+        '"invoice" "paid" "card ending" filetype:pdf',
+        '"receipt" "Visa" OR "Mastercard" filetype:pdf',
+        
+        # === MONGODB / NOSQL EXPOSED ===
+        'inurl:":27017" "payment" OR "card"',
+        'inurl:":27017" "customer" "credit"',
+        'inurl:":5984" "payment" OR "billing"',  # CouchDB
+        '"MongoDB" intext:"payment" "collection" -docs',
+        'intitle:"mongo express" "payment" OR "order"',
+        
+        # === ELASTICSEARCH EXPOSED ===
+        'inurl:":9200/_cat" "payment" OR "order"',
+        'inurl:":9200" "card" "payment" -docs',
+        'intitle:"Kibana" "payment" OR "transaction"',
+        'inurl:":5601" "payment" OR "card" dashboard',
+        
+        # === GRAPHQL EXPOSED ===
+        'inurl:"/graphql" "payment" "mutation" -github',
+        'inurl:"/graphql" "card" "charge" -github',
+        'inurl:"/graphiql" "payment" OR "order" -github',
+        'intitle:"GraphQL Playground" "payment" -github',
+        'intitle:"GraphiQL" "payment" OR "checkout" -github',
+        
+        # === SWAGGER / API DOCS EXPOSED ===
+        'inurl:"/swagger" "payment" OR "checkout" -github',
+        'inurl:"/api-docs" "payment" "charge" -github',
+        'intitle:"Swagger UI" "payment" OR "card" -github',
+        'inurl:"/redoc" "payment" OR "billing" -github',
+        'inurl:"/openapi" "payment" -github',
+        
+        # === ADDITIONAL INJECTABLE CHECKOUT URLs ===
+        'inurl:"checkout.php?cartid=" -github',
+        'inurl:"checkout.php?UserID=" -github',
+        'inurl:"checkout_confirmed.php?order_id=" -github',
+        'inurl:"cart.php?action=" -github',
+        'inurl:"cart_additem.php?id=" -github',
+        'inurl:"product_details.php?product_id=" -github',
+        'inurl:"product-list.php?category_id=" -github',
+        'inurl:"proddetail.php?prod=" -github',
+        'inurl:"shop_detail.php?id=" -github',
+        'inurl:"comersus_viewItem.php?idProduct=" -github',
+        'inurl:"eshop.php?id=" -github',
+        'inurl:"estore/products.php?cat=" -github',
+        'inurl:"buy.php?category=" -github',
+        'inurl:"order.php?id=" -github',
+        'inurl:"purchase.php?id=" -github',
+        'inurl:"payment.php?id=" -github',
+        'inurl:"billing.php?id=" -github',
+        'inurl:"store.php?cat=" -github',
+        'inurl:"shop.php?cat=" -github',
+        'inurl:"catalog.php?CatalogID=" -github',
+        'inurl:"viewcart.php?CartId=" -github',
+        'inurl:"shoppingcart.php?id=" -github',
+        'inurl:"getitem.php?id=" -github',
+        
+        # === ADDITIONAL ERROR-BASED SQLI ===
+        '"Warning: mysql_" inurl:"checkout"',
+        '"Warning: mysql_" inurl:"payment"',
+        '"Warning: mysql_" inurl:"order.php"',
+        '"Warning: mysql_" inurl:"cart.php"',
+        '"SQL syntax" inurl:"product.php"',
+        '"SQL syntax" inurl:"store.php"',
+        '"SQL syntax" inurl:"shop.php"',
+        '"ODBC" "driver" inurl:"checkout"',
+        '"Unclosed quotation" inurl:"payment"',
+        'inurl:".php?id=" "major credit cards accepted"',
+        'inurl:".asp?id=" "major credit cards accepted"',
+        'inurl:".php?id=" intext:"we accept visa" OR "mastercard"',
+        
+        # === MEMBERSHIP / SaaS BILLING ===
+        '"stripe billing portal" -docs -github',
+        '"customer_portal" intext:"stripe" -github -docs',
+        '"billing_portal" intext:"pk_live_" -github',
+        '"subscription_data" intext:"stripe" -github',
+        'inurl:"/customer-portal" intext:"stripe"',
+        'inurl:"/billing-portal" intext:"pk_live_"',
+        
+        # === SPECIFIC INDUSTRY HIGH-VALUE ===
+        '"cannabis" checkout intext:"stripe" -github',
+        '"cbd" payment intext:"pk_live_" -github',
+        '"vape" checkout intext:"stripe" -github',
+        '"supplements" checkout intext:"pk_live_"',
+        '"kratom" payment intext:"stripe"',
+        '"nootropics" checkout intext:"pk_live_"',
+        '"adult" checkout intext:"stripe" -github',
+        '"gambling" deposit intext:"stripe" -github',
+        '"forex" payment intext:"pk_live_" -github',
+        '"trading" subscription intext:"stripe" -github',
+        '"crypto exchange" intext:"pk_live_" -github',
+        '"nft" mint intext:"stripe" -github',
+        '"dropshipping" checkout intext:"pk_live_"',
+        '"print on demand" checkout intext:"stripe"',
+        '"fulfillment" payment intext:"pk_live_"',
+        
+        # === GOVERNMENT / MUNICIPAL PAYMENTS ===
+        'site:*.gov "pay" "fee" intext:"stripe" -captcha',
+        'site:*.gov "permit" payment intext:"pk_live_"',
+        'site:*.gov "license" fee intext:"stripe"',
+        'site:*.gov.uk "pay" intext:"stripe"',
+        'site:*.gc.ca "payment" intext:"stripe"',
+        'site:*.gov.au "fee" intext:"stripe" payment',
+        
+        # === RELIGIOUS / NONPROFIT HIGH-VALUE ===
+        'site:*.church "give" intext:"pk_live_" -captcha',
+        'site:*.church "tithe" intext:"stripe" -captcha',
+        'site:*.church "offering" intext:"pk_live_"',
+        'site:*.org "donate" "monthly" intext:"pk_live_" -captcha',
+        'site:*.org "contribute" intext:"stripe" -recaptcha',
+        '"synagogue" donate intext:"pk_live_" -captcha',
+        '"mosque" donate intext:"stripe" -captcha',
+        '"temple" donate intext:"pk_live_" -captcha',
+        '"ministry" give intext:"stripe" -captcha',
+        '"parish" donate intext:"pk_live_"',
+        '"diocese" payment intext:"stripe"',
+        
+        # === SCHOOL / UNIVERSITY FEES ===
+        'site:*.edu "pay" "fee" intext:"stripe"',
+        'site:*.edu "tuition" intext:"pk_live_"',
+        'site:*.edu "application fee" intext:"stripe"',
+        'site:*.edu "dining" payment intext:"pk_live_"',
+        'site:*.edu "parking" permit intext:"stripe"',
+        'site:*.edu "store" checkout intext:"pk_live_"',
+        'site:*.ac.uk "fee" payment intext:"stripe"',
+        'site:*.edu.au "payment" intext:"pk_live_"',
+        
+        # === EXPOSED PAYMENT LOGS ===
+        'filetype:log "payment" "card" "approved" -github',
+        'filetype:log "transaction" "amount" "card" -github',
+        'filetype:log "charge" "stripe" "succeeded" -github',
+        'filetype:log "PaymentIntent" "succeeded" -github',
+        'filetype:log "authorize" "capture" "card" -github',
+        'filetype:log "refund" "card_ending" -github',
+        
+        # === EXPOSED PAYMENT SQL DUMPS ===
+        'filetype:sql "INSERT INTO" "orders" "card" "amount"',
+        'filetype:sql "INSERT INTO" "transactions" "card_type"',
+        'filetype:sql "INSERT INTO" "billing" "card_number"',
+        'filetype:sql "CREATE TABLE" "payment_methods"',
+        'filetype:sql "CREATE TABLE" "transactions" "card"',
+        'filetype:sql "CREATE TABLE" "orders" "billing"',
+        'filetype:sql "INSERT INTO" "customers" "credit_card"',
+        'filetype:sql "INSERT INTO" "payments" "stripe"',
+        
+        # === EXPOSED STRIPE DASHBOARD / WEBHOOKS ===
+        'inurl:"stripe.com/test_" -stripe.com',
+        'inurl:"/stripe/webhook" -github -docs',
+        'inurl:"/webhooks/stripe" -github -docs',
+        'inurl:"/api/stripe" -github -docs',
+        'inurl:"/stripe-webhook" -github -docs',
+        'intext:"whsec_" -github -stripe.com -docs',
+        'intext:"evt_" "payment_intent" -github -stripe.com',
+        
+        # === BIG COMMERCE / VOLUSION / 3DCART ===
+        '"bigcommerce" intext:"client_id" "access_token" -github -docs',
+        '"volusion" "api_key" -github -docs',
+        '"3dcart" "api_key" -github -docs',
+        'inurl:"bigcommerce.com" "checkout" intext:"pk_live_"',
+        '"shift4shop" "api" intext:"key" -github',
+        
+        # === ECWID ===
+        'intext:"ecwid" "store_id" -github -docs',
+        '"app.ecwid.com" intext:"api" -docs',
+        'inurl:"ecwid" checkout -demo -docs',
+        
+        # === SNIPCART / FOXY.IO / GUMROAD ===
+        'intext:"snipcart" "api_key" -github -docs',
+        '"snipcart" intext:"pk_" -github',
+        '"foxy.io" intext:"store" -github -docs',
+        
+        # === PAYMENT FORM PAGES (NO SECURITY) ===
+        '"enter your card" "card number" "expiry" -recaptcha -cloudflare -github',
+        '"credit card information" "card number" "cvv" -docs -github -tutorial',
+        '"billing information" "card number" intext:"pk_live_" -github',
+        '"payment details" "card number" "security code" -github -docs',
+        '"pay securely" intext:"pk_live_" -docs -github',
+        '"secure checkout" intext:"pk_live_" -stripe.com -docs',
+        
+        # === MARKET-SPECIFIC PAYMENT GATEWAYS ===
+        # Japan
+        'site:*.jp intext:"stripe" payment',
+        'site:*.jp intext:"payjp" "api_key" -github',
+        '"payjp" "pk_" -github -docs',
+        # South Korea
+        'site:*.co.kr intext:"iamport" OR "toss" payment',
+        '"iamport" intext:"api_key" -github',
+        '"toss" "payments" "secret_key" -github -docs',
+        # China
+        '"wechat pay" "mch_id" "api_key" -github -docs',
+        '"alipay" "app_id" "private_key" -github -docs',
+        # Russia/CIS
+        'site:*.ru intext:"yookassa" OR "robokassa" payment',
+        '"yookassa" "shopId" "secret_key" -github',
+        '"robokassa" "MerchantLogin" -github',
+        # Middle East
+        'site:*.ae intext:"telr" OR "payfort" payment',
+        '"payfort" "access_code" "merchant_identifier" -github',
+        '"tap" "payment" intext:"sk_live_" -github -stripe.com',
+        '"hyperpay" intext:"entity_id" -github -docs',
+        # Southeast Asia
+        '"omise" intext:"pkey_live_" -github -docs',
+        '"omise" intext:"skey_live_" -github -docs',
+        '"paymaya" intext:"pk-" -github -docs',
+        '"gcash" "api_key" -github -docs',
+        '"grab pay" "merchant_id" -github -docs',
     ]
 
     def __init__(self, params_dir: str = None):
