@@ -30,7 +30,9 @@ class DorkerConfig:
     results_per_dork: int = 20
     engines: List[str] = field(default_factory=lambda: [
         "duckduckgo", "bing", "startpage", "yahoo",
-        "ecosia", "qwant", "brave",
+        "ecosia", "qwant", "brave", "aol",
+        "yandex", "ask", "dogpile", "searxng", "you",
+        "mojeek", "naver",
     ])
     engine_shuffle: bool = True
     engine_fallback: bool = True

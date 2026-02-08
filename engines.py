@@ -562,6 +562,481 @@ class AOLSearch(SearchEngine):
             return []
 
 
+# ────────────────────────── YANDEX ENGINE ──────────────────────────
+
+class YandexSearch(SearchEngine):
+    """Yandex — large independent index, good non-Western coverage."""
+    name = "yandex"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://yandex.com/search/?text={quote(query)}&p={page}&lr=84"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "en-US,en;q=0.9,ru;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    # Organic results: <li class="serp-item"> → <a> with href
+                    for li in soup.find_all("li", class_="serp-item"):
+                        a = li.find("a")
+                        if a:
+                            href = a.get("href", "")
+                            if href and href.startswith("http") and "yandex" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    # Fallback: data-cid organic blocks
+                    if not results:
+                        for div in soup.find_all("div", attrs={"data-cid": True}):
+                            a = div.find("a", class_=re.compile(r"link|title|organic", re.I))
+                            if not a:
+                                a = div.find("a")
+                            if a:
+                                href = a.get("href", "")
+                                if href and href.startswith("http") and "yandex" not in href:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    # Third pass: any link matching organic patterns
+                    if not results:
+                        for a in soup.find_all("a"):
+                            href = a.get("href", "")
+                            if (href and href.startswith("http")
+                                    and "yandex" not in href
+                                    and "yastatic" not in href
+                                    and not href.endswith(".js")):
+                                text = a.get_text(strip=True)
+                                if text and len(text) > 10:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Yandex] Search error: {e}")
+            return []
+
+
+# ────────────────────────── ASK.COM ENGINE ──────────────────────────
+
+class AskSearch(SearchEngine):
+    """Ask.com — lightweight search engine."""
+    name = "ask"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.ask.com/web?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                async with session.get(url, headers=self.headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    # Ask.com uses PartialSearchResults-item divs
+                    for div in soup.find_all("div", class_=re.compile(r"PartialSearchResults-item|result", re.I)):
+                        a = div.find("a", class_=re.compile(r"PartialSearchResults-item-title-link|result-link", re.I))
+                        if not a:
+                            a = div.find("a")
+                        if a:
+                            href = a.get("href", "")
+                            if href and href.startswith("http") and "ask.com" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    # Fallback: generic anchor search
+                    if not results:
+                        for a in soup.find_all("a"):
+                            href = a.get("href", "")
+                            if (href and href.startswith("http")
+                                    and "ask.com" not in href
+                                    and "/web?" not in href):
+                                text = a.get_text(strip=True)
+                                if text and len(text) > 8:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Ask] Search error: {e}")
+            return []
+
+
+# ────────────────────────── DOGPILE ENGINE ──────────────────────────
+
+class DogpileSearch(SearchEngine):
+    """Dogpile — meta-search aggregator hitting multiple backends."""
+    name = "dogpile"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        qsi = page * 10 + 1
+        url = f"https://www.dogpile.com/serp?q={quote(query)}&qsi={qsi}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                async with session.get(url, headers=self.headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    # Dogpile organic results
+                    for div in soup.find_all("div", class_=re.compile(r"web-bing__result|result", re.I)):
+                        a = div.find("a", class_=re.compile(r"web-bing__title|result__a", re.I))
+                        if not a:
+                            a = div.find("a")
+                        if a:
+                            href = a.get("href", "")
+                            if href and href.startswith("http") and "dogpile.com" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    # Fallback: look for any external links in result containers
+                    if not results:
+                        for a in soup.find_all("a", href=True):
+                            href = a["href"]
+                            if (href.startswith("http")
+                                    and "dogpile.com" not in href
+                                    and "infospace.com" not in href):
+                                text = a.get_text(strip=True)
+                                if text and len(text) > 8:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Dogpile] Search error: {e}")
+            return []
+
+
+# ────────────────────────── SEARXNG ENGINE ──────────────────────────
+
+# Pool of public SearXNG instances for load distribution
+SEARXNG_INSTANCES = [
+    "https://searx.be",
+    "https://search.bus-hit.me",
+    "https://searx.tiekoetter.com",
+    "https://search.ononoki.org",
+    "https://searx.zhenyapav.com",
+    "https://etsi.me",
+    "https://priv.au",
+    "https://searx.work",
+    "https://search.sapti.me",
+    "https://paulgo.io",
+]
+
+
+class SearXNGSearch(SearchEngine):
+    """SearXNG — open meta-search engine hitting multiple backends per query."""
+    name = "searxng"
+
+    def __init__(self, proxy: Optional[str] = None, session: aiohttp.ClientSession = None,
+                 instance_url: Optional[str] = None):
+        super().__init__(proxy=proxy, session=session)
+        self._instances = list(SEARXNG_INSTANCES)
+        random.shuffle(self._instances)
+        self._instance_idx = 0
+        self._custom_instance = instance_url
+
+    def _next_instance(self) -> str:
+        if self._custom_instance:
+            return self._custom_instance.rstrip("/")
+        inst = self._instances[self._instance_idx % len(self._instances)]
+        self._instance_idx += 1
+        return inst
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        # Try JSON API first, then HTML fallback
+        for attempt in range(min(3, len(self._instances))):
+            base = self._next_instance()
+            # JSON API endpoint
+            api_url = f"{base}/search?q={quote(query)}&format=json&pageno={page + 1}&language=en&safesearch=0"
+            try:
+                session = await self._get_session()
+                own = session is not self._session
+                try:
+                    headers = self.headers.copy()
+                    headers["Accept"] = "application/json, text/html"
+                    async with session.get(api_url, headers=headers, proxy=self.proxy,
+                                           ssl=False, allow_redirects=True) as resp:
+                        if resp.status != 200:
+                            continue
+                        content_type = resp.headers.get("Content-Type", "")
+                        if "json" in content_type:
+                            data = await resp.json()
+                            results = []
+                            for item in data.get("results", []):
+                                u = item.get("url", "")
+                                if u and u.startswith("http"):
+                                    results.append(u)
+                                    if len(results) >= num_results:
+                                        break
+                            if results:
+                                return results
+                        else:
+                            # HTML fallback
+                            html = await resp.text()
+                            self._detect_captcha_in_response(resp.status, html, api_url)
+                            soup = BeautifulSoup(html, "html.parser")
+                            results = []
+                            for h3 in soup.find_all("h3"):
+                                a = h3.find("a")
+                                if a:
+                                    href = a.get("href", "")
+                                    if href and href.startswith("http"):
+                                        results.append(href)
+                                        if len(results) >= num_results:
+                                            break
+                            # Alt: result div pattern
+                            if not results:
+                                for div in soup.find_all("article", class_="result"):
+                                    a = div.find("a")
+                                    if a:
+                                        href = a.get("href", "")
+                                        if href and href.startswith("http"):
+                                            results.append(href)
+                                            if len(results) >= num_results:
+                                                break
+                            if results:
+                                return results
+                finally:
+                    if own:
+                        await session.close()
+            except RateLimitError:
+                raise
+            except Exception as e:
+                logger.debug(f"[SearXNG] Instance {base} failed: {e}")
+                continue
+
+        logger.error("[SearXNG] All instances failed")
+        return []
+
+
+# ────────────────────────── YOU.COM ENGINE ──────────────────────────
+
+class YouSearch(SearchEngine):
+    """You.com — modern search engine with good web coverage."""
+    name = "you"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://you.com/search?q={quote(query)}&tbm=web"
+        if page > 0:
+            url += f"&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                async with session.get(url, headers=self.headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    results = []
+                    # You.com embeds results in data attributes and JS payloads;
+                    # extract URLs from the HTML using regex as primary approach
+                    soup = BeautifulSoup(html, "html.parser")
+                    # Method 1: <a> tags with data-testid or in result containers
+                    for a in soup.find_all("a", attrs={"data-testid": re.compile(r"result", re.I)}):
+                        href = a.get("href", "")
+                        if href and href.startswith("http") and "you.com" not in href:
+                            results.append(href)
+                            if len(results) >= num_results:
+                                break
+                    # Method 2: result card divs
+                    if not results:
+                        for div in soup.find_all("div", attrs={"data-testid": re.compile(r"web-result|snippet", re.I)}):
+                            a = div.find("a", href=True)
+                            if a:
+                                href = a["href"]
+                                if href.startswith("http") and "you.com" not in href:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    # Method 3: JSON-LD or embedded script data
+                    if not results:
+                        for script in soup.find_all("script"):
+                            text = script.string or ""
+                            urls = re.findall(r'"url"\s*:\s*"(https?://[^"]+)"', text)
+                            for u in urls:
+                                if "you.com" not in u and u not in results:
+                                    results.append(u)
+                                    if len(results) >= num_results:
+                                        break
+                            if len(results) >= num_results:
+                                break
+                    # Method 4: any external link with meaningful text
+                    if not results:
+                        for a in soup.find_all("a", href=True):
+                            href = a["href"]
+                            if (href.startswith("http")
+                                    and "you.com" not in href
+                                    and not href.endswith((".js", ".css", ".png", ".jpg"))):
+                                text = a.get_text(strip=True)
+                                if text and len(text) > 10:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[You] Search error: {e}")
+            return []
+
+
+# ────────────────────────── MOJEEK ENGINE ──────────────────────────
+
+class MojeekSearch(SearchEngine):
+    """Mojeek — independent UK search engine with its own crawler. No JS needed."""
+    name = "mojeek"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        offset = page * num_results
+        url = f"https://www.mojeek.com/search?q={quote(query)}&s={offset}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                async with session.get(url, headers=self.headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    # Primary: <ul class="results-standard"> → <li> → <a>
+                    for li in soup.find_all("li", class_=re.compile(r"results-standard")):
+                        a = li.find("a", href=True)
+                        if a:
+                            href = a.get("href", "")
+                            if href and href.startswith("http") and "mojeek" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    # Fallback: any <a class="ob"> (Mojeek organic block links)
+                    if not results:
+                        for a in soup.find_all("a", class_="ob"):
+                            href = a.get("href", "")
+                            if href and href.startswith("http") and "mojeek" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    # Fallback 2: generic <li> with title links
+                    if not results:
+                        for li in soup.find_all("li"):
+                            a = li.find("a", href=True)
+                            if a:
+                                href = a.get("href", "")
+                                if (href and href.startswith("http")
+                                        and "mojeek" not in href
+                                        and not href.endswith((".css", ".js", ".png"))):
+                                    text = a.get_text(strip=True)
+                                    if text and len(text) > 8:
+                                        results.append(href)
+                                        if len(results) >= num_results:
+                                            break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Mojeek] Search error: {e}")
+            return []
+
+
+# ────────────────────────── NAVER ENGINE ──────────────────────────
+
+class NaverSearch(SearchEngine):
+    """Naver — South Korea's largest search engine with its own web crawler.
+    Supports inurl/site dorking. Excellent non-duplicate coverage."""
+    name = "naver"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        start = page * 10 + 1
+        url = f"https://search.naver.com/search.naver?where=webkr&query={quote(query)}&start={start}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "en-US,en;q=0.9,ko;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    seen = set()
+                    # Naver web results: <a class="link_tit" or class="total_tit"> or <a> in <div class="total_wrap">
+                    for div in soup.find_all("div", class_=re.compile(r"total_wrap|api_txt_lines|web_detail")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a.get("href", "")
+                            if (href and href.startswith("http")
+                                    and "naver.com" not in href
+                                    and "naver.net" not in href
+                                    and href not in seen):
+                                seen.add(href)
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    # Fallback: any external link with meaningful text
+                    if not results:
+                        for a in soup.find_all("a", href=True):
+                            href = a["href"]
+                            if (href.startswith("http")
+                                    and "naver.com" not in href
+                                    and "naver.net" not in href
+                                    and href not in seen):
+                                text = a.get_text(strip=True)
+                                if text and len(text) > 5:
+                                    seen.add(href)
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Naver] Search error: {e}")
+            return []
+
+
 # ────────────────────────── FIRECRAWL ENGINE ──────────────────────────
 
 class FirecrawlSearch(SearchEngine):
@@ -748,6 +1223,13 @@ ENGINE_REGISTRY = {
     "qwant": QwantSearch,
     "brave": BraveSearch,
     "aol": AOLSearch,
+    "yandex": YandexSearch,
+    "ask": AskSearch,
+    "dogpile": DogpileSearch,
+    "searxng": SearXNGSearch,
+    "you": YouSearch,
+    "mojeek": MojeekSearch,
+    "naver": NaverSearch,
 }
 
 
