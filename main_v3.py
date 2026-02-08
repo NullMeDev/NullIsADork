@@ -1022,14 +1022,30 @@ class MedyDorkerPipeline:
                         crawl_sqli_limit = getattr(self.config, 'deep_crawl_sqli_limit', 5)
                         # Filter out the original URL (already tested above)
                         extra_targets = [u for u in discovered_param_urls if u != url]
+                        # Skip URLs whose param values contain full URLs (causes SSRF-like hangs)
+                        def _safe_param_url(u):
+                            try:
+                                from urllib.parse import parse_qs, urlparse as _up
+                                qs = parse_qs(_up(u).query)
+                                for vals in qs.values():
+                                    for v in vals:
+                                        if v.startswith(("http://", "https://")):
+                                            return False
+                            except Exception:
+                                pass
+                            return True
+                        extra_targets = [u for u in extra_targets if _safe_param_url(u)]
                         if extra_targets:
                             extra_targets = extra_targets[:crawl_sqli_limit]
                             for extra_url in extra_targets:
                                 try:
-                                    extra_sqli = await self.sqli_scanner.scan(
-                                        extra_url, session,
-                                        waf_name=waf_name,
-                                        protection_info=waf_info,
+                                    extra_sqli = await asyncio.wait_for(
+                                        self.sqli_scanner.scan(
+                                            extra_url, session,
+                                            waf_name=waf_name,
+                                            protection_info=waf_info,
+                                        ),
+                                        timeout=45,
                                     )
                                     if extra_sqli:
                                         for sqli in extra_sqli:
@@ -1073,6 +1089,8 @@ class MedyDorkerPipeline:
                                                     "source": "Discovered via recursive crawl",
                                                 }
                                             )
+                                except asyncio.TimeoutError:
+                                    logger.warning(f"Crawl-discovered SQLi test timed out for {extra_url}")
                                 except Exception as e:
                                     logger.debug(f"Crawl-discovered SQLi test failed for {extra_url}: {e}")
 
@@ -1415,7 +1433,10 @@ class MedyDorkerPipeline:
     async def _process_url_safe(self, url: str, results_list: list, findings_counter: list):
         """Process a URL with error handling for concurrent use."""
         try:
-            result = await self.process_url(url)
+            result = await asyncio.wait_for(
+                self.process_url(url),
+                timeout=180,  # 3 min max per URL
+            )
             results_list.append(result)
             
             # Log findings
@@ -1458,6 +1479,8 @@ class MedyDorkerPipeline:
                     f"🎯 <b>HIT!</b> {', '.join(findings)}\n"
                     f"<code>{url[:80]}</code>"
                 )
+        except asyncio.TimeoutError:
+            logger.warning(f"URL processing timed out (180s): {url[:60]}")
         except Exception as e:
             logger.debug(f"URL processing error: {url} — {e}")
 
