@@ -197,9 +197,18 @@ class DorkerDB:
                 UNIQUE(key_type, key_hash)
             );
             
+            CREATE TABLE IF NOT EXISTS processed_urls (
+                url_hash TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                processed_at REAL NOT NULL
+            );
+            
             CREATE INDEX IF NOT EXISTS idx_port_domain ON port_scans(domain);
             CREATE INDEX IF NOT EXISTS idx_oob_url ON oob_results(url);
             CREATE INDEX IF NOT EXISTS idx_key_type ON key_validations(key_type);
+            CREATE INDEX IF NOT EXISTS idx_processed_domain ON processed_urls(domain);
+            CREATE INDEX IF NOT EXISTS idx_processed_at ON processed_urls(processed_at);
         """)
         conn.commit()
         logger.info(f"Database initialized at {self.db_path}")
@@ -226,6 +235,55 @@ class DorkerDB:
         conn = self._get_conn()
         row = conn.execute("SELECT 1 FROM seen_domains WHERE domain = ?", (domain,)).fetchone()
         return row is not None
+
+    def is_domain_on_cooldown(self, domain: str, cooldown_hours: int = 24) -> bool:
+        """Check if domain was scanned within the cooldown period.
+        
+        Returns True if domain should be skipped (still on cooldown).
+        Returns False if domain can be revisited (cooldown expired or never seen).
+        If cooldown_hours == 0, acts as permanent block (old behavior).
+        """
+        if cooldown_hours == 0:
+            return self.is_domain_seen(domain)
+        conn = self._get_conn()
+        cutoff = time.time() - (cooldown_hours * 3600)
+        row = conn.execute(
+            "SELECT last_seen FROM seen_domains WHERE domain = ? AND last_seen > ?",
+            (domain, cutoff)
+        ).fetchone()
+        return row is not None
+
+    def add_processed_url(self, url: str, domain: str):
+        """Record a URL as processed (permanent URL-level dedup)."""
+        import hashlib
+        url_hash = hashlib.md5(url.encode(errors='ignore')).hexdigest()
+        now = time.time()
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT OR IGNORE INTO processed_urls (url_hash, url, domain, processed_at)
+            VALUES (?, ?, ?, ?)
+        """, (url_hash, url[:2000], domain, now))
+        conn.commit()
+
+    def is_url_processed(self, url: str) -> bool:
+        """Check if this exact URL has been processed before."""
+        import hashlib
+        url_hash = hashlib.md5(url.encode(errors='ignore')).hexdigest()
+        conn = self._get_conn()
+        row = conn.execute("SELECT 1 FROM processed_urls WHERE url_hash = ?", (url_hash,)).fetchone()
+        return row is not None
+
+    def get_processed_url_count(self) -> int:
+        conn = self._get_conn()
+        row = conn.execute("SELECT COUNT(*) as cnt FROM processed_urls").fetchone()
+        return row["cnt"]
+
+    def cleanup_old_processed_urls(self, max_age_days: int = 30):
+        """Remove processed URL entries older than max_age_days to keep DB lean."""
+        cutoff = time.time() - (max_age_days * 86400)
+        conn = self._get_conn()
+        conn.execute("DELETE FROM processed_urls WHERE processed_at < ?", (cutoff,))
+        conn.commit()
 
     def get_seen_domains(self) -> set:
         conn = self._get_conn()

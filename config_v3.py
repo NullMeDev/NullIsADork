@@ -89,7 +89,7 @@ class DorkerConfig:
     ])
     captcha_max_solve_time: int = 180           # Max seconds per solve attempt
     captcha_auto_solve_search: bool = True      # Solve captchas blocking search engines
-    captcha_auto_solve_target: bool = False     # Solve captchas on scanned target sites
+    captcha_auto_solve_target: bool = True      # Solve captchas on scanned target sites
     captcha_budget_limit: float = 0.0           # Max $ to spend per session (0=unlimited)
     captcha_max_per_domain: int = 3             # Max solve attempts per domain
     
@@ -151,7 +151,7 @@ class DorkerConfig:
     port_scan_ports: str = "quick"          # "quick" (31 ports), "extended" (~80), or comma-separated
     
     # =============== OOB SQLi (v3.11) ===============
-    oob_sqli_enabled: bool = False          # Requires callback host — disabled by default
+    oob_sqli_enabled: bool = True           # Uses interact.sh for DNS exfil (no callback host needed)
     oob_callback_host: str = ""             # Public IP/domain for HTTP callback server
     oob_callback_port: int = 0              # 0 = ephemeral random port
     oob_callback_timeout: float = 15.0      # Seconds to wait for callback
@@ -188,9 +188,15 @@ class DorkerConfig:
     report_dumps: bool = True
     report_secrets: bool = True
     
+    # =============== DOMAIN REVISIT & URL DEDUP ===============
+    domain_revisit_hours: int = 24  # Hours before revisiting a domain (0 = never revisit)
+    url_dedup_enabled: bool = True  # Skip exact-same URLs permanently
+    
     # =============== JS ANALYSIS & API BRUTEFORCE (autonomous pipeline) ===============
     js_analysis_enabled: bool = True   # JS bundle analysis in process_url()
     api_bruteforce_enabled: bool = True  # API endpoint bruteforce in process_url()
+    subdomain_enum_enabled: bool = True # Subdomain discovery via crt.sh + DNS brute
+    dir_fuzz_enabled: bool = True       # Directory/file fuzzing for sensitive paths
     
     # =============== MADY BOT INTEGRATION ===============
     mady_bot_feed: bool = True  # Auto-feed found gateways to Mady bot

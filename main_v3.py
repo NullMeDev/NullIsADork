@@ -89,6 +89,8 @@ from ml_filter import MLFilter, FilterResult
 from js_analyzer import JSBundleAnalyzer, JSAnalysisResult, analyze_js_bundles
 from api_bruteforcer import APIBruteforcer, BruteforceResult, bruteforce_api
 from mady_feeder import MadyFeeder, MadyFeederConfig, feed_to_mady, get_feeder
+from subdomain_enum import SubdomainEnumerator, SubdomainResult, enumerate_subdomains
+from dir_fuzzer import DirectoryFuzzer, DirFuzzResult, fuzz_directories
 from hint_engine import (
     get_cookie_hint, get_secret_hint, get_endpoint_hint,
     get_waf_hint, get_port_hint, get_sqli_hint, get_dump_hint,
@@ -630,12 +632,17 @@ class MadyDorkerPipeline:
             "crlf": [],
             "js_analysis": None,
             "api_bruteforce": None,
+            "subdomains": None,
+            "dir_fuzz": None,
             "mady_fed": 0,
         }
         
         domain = urlparse(url).netloc
         self.seen_domains.add(domain)
         self.db.add_seen_domain(domain)
+        # URL-level dedup: record this exact URL as processed
+        if getattr(self.config, 'url_dedup_enabled', True):
+            self.db.add_processed_url(url, domain)
         self.urls_scanned += 1
         self.reporter.stats.urls_scanned += 1
         
@@ -712,6 +719,51 @@ class MadyDorkerPipeline:
                                 ]
                         except Exception as e:
                             logger.debug(f"Port scan failed: {e}")
+                    
+                    # Step 1c: Subdomain Enumeration (once per base domain)
+                    if getattr(self.config, 'subdomain_enum_enabled', True):
+                        try:
+                            base_domain = domain
+                            # Only run if we haven't enumerated this domain recently
+                            if not self.db.is_domain_on_cooldown(f"_subenum_{base_domain}", 24):
+                                sub_result = await enumerate_subdomains(
+                                    base_domain, check_live=True, timeout=5.0
+                                )
+                                if sub_result.live_subdomains:
+                                    result["subdomains"] = {
+                                        "found": sub_result.total_found,
+                                        "live": sub_result.total_live,
+                                        "sources": sub_result.sources,
+                                    }
+                                    # Queue live subdomains as new URLs for the pipeline
+                                    for sub in sub_result.live_subdomains:
+                                        sub_url = f"https://{sub}/"
+                                        if not self.db.is_url_processed(sub_url):
+                                            discovered_param_urls = getattr(result, '_extra_urls', set())
+                                            # Store for later — will be picked up by dork cycle
+                                            self.db.add_seen_domain(sub)  # Track subdomain
+                                    
+                                    logger.info(
+                                        f"[SubEnum] {base_domain}: {sub_result.total_found} found, "
+                                        f"{sub_result.total_live} live"
+                                    )
+                                    await self.reporter.report_finding(
+                                        url,
+                                        f"🌐 <b>Subdomain Enumeration</b>\n"
+                                        f"<code>{base_domain}</code>\n"
+                                        f"Found: {sub_result.total_found} | Live: {sub_result.total_live}\n"
+                                        f"Sources: {', '.join(f'{k}={v}' for k,v in sub_result.sources.items())}\n"
+                                        + (
+                                            "Live:\n" + "\n".join(
+                                                f"  • <code>{s}</code>" for s in sub_result.live_subdomains[:15]
+                                            )
+                                            if sub_result.live_subdomains else ""
+                                        )
+                                    )
+                                # Mark as enumerated so we don't repeat for 24h
+                                self.db.add_seen_domain(f"_subenum_{base_domain}")
+                        except Exception as e:
+                            logger.debug(f"Subdomain enumeration failed: {e}")
                     
                     # Step 2: Cookie Extraction
                     if self.config.cookie_extraction_enabled:
@@ -1086,6 +1138,56 @@ class MadyDorkerPipeline:
                                 )
                         except Exception as e:
                             logger.warning(f"[API] Bruteforce failed for {url[:60]}: {e}")
+                    
+                    # ─── Step 3d: Directory Fuzzing ────────────────────────────
+                    # Probe for sensitive files, backups, configs, exposed repos
+                    if getattr(self.config, 'dir_fuzz_enabled', True):
+                        try:
+                            dir_result = await fuzz_directories(url, session=session, timeout=5.0)
+                            if dir_result.hits:
+                                result["dir_fuzz"] = {
+                                    "probed": dir_result.total_probed,
+                                    "found": dir_result.total_found,
+                                    "sensitive": len(dir_result.sensitive_files),
+                                    "backups": len(dir_result.backup_files),
+                                    "configs": len(dir_result.config_files),
+                                }
+                                
+                                # Feed discovered paths with query params into SQLi pool
+                                for hit in dir_result.hits:
+                                    parsed_hit = urlparse(hit.url)
+                                    if parsed_hit.query:
+                                        discovered_param_urls.add(hit.url)
+                                
+                                # Report sensitive findings
+                                if dir_result.sensitive_files or dir_result.backup_files:
+                                    df_msg = (
+                                        f"📂 <b>Directory Fuzzing</b>\n"
+                                        f"<code>{url[:60]}</code>\n"
+                                        f"Probed: {dir_result.total_probed} | Found: {dir_result.total_found}\n"
+                                    )
+                                    if dir_result.sensitive_files:
+                                        df_msg += f"⚠️ <b>Sensitive: {len(dir_result.sensitive_files)}</b>\n"
+                                        for sf in dir_result.sensitive_files[:5]:
+                                            df_msg += f"  [{sf.status}] <code>{sf.url[-60:]}</code>\n"
+                                            if sf.reason:
+                                                df_msg += f"    → {sf.reason}\n"
+                                    if dir_result.backup_files:
+                                        df_msg += f"💾 <b>Backups: {len(dir_result.backup_files)}</b>\n"
+                                        for bf in dir_result.backup_files[:5]:
+                                            df_msg += f"  [{bf.status}] <code>{bf.url[-60:]}</code>\n"
+                                    if dir_result.config_files:
+                                        df_msg += f"⚙️ <b>Configs: {len(dir_result.config_files)}</b>\n"
+                                        for cf in dir_result.config_files[:5]:
+                                            df_msg += f"  [{cf.status}] <code>{cf.url[-60:]}</code>\n"
+                                    
+                                    await self.reporter.report_finding(url, df_msg)
+                                    logger.info(
+                                        f"[DirFuzz] {url[:50]} → {dir_result.total_found} hits "
+                                        f"({len(dir_result.sensitive_files)} sensitive)"
+                                    )
+                        except Exception as e:
+                            logger.debug(f"[DirFuzz] Failed for {url[:60]}: {e}")
                     
                     # Step 4: SQLi Testing (now with cookie/header/POST injection + WAF bypass)
                     # Also test param URLs discovered by the recursive crawler
@@ -1752,6 +1854,14 @@ class MadyDorkerPipeline:
         self.cycle_count += 1
         logger.info(f"=== CYCLE {self.cycle_count} STARTING ===")
         
+        # Periodic cleanup: remove processed URL entries older than 30 days
+        if self.cycle_count % 10 == 1:
+            try:
+                self.db.cleanup_old_processed_urls(max_age_days=30)
+                logger.debug("Cleaned up old processed URL entries")
+            except Exception:
+                pass
+        
         # Generate dorks (in thread to avoid blocking event loop)
         if dorks is None:
             if category:
@@ -1816,13 +1926,19 @@ class MadyDorkerPipeline:
                 if not urls:
                     continue
                 
-                # Filter URLs
+                # Filter URLs — domain TTL cooldown + URL-level dedup
                 filtered_urls = []
+                _revisit_hours = getattr(self.config, 'domain_revisit_hours', 24)
+                _url_dedup = getattr(self.config, 'url_dedup_enabled', True)
                 for url in urls:
                     if self._should_skip_url(url):
                         continue
                     domain = urlparse(url).netloc
-                    if domain in self.seen_domains:
+                    # URL-level dedup: never reprocess exact same URL
+                    if _url_dedup and self.db.is_url_processed(url):
+                        continue
+                    # Domain cooldown: skip if scanned within revisit window
+                    if self.db.is_domain_on_cooldown(domain, _revisit_hours):
                         continue
                     filtered_urls.append(url)
                 
@@ -2077,17 +2193,17 @@ class MadyDorkerPipeline:
                 logger.error(f"Export loop error: {e}")
 
     async def _write_export(self) -> Optional[str]:
-        """Write a comprehensive .txt export of all findings."""
+        """Write comprehensive exports in .txt, .json, and .csv formats."""
         self._export_counter += 1
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"dorker_export_{ts}.txt"
-        filepath = os.path.join(self._export_dir, filename)
+        base_path = os.path.join(self._export_dir, f"dorker_export_{ts}")
         
         stats = self.get_stats()
         
+        # ════════════ TXT EXPORT ════════════
         lines = []
         lines.append("=" * 70)
-        lines.append(f"  MadyDorker v3.15 — Hourly Export #{self._export_counter}")
+        lines.append(f"  MadyDorker v3.22 — Export #{self._export_counter}")
         lines.append(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"  Uptime: {stats.get('uptime', 'N/A')}")
         lines.append("=" * 70)
@@ -2186,12 +2302,67 @@ class MadyDorkerPipeline:
         lines.append(f"  End of export — {len(lines)} lines")
         lines.append("=" * 70)
         
+        txt_path = f"{base_path}.txt"
+        json_path = f"{base_path}.json"
+        csv_path = f"{base_path}.csv"
+        exported_files = []
+        
         try:
-            with open(filepath, 'w') as f:
+            # Write TXT
+            with open(txt_path, 'w') as f:
                 f.write("\n".join(lines))
-            logger.info(f"Hourly export written: {filepath} ({len(lines)} lines)")
+            exported_files.append(txt_path)
+            
+            # Write JSON — structured export of all findings
+            import json as _json
+            json_data = {
+                "export_id": self._export_counter,
+                "generated": datetime.now().isoformat(),
+                "uptime": stats.get("uptime", ""),
+                "summary": {
+                    "cycles": self.cycle_count,
+                    "urls_scanned": self.urls_scanned,
+                    "domains_seen": len(self.seen_domains),
+                    "sqli_vulns": len(self.vulnerable_urls),
+                    "secrets_found": len(self.found_secrets),
+                    "gateways_found": len(self.found_gateways),
+                    "cards_found": len(self.found_cards),
+                },
+                "vulnerable_urls": self.vulnerable_urls[-500:],
+                "gateways": self.found_gateways[-500:],
+                "secrets": self.found_secrets[-500:],
+                "cards": self.found_cards[-200:],
+            }
+            with open(json_path, 'w') as f:
+                _json.dump(json_data, f, indent=2, default=str)
+            exported_files.append(json_path)
+            
+            # Write CSV — vulnerable URLs for easy import/sorting
+            import csv as _csv
+            with open(csv_path, 'w', newline='') as f:
+                writer = _csv.writer(f)
+                writer.writerow(["type", "url", "detail", "dbms", "technique", "time"])
+                for v in self.vulnerable_urls:
+                    writer.writerow([
+                        "sqli", v.get("url", ""), v.get("param", v.get("parameter", "")),
+                        v.get("dbms", ""), v.get("technique", v.get("type", "")),
+                        v.get("time", v.get("found_at", "")),
+                    ])
+                for g in self.found_gateways:
+                    writer.writerow([
+                        "gateway", g.get("url", ""), g.get("type", ""),
+                        "", "", g.get("time", ""),
+                    ])
+                for s in self.found_secrets:
+                    writer.writerow([
+                        "secret", s.get("url", ""), s.get("type", ""),
+                        "", s.get("value", "")[:80], s.get("time", ""),
+                    ])
+            exported_files.append(csv_path)
+            
+            logger.info(f"Export #{self._export_counter}: {len(exported_files)} files written ({len(lines)} txt lines)")
             self._last_export_time = datetime.now()
-            return filepath
+            return txt_path  # Return primary txt path for Telegram upload
         except Exception as e:
             logger.error(f"Export write failed: {e}")
             return None
