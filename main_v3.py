@@ -1669,26 +1669,35 @@ class MedyDorkerPipeline:
                 logger.info(f"🔄 Proxies: {self.proxy_manager.alive_count}/{self.proxy_manager.total} alive")
         
         # Generate dorks in thread to avoid blocking event loop
-        dork_count = await asyncio.to_thread(
-            lambda: len(self.generator.generate_all(50000))
+        total_pool = await asyncio.to_thread(
+            lambda: len(self.generator.generate_all())
         )
+        per_cycle = self.config.max_dorks
         
         # Send startup notification
         proxy_status = "Disabled"
         if self.proxy_manager and self.proxy_manager.has_proxies:
             proxy_status = f"{self.proxy_manager.alive_count}/{self.proxy_manager.total} alive"
+        
+        engines = self.config.engines
         await self.reporter.report_startup({
-            "Dorks Available": dork_count,
-            "Engines": ", ".join(self.config.engines),
+            "Total Dork Pool": f"{total_pool:,}",
+            "Per Cycle": f"{per_cycle:,}",
+            "Concurrent URLs": self.config.concurrent_url_limit,
+            "Engines": f"{len(engines)} ({', '.join(engines)})",
+            "Search Delay": f"{self.config.search_delay_min}-{self.config.search_delay_max}s",
+            "Cycle Delay": f"{self.config.cycle_delay}s",
             "Proxies": proxy_status,
             "SQLi": "Enabled" if self.config.sqli_enabled else "Disabled",
             "Dumper": "Enabled" if self.config.dumper_enabled else "Disabled",
             "WAF Detection": "Enabled" if self.config.waf_detection_enabled else "Disabled",
+            "Secrets": "Enabled" if self.config.secret_extraction_enabled else "Disabled",
         })
         
         await self._send_progress(
             f"🚀 <b>Pipeline Started!</b>\n"
-            f"Dorks: {dork_count:,} | Engines: {len(self.config.engines)}\n"
+            f"Dork Pool: {total_pool:,} | Per Cycle: {per_cycle:,}\n"
+            f"Engines: {len(engines)} | Concurrent: {self.config.concurrent_url_limit} URLs\n"
             f"Generating dorks and starting cycle..."
         )
         
@@ -2165,15 +2174,23 @@ async def cmd_dorkon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Store telegram context for progress messages
     p.set_telegram_context(context.bot, update.effective_chat.id)
     
-    dork_count = await asyncio.to_thread(lambda: len(p.generator.generate_all(p.config.max_dorks)))
+    total_dorks = await asyncio.to_thread(lambda: len(p.generator.generate_all()))
+    per_cycle = p.config.max_dorks
+    engines = p.config.engines
     await update.message.reply_text(
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "  ⚡ <b>Pipeline Starting</b> ⚡\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"\n"
-        f"  📋 Dorks: <b>{dork_count:,}</b>\n"
-        f"  🔍 Engines: <b>{len(p.config.engines)}</b>\n"
+        f"  📋 Total Dork Pool: <b>{total_dorks:,}</b>\n"
+        f"  🔄 Per Cycle: <b>{per_cycle:,}</b>\n"
+        f"  🔍 Engines: <b>{len(engines)}</b> ({', '.join(engines)})\n"
         f"  ⚡ Concurrent: <b>{p.config.concurrent_url_limit}</b> URLs\n"
+        f"  ⏱ Search Delay: <b>{p.config.search_delay_min}-{p.config.search_delay_max}s</b>\n"
+        f"  🔁 Cycle Delay: <b>{p.config.cycle_delay}s</b>\n"
+        f"  🛡 WAF: {'✅' if p.config.waf_detection_enabled else '❌'}"
+        f" | SQLi: {'✅' if p.config.sqli_enabled else '❌'}"
+        f" | Secrets: {'✅' if p.config.secret_extraction_enabled else '❌'}\n"
         f"\n"
         f"  Use /status for live stats\n"
         f"  Use /dorkoff to stop\n"
