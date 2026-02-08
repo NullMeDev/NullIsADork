@@ -1,0 +1,214 @@
+======================================================================
+  MedyDorker v3.15 — Hourly Export #1
+  Generated: 2026-02-07 19:31:18
+  Uptime: 1h 0m
+======================================================================
+
+--- SUMMARY ---
+Cycles completed: 1
+URLs scanned: 0
+Domains seen: 83
+SQLi vulns: 51
+Secrets found: 0
+Gateways found: 4
+Cards found: 0
+Cookies: 0 (B3: 0)
+
+--- VULNERABLE URLs (SQLi) ---
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://forum.kvinneguiden.no/topic/1842682-hvordan-fjerne-seg-selv-som-admin-p%C3%A5-fbside/
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://forum.kvinneguiden.no/topic/1842682-hvordan-fjerne-seg-selv-som-admin-p%C3%A5-fbside/
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://ntrs.nasa.gov/api/citations/20205009051/downloads/Modeling%20Laminar-to-Turbulent%20Transition%20in%20the%20NASA%20Ames%20Panel%20Test%20Facility%20Arcjet.pdf
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://ntrs.nasa.gov/api/citations/20240012627/downloads/20240012627_Idris%20-%20DASC%20Panel%20Autonomy%20Slides.pdf
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://blogs.loc.gov/thesignal/2014/07/preserving-and-curating-research-data-panel-preview-for-dp2014/
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.montgomerycountypa.gov/3616/Youth-Aid-Panel-Program
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.nga.gov/artworks/37635-deacon-saint-saint-anthony-abbot-right-panel
+  [Time-based header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://biblioteche.unipv.it/wp-content/uploads/2020/06/MOBILUS-Admin-Guide-2018.pdf
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://www.milamaurizi.it/en/author/admin/
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://biblioteche.unipv.it/wp-content/uploads/2020/06/MOBILUS-Admin-Guide-2018.pdf
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://www.milamaurizi.it/en/author/admin/
+  [Header injection (Client-IP)/mysql] param=Header:Client-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (True-Client-IP)/mysql] param=Header:True-Client-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (CF-Connecting-IP)/mysql] param=Header:CF-Connecting-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (X-Originating-IP)/mysql] param=Header:X-Originating-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (X-Custom-IP-Authorization)/mysql] param=Header:X-Custom-IP-Authorization
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (Referer)/mysql] param=Header:Referer
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (X-Real-IP)/mysql] param=Header:X-Real-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [Header injection (X-Client-IP)/mysql] param=Header:X-Client-IP
+    http://testphp.vulnweb.com/userinfo.php
+  [UNION ALL SELECT/mysql] param=pic
+    http://testphp.vulnweb.com/product.php?pic=4
+  [UNION ALL SELECT/mysql] param=artist
+    http://testphp.vulnweb.com/artists.php?artist=2
+  [POST param injection (POST)/mysql] param=POST:pass
+    http://testphp.vulnweb.com/userinfo.php
+  [POST param injection (POST)/mysql] param=POST:uname
+    http://testphp.vulnweb.com/userinfo.php
+  [UNION ALL SELECT/mysql] param=artist
+    http://testphp.vulnweb.com/artists.php?artist=1
+  [UNION ALL SELECT/mysql] param=artist
+    http://testphp.vulnweb.com/artists.php?artist=3
+  [UNION ALL SELECT/mysql] param=cat
+    http://testphp.vulnweb.com/listproducts.php?cat=2
+  [UNION ALL SELECT/mysql] param=pic
+    http://testphp.vulnweb.com/product.php?pic=2
+  [Boolean-based blind/mysql] param=artist
+    http://testphp.vulnweb.com/artists.php?artist=1
+  [UNION ALL SELECT/mysql] param=cat
+    http://testphp.vulnweb.com/listproducts.php?cat=1
+
+--- GATEWAYS ---
+  [?] https://www.opb.org/donate
+  [?] https://www.parkinson.org/donate
+  [?] https://icrd.org/donate/
+  [?] https://icrd.org/donate/
+
+--- SCANNED DOMAINS ---
+  admin.burgodistribuzioneprod.nohup.it
+  android.googlesource.com
+  aol-direct.univr.it
+  apkpure.com
+  avforum.no
+  barbarossasoftair.it
+  biblioteche.unipv.it
+  biomarintforum.no
+  blogs.loc.gov
+  booksadmin.nz
+  buildlogs.cdn.centos.org
+  central.owncloud.org
+  csrc.nist.gov
+  developer.unigine.com
+  dot.ca.gov
+  download.oracle.com
+  forum.babyverden.no
+  forum.kvinneguiden.no
+  forum.mensa.no
+  freak.no
+  ftp.funet.fi
+  gruppoinventa.it
+  help.count.it
+  jira.getxray.app
+  norgespartiet.no
+  ns3.ucc.edu.gh
+  nsf-gov-resources.nsf.gov
+  ntrs.nasa.gov
+  onskebarn.no
+  orizio.it
+  quickcuts.co.nz
+  redmine.pfsense.org
+  rotary.no
+  secure-computing.net
+  sjakkhistorie.no
+  testphp.vulnweb.com
+  traba.it
+  web.unicz.it
+  webdrift.org.ntnu.no
+  www.3rdarmadmin.co.nz
+  www.admin.v68.framesi.idspace.it
+  www.admin4tradies.co.nz
+  www.adminoutsourced.co.nz
+  www.als.org
+  www.alz.org
+  www.appbrain.com
+  www.bestfriends.org
+  www.bing.com
+  www.bizcommunity.com.gh
+  www.cancer.org
+  www.cars45.com.gh
+  www.census.gov
+  www.cybrary.it
+  www.deltics.co.nz
+  www.diabetes.org
+  www.diskusjon.no
+  www.epilepsy.com
+  www.fema.gov
+  www.finansavisen.no
+  www.heart.org
+  www.inde.nz
+  www.ladyadmin.co.nz
+  www.lungusa.org
+  www.marketbook.com.gh
+  www.messinaline.it
+  www.milamaurizi.it
+  www.montgomerycountypa.gov
+  www.morningsidechurchofchrist.org.nz
+  www.mrstradie.co.nz
+  www.nga.gov
+  www.parkinson.org
+  www.princegeorgescountymd.gov
+  www.saloneuropa.it
+  www.sandia.gov
+  www.skolelederforbundet.no
+  www.strictlysavvy.co.nz
+  www.sveis.no
+  www.theadminangels.co.nz
+  www.torai.it
+  www.transcendadmin.co.nz
+  www.ubuy.com.gh
+  www.virtualmelbas.co.nz
+  www.zipleaf.co.nz
+
+======================================================================
+  End of export — 212 lines
+======================================================================

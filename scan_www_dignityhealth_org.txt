@@ -1,0 +1,66 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔍 Full Domain Scan Report
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 Target: https://www.dignityhealth.org/donate
+📄 Pages Crawled: 1
+🔗 Param URLs Found: 0
+🔓 SQLi Endpoints Tested: 0
+
+🍪 Cookies (3):
+  ApplicationGatewayAffinity=978bda7a6be61dd523e0a6f6c3a3d42e
+  ApplicationGatewayAffinityCORS=978bda7a6be61dd523e0a6f6c3a3d42e
+  __cf_bm=cGPbNUUNYeZffNorR75gxFGM60Ep5OsOrvyEpeCZy3Y-1770498962-1.0.1
+
+  💡 Cookie Intelligence:
+  💡 Possible MD5 Hash
+   32-char hex value — likely a session hash or CSRF token. Try rainbow table lookup at crackstation.net.
+
+  💡 Possible MD5 Hash
+   32-char hex value — likely a session hash or CSRF token. Try rainbow table lookup at crackstation.net.
+
+  💡 Cloudflare Bot Management (Bot Detection)
+   Cloudflare bot management cookie. Site uses CF bot protection. May need to solve CF challenge. Use cloudscraper or FlareSolverr to bypass.
+   🧰 Tools: cloudscraper, FlareSolverr, cURL + browser cookies
+
+
+Platform: Magento
+Gateways: ❌ None detected
+AJAX: ❌ | Nonce: ❌ | Captcha: ✅ None
+
+🛡 Protection:
+  WAF: Cloudflare
+  💡 ☁️ Cloudflare WAF detected. Bypass tips: 1) Find origin IP via DNS history (SecurityTrails, Censys), 2) Check mail headers (MX records → origin), 3) Use cloudscraper or FlareSolverr, 4) Check for IP leak in /cdn-cgi/ headers.
+
+🔐 No secrets/keys found.
+
+🌐 Endpoints (2):
+  📝 Forms: 1
+  🔐 Login: 1
+
+  💡 Endpoint Intelligence:
+  📝 Form actions detected. Each form is a potential input vector. Test: 1) SQLi/XSS in every field, 2) File upload if present, 3) CSRF — can the form be submitted from another site?, 4) Hidden fields — modify with Burp before submitting.
+
+  🔐 Login pages found. Try: 1) Default creds (admin:admin, admin:password), 2) SQL injection in login form ('OR 1=1--), 3) Brute force with Hydra/Burp Intruder, 4) Check for user enumeration via different error messages.
+
+
+🔓 No testable endpoints found
+
+🔌 Open Ports (8):
+  🔴 2082 (cpanel)
+     💡 📊 cPanel — web hosting panel. Try default creds or reset via WHM.
+  🔴 2083 (cpanel-ssl)
+     💡 📊 cPanel SSL — same as 2082 but encrypted.
+  🔴 2086 (whm)
+     💡 📊 WHM (Web Host Manager) — root-level hosting access. Very high value if accessible.
+  🔴 2087 (whm-ssl)
+     💡 📊 WHM SSL — same as 2086 but encrypted.
+  🟡 8080 (http-proxy)
+     💡 🌐 HTTP-alt (Tomcat/Jetty/proxy). Check /manager/html for Tomcat Manager (tomcat:tomcat).
+  🟡 8443 (https-alt)
+     💡 🔒 HTTPS-alt — alternate HTTPS. Often admin panels or API endpoints.
+  🟢 80 (http)
+     💡 🌐 HTTP — web server. Check server header for software/version.
+  🟢 443 (https)
+     💡 🔒 HTTPS — check TLS cert for alt names (more domains!) with: openssl s_client -connect <host>:443
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

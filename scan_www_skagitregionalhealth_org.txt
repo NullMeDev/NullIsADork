@@ -1,0 +1,84 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔍 Full Domain Scan Report
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 Target: https://www.skagitregionalhealth.org/donate
+📄 Pages Crawled: 50
+🔗 Param URLs Found: 72
+🔓 SQLi Endpoints Tested: 20
+
+🍪 Cookies (11):
+  ASP.NET_SessionId=qbws5fd0vfdatbp5sbxan1le 🔐
+  AWSALB=c2OSiUIu1XOifLMxXymqyfs96VMChC9Q1KnVWRTXma8SoV1+OhfUKRg3oeep
+  AWSALBCORS=c2OSiUIu1XOifLMxXymqyfs96VMChC9Q1KnVWRTXma8SoV1+OhfUKRg3oeep
+  __cf_bm=iMCAC6amPtzwebEdvs39ycwsqarl8UxDHkpr_KHEVSI-1770501494.72814
+  _epd=eyJmYmlkIjoiNDE5MDU2NjEyMDkyMjUzIiwiX2ZicCI6bnVsbCwiX2ZiYyI6
+  _ga=GA1.1.604640435.1770501510
+  _ga_XNMFZD4JX5=GS2.1.s1770501510$o1$g0$t1770501510$j60$l0$h0
+  calltrk_landing=https%3A%2F%2Fwww.skagitregionalhealth.org%2F
+  calltrk_referrer=direct
+  calltrk_session_id=50faaa99-7634-4450-b039-f1e19c7ce402 🔐
+  cf_clearance=zfwX_n0a_6_wSekmMsXNX5ydVK_OuBdrtEVbrDOa2Ww-1770501507-1.2.1
+
+  💡 Cookie Intelligence:
+  💡 ASP.NET / IIS (Session)
+   ASP.NET session cookie. Paste into browser cookie editor to hijack. Check for ViewState deserialization vulns alongside this. Machine key leak = full session forge.
+   🧰 Tools: EditThisCookie, ysoserial.net, Burp ViewState Editor
+
+  💡 AWS ALB (Application Load Balancer) (Load Balancer)
+   AWS ALB sticky session cookie. Reveals AWS infrastructure. Try accessing the ALB domain directly to find the origin. Check for /server-status, /healthcheck, or custom health endpoints.
+
+  💡 AWS ALB (Application Load Balancer) (Load Balancer)
+   AWS ALB sticky session cookie. Reveals AWS infrastructure. Try accessing the ALB domain directly to find the origin. Check for /server-status, /healthcheck, or custom health endpoints.
+
+  💡 Cloudflare Bot Management (Bot Detection)
+   Cloudflare bot management cookie. Site uses CF bot protection. May need to solve CF challenge. Use cloudscraper or FlareSolverr to bypass.
+   🧰 Tools: cloudscraper, FlareSolverr, cURL + browser cookies
+
+  💡 JWT Token (Auth)
+   This looks like a JWT (base64-encoded JSON). Decode at jwt.io to see payload claims. Try alg:none attack, or brute-force the signing key with jwt_tool.
+
+  💡 Google Analytics (Tracking)
+   Google Analytics cookie. Contains a client ID that tracks the user. Not security-relevant unless combined with other user data.
+
+  💡 Google Analytics (Tracking)
+   Google Analytics cookie. Contains a client ID that tracks the user. Not security-relevant unless combined with other user data.
+
+  💡 Cloudflare (Challenge Passed)
+   Cloudflare challenge clearance cookie. Importing this + __cf_bm into your requests will bypass Cloudflare for ~30 minutes. Time-sensitive!
+   🧰 Tools: EditThisCookie, cloudscraper
+
+
+Gateways: ❌ None detected
+AJAX: ❌ | Nonce: ❌ | Captcha: ✅ None
+
+🛡 Protection:
+  WAF: Cloudflare
+  💡 ☁️ Cloudflare WAF detected. Bypass tips: 1) Find origin IP via DNS history (SecurityTrails, Censys), 2) Check mail headers (MX records → origin), 3) Use cloudscraper or FlareSolverr, 4) Check for IP leak in /cdn-cgi/ headers.
+
+🔐 Other Secrets (4):
+  GCP API Key: AIzaSyAgzyz66QBzEOw9rAMTwG5KNeUGVM_nRAg
+  Twilio Account SID: ACAD0521BF0B445F7298B94559801D6057
+  Twilio Account SID: AC7291C4010A4E2FBA5227D09CE4CEDAD1
+  Twilio Account SID: ACE8C969B8307D46747B527F90E516A80C
+
+🔓 Tested 20 endpoints — none injectable
+
+🔌 Open Ports (8):
+  🔴 2082 (cpanel)
+     💡 📊 cPanel — web hosting panel. Try default creds or reset via WHM.
+  🔴 2083 (cpanel-ssl)
+     💡 📊 cPanel SSL — same as 2082 but encrypted.
+  🔴 2086 (whm)
+     💡 📊 WHM (Web Host Manager) — root-level hosting access. Very high value if accessible.
+  🔴 2087 (whm-ssl)
+     💡 📊 WHM SSL — same as 2086 but encrypted.
+  🟡 8080 (http)
+     💡 🌐 HTTP-alt (Tomcat/Jetty/proxy). Check /manager/html for Tomcat Manager (tomcat:tomcat).
+  🟡 8443 (https-alt)
+     💡 🔒 HTTPS-alt — alternate HTTPS. Often admin panels or API endpoints.
+  🟢 80 (http)
+     💡 🌐 HTTP — web server. Check server header for software/version.
+  🟢 443 (https)
+     💡 🔒 HTTPS — check TLS cert for alt names (more domains!) with: openssl s_client -connect <host>:443
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

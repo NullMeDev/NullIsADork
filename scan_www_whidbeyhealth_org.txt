@@ -1,0 +1,63 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔍 Full Domain Scan Report
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 Target: https://www.whidbeyhealth.org/donate
+📄 Pages Crawled: 2
+🔗 Param URLs Found: 0
+🔓 SQLi Endpoints Tested: 0
+
+🍪 Cookies (1):
+  __cf_bm=g.oVppiTC2BEQ2LrlDLqPyqr3PJbEJQIrczm7iSUUmI-1770498601-1.0.1
+
+  💡 Cookie Intelligence:
+  💡 Cloudflare Bot Management (Bot Detection)
+   Cloudflare bot management cookie. Site uses CF bot protection. May need to solve CF challenge. Use cloudscraper or FlareSolverr to bypass.
+   🧰 Tools: cloudscraper, FlareSolverr, cURL + browser cookies
+
+
+Platform: WordPress
+Gateways: ❌ None detected
+AJAX: ✅ | Nonce: ❌ | Captcha: ✅ None
+
+🛡 Protection:
+  WAF: Cloudflare | CDN: Fastly | CMS: WordPress
+  💡 ☁️ Cloudflare WAF detected. Bypass tips: 1) Find origin IP via DNS history (SecurityTrails, Censys), 2) Check mail headers (MX records → origin), 3) Use cloudscraper or FlareSolverr, 4) Check for IP leak in /cdn-cgi/ headers.
+📦 WordPress CMS. Quick checks: /wp-json/wp/v2/users (user enum), /xmlrpc.php (brute force), /wp-content/debug.log (info leak), /wp-config.php.bak or /wp-config.php~ (backup leak). Run: wpscan --url  --enumerate u,p,t
+
+🔐 Other Secrets (1):
+  WP Nonce: 239146f239
+
+🌐 Endpoints (12):
+  ⚡ AJAX: 1
+  🔎 Search: 1
+  ❓ Params: 10
+
+  💡 Endpoint Intelligence:
+  ⚡ AJAX endpoints detected. These often have weaker auth than page endpoints. Test: 1) Direct access without session, 2) Parameter tampering, 3) Mass assignment (add extra JSON fields), 4) Check for verbose error responses.
+
+  🔎 Search endpoint. Test: 1) SQL injection in search query, 2) XSS via search term reflection, 3) LDAP injection if corporate directory search, 4) Server-side template injection (SSTI) via {{7*7}}.
+
+  ❓ Parameterized URLs — every parameter is a potential injection point. Test each for: SQLi, XSS, path traversal (../../etc/passwd), SSRF, open redirect, and command injection.
+
+
+🔓 No testable endpoints found
+
+🔌 Open Ports (8):
+  🔴 2082 (cpanel)
+     💡 📊 cPanel — web hosting panel. Try default creds or reset via WHM.
+  🔴 2083 (cpanel-ssl)
+     💡 📊 cPanel SSL — same as 2082 but encrypted.
+  🔴 2086 (whm)
+     💡 📊 WHM (Web Host Manager) — root-level hosting access. Very high value if accessible.
+  🔴 2087 (whm-ssl)
+     💡 📊 WHM SSL — same as 2086 but encrypted.
+  🟡 8080 (http)
+     💡 🌐 HTTP-alt (Tomcat/Jetty/proxy). Check /manager/html for Tomcat Manager (tomcat:tomcat).
+  🟡 8443 (https-alt)
+     💡 🔒 HTTPS-alt — alternate HTTPS. Often admin panels or API endpoints.
+  🟢 80 (http)
+     💡 🌐 HTTP — web server. Check server header for software/version.
+  🟢 443 (https)
+     💡 🔒 HTTPS — check TLS cert for alt names (more domains!) with: openssl s_client -connect <host>:443
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -155,6 +155,51 @@ class DorkerDB:
             CREATE INDEX IF NOT EXISTS idx_gateway_type ON gateway_keys(key_type);
             CREATE INDEX IF NOT EXISTS idx_cookies_domain ON cookies(domain);
             CREATE INDEX IF NOT EXISTS idx_b3_url ON b3_cookies(url);
+            
+            CREATE TABLE IF NOT EXISTS port_scans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                domain TEXT,
+                ip TEXT,
+                port INTEGER,
+                service TEXT,
+                banner TEXT,
+                version TEXT,
+                risk TEXT,
+                notes TEXT,
+                found_at REAL
+            );
+            
+            CREATE TABLE IF NOT EXISTS oob_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                parameter TEXT,
+                dbms TEXT,
+                channel TEXT,
+                extraction TEXT,
+                callbacks INTEGER DEFAULT 0,
+                payloads_sent INTEGER DEFAULT 0,
+                found_at REAL,
+                UNIQUE(url, parameter, dbms)
+            );
+            
+            CREATE TABLE IF NOT EXISTS key_validations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_type TEXT NOT NULL,
+                key_hash TEXT NOT NULL,
+                is_live INTEGER DEFAULT 0,
+                confidence REAL,
+                risk_level TEXT,
+                account_info TEXT,
+                permissions TEXT,
+                source_url TEXT,
+                found_at REAL,
+                UNIQUE(key_type, key_hash)
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_port_domain ON port_scans(domain);
+            CREATE INDEX IF NOT EXISTS idx_oob_url ON oob_results(url);
+            CREATE INDEX IF NOT EXISTS idx_key_type ON key_validations(key_type);
         """)
         conn.commit()
         logger.info(f"Database initialized at {self.db_path}")
@@ -480,6 +525,26 @@ class DorkerDB:
         """).fetchall()
         return [dict(r) for r in rows]
 
+    def get_gateway_cookies(self) -> List[Dict]:
+        """Get cookies identified as payment gateway cookies."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM cookies 
+            WHERE cookie_type LIKE 'gateway:%' 
+            ORDER BY found_at DESC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_commerce_cookies(self) -> List[Dict]:
+        """Get cookies identified as commerce/checkout cookies."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM cookies 
+            WHERE cookie_type = 'commerce' 
+            ORDER BY found_at DESC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
     def get_cookie_count(self) -> int:
         conn = self._get_conn()
         row = conn.execute("SELECT COUNT(*) as cnt FROM cookies").fetchone()
@@ -546,6 +611,88 @@ class DorkerDB:
         if imported > 0:
             logger.info(f"Imported {imported} records from JSON files")
         return imported
+
+    # ═══════════════ PORT SCANS (v3.10) ═══════════════
+
+    def add_port_scan(self, url: str, domain: str, ip: str, port: int,
+                      service: str = "", banner: str = "", version: str = "",
+                      risk: str = "", notes: str = ""):
+        conn = self._get_conn()
+        try:
+            conn.execute("""
+                INSERT INTO port_scans 
+                (url, domain, ip, port, service, banner, version, risk, notes, found_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (url, domain, ip, port, service, banner, version, risk, notes, time.time()))
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"DB insert port scan error: {e}")
+
+    def get_port_scans(self, domain: str = None, limit: int = 100) -> List[Dict]:
+        conn = self._get_conn()
+        if domain:
+            rows = conn.execute(
+                "SELECT * FROM port_scans WHERE domain = ? ORDER BY found_at DESC LIMIT ?",
+                (domain, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM port_scans ORDER BY found_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ═══════════════ OOB RESULTS (v3.11) ═══════════════
+
+    def add_oob_result(self, result: Dict):
+        conn = self._get_conn()
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO oob_results 
+                (url, parameter, dbms, channel, extraction, callbacks, payloads_sent, found_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                result.get("url", ""), result.get("parameter", ""),
+                result.get("dbms", ""), result.get("channel", ""),
+                json.dumps(result.get("extraction", {})),
+                result.get("callbacks", 0), result.get("payloads_sent", 0),
+                time.time(),
+            ))
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"DB insert OOB error: {e}")
+
+    # ═══════════════ KEY VALIDATIONS (v3.13) ═══════════════
+
+    def add_key_validation(self, validation: Dict):
+        conn = self._get_conn()
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO key_validations
+                (key_type, key_hash, is_live, confidence, risk_level,
+                 account_info, permissions, source_url, found_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                validation.get("key_type", ""),
+                validation.get("key_hash", ""),
+                1 if validation.get("is_live") else 0,
+                validation.get("confidence", 0),
+                validation.get("risk_level", ""),
+                validation.get("account_info", "{}"),
+                validation.get("permissions", "[]"),
+                validation.get("source_url", ""),
+                time.time(),
+            ))
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"DB insert key validation error: {e}")
+
+    def get_live_keys(self, limit: int = 100) -> List[Dict]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM key_validations WHERE is_live = 1 ORDER BY found_at DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # ═══════════════ STATS ═══════════════
 

@@ -1,0 +1,100 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔍 Full Domain Scan Report
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 Target: https://www.islandhealth.org/donate
+📄 Pages Crawled: 38
+🔗 Param URLs Found: 3
+🔓 SQLi Endpoints Tested: 3
+
+🍪 Cookies (1):
+  __cf_bm=jSE2PF7cgLDEF7asdYUpKeZbvBa52yTOwWlMjiDzJwY-1770498628-1.0.1
+
+  💡 Cookie Intelligence:
+  💡 Cloudflare Bot Management (Bot Detection)
+   Cloudflare bot management cookie. Site uses CF bot protection. May need to solve CF challenge. Use cloudscraper or FlareSolverr to bypass.
+   🧰 Tools: cloudscraper, FlareSolverr, cURL + browser cookies
+
+
+Platform: WordPress
+Gateways: Stripe, Stripe (UPE/embedded)
+Form Type: Ninja Forms
+AJAX: ✅ | Nonce: ✅ | Captcha: ✅ None
+
+🛡 Protection:
+  WAF: Cloudflare | CDN: Fastly | CMS: WordPress
+  💡 ☁️ Cloudflare WAF detected. Bypass tips: 1) Find origin IP via DNS history (SecurityTrails, Censys), 2) Check mail headers (MX records → origin), 3) Use cloudscraper or FlareSolverr, 4) Check for IP leak in /cdn-cgi/ headers.
+📦 WordPress CMS. Quick checks: /wp-json/wp/v2/users (user enum), /xmlrpc.php (brute force), /wp-content/debug.log (info leak), /wp-config.php.bak or /wp-config.php~ (backup leak). Run: wpscan --url  --enumerate u,p,t
+
+🔑 Gateway Keys (3):
+  Stripe Publishable Key
+  pk_live_51KK5EXBCvKkpRvjVXI4DKkDkebi5qXAOL2M65Biggcy7npEq9okA7kGGRRlozL4bmvSmWAj
+  📍 https://www.islandhealth.org/checkout/
+  💡 Severity: LOW
+   💳 Stripe publishable key (pk_live_). This is semi-public but confirms Stripe integration. Search the same codebase for the matching SECRET key (sk_live_). The publishable key can create payment tokens — minimal risk alone.
+
+  Checkout.com PK
+  pk_live_51KK5EXBCvKkpRvjVXI4DKkDkebi5qXAOL2M65Biggcy7npEq9okA7kGGRRl
+  📍 https://www.islandhealth.org/checkout/
+  💡 Severity: LOW
+   💳 Stripe publishable key (pk_live_). This is semi-public but confirms Stripe integration. Search the same codebase for the matching SECRET key (sk_live_). The publishable key can create payment tokens — minimal risk alone.
+
+  WC Stripe Account
+  ISLANDHEALTH.org
+  📍 https://www.islandhealth.org/checkout/
+
+🔐 Other Secrets (14):
+  WP Nonce: bc8d76035a
+  WC AJAX URL: \/?wc-ajax=%%endpoint%%
+  WP Nonce: 724ba5b16c
+  WP Nonce: 1882b6e7f6
+  WP Nonce: e1c4ec1f9e
+  WP Nonce: decaba15d8
+  WP Nonce: d2e8ff06fd
+  WP Nonce: 8b36088e5c
+  WP Nonce: 819a8ee027
+  WP Nonce: d80f6dc4f9
+  WP Nonce: 5c834db8e6
+  WP Nonce: 03b9be16fd
+  WP Users API (Exposed): https://www.islandhealth.org/wp-json/wp/v2/users
+  WP Users API (Exposed): https://www.islandhealth.org/?rest_route=/wp/v2/users
+
+🌐 Endpoints (23):
+  ⚡ AJAX: 5
+  🔗 REST: 14
+  📝 Forms: 2
+  🔎 Search: 1
+  📜 JS: 1
+
+  💡 Endpoint Intelligence:
+  ⚡ AJAX endpoints detected. These often have weaker auth than page endpoints. Test: 1) Direct access without session, 2) Parameter tampering, 3) Mass assignment (add extra JSON fields), 4) Check for verbose error responses.
+
+  🔗 REST API endpoints found. Test: 1) Try without auth, 2) Check /api/docs, /swagger.json, /openapi.json for API docs, 3) Test IDOR by changing resource IDs, 4) Try method tampering (GET→PUT/DELETE).
+
+  📝 Form actions detected. Each form is a potential input vector. Test: 1) SQLi/XSS in every field, 2) File upload if present, 3) CSRF — can the form be submitted from another site?, 4) Hidden fields — modify with Burp before submitting.
+
+  🔎 Search endpoint. Test: 1) SQL injection in search query, 2) XSS via search term reflection, 3) LDAP injection if corporate directory search, 4) Server-side template injection (SSTI) via {{7*7}}.
+
+  📜 Interesting JavaScript files! JS files often leak: API keys, internal endpoints, commented-out code, debug flags. Tools: LinkFinder, JSparser, or manual regex for URLs/secrets.
+
+
+🔓 Tested 3 endpoints — none injectable
+
+🔌 Open Ports (8):
+  🔴 2082 (cpanel)
+     💡 📊 cPanel — web hosting panel. Try default creds or reset via WHM.
+  🔴 2083 (cpanel-ssl)
+     💡 📊 cPanel SSL — same as 2082 but encrypted.
+  🔴 2086 (whm)
+     💡 📊 WHM (Web Host Manager) — root-level hosting access. Very high value if accessible.
+  🔴 2087 (whm-ssl)
+     💡 📊 WHM SSL — same as 2086 but encrypted.
+  🟡 8080 (http)
+     💡 🌐 HTTP-alt (Tomcat/Jetty/proxy). Check /manager/html for Tomcat Manager (tomcat:tomcat).
+  🟡 8443 (https-alt)
+     💡 🔒 HTTPS-alt — alternate HTTPS. Often admin panels or API endpoints.
+  🟢 80 (http)
+     💡 🌐 HTTP — web server. Check server header for software/version.
+  🟢 443 (https)
+     💡 🔒 HTTPS — check TLS cert for alt names (more domains!) with: openssl s_client -connect <host>:443
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

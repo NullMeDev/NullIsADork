@@ -38,6 +38,9 @@ class ReporterStats:
     sqli_vulns_found: int = 0
     data_dumps: int = 0
     secrets_found: int = 0
+    b3_cookies_found: int = 0
+    gateway_cookies_found: int = 0
+    commerce_cookies_found: int = 0
     urls_scanned: int = 0
     dorks_processed: int = 0
     messages_sent: int = 0
@@ -345,7 +348,7 @@ class TelegramReporter:
         minutes = int((uptime.total_seconds() % 3600) // 60)
         
         text = (
-            f"📊 <b>MedyDorker v3.0 STATUS</b> 📊\n"
+            f"📊 <b>MedyDorker v3.5 STATUS</b> 📊\n"
             f"\n"
             f"⏱ <b>Uptime:</b> {hours}h {minutes}m\n"
             f"🔍 <b>URLs Scanned:</b> {self.stats.urls_scanned}\n"
@@ -357,6 +360,11 @@ class TelegramReporter:
             f"  🔓 SQLi Vulns: {self.stats.sqli_vulns_found}\n"
             f"  📦 Data Dumps: {self.stats.data_dumps}\n"
             f"  🔐 Secrets: {self.stats.secrets_found}\n"
+            f"\n"
+            f"<b>Cookie Hunt:</b>\n"
+            f"  🔵 B3 Cookies: {self.stats.b3_cookies_found}\n"
+            f"  🏦 Gateway Cookies: {self.stats.gateway_cookies_found}\n"
+            f"  🛒 Commerce Cookies: {self.stats.commerce_cookies_found}\n"
             f"\n"
             f"📨 <b>Messages Sent:</b> {self.stats.messages_sent}\n"
             f"❌ <b>Errors:</b> {self.stats.errors}\n"
@@ -447,6 +455,9 @@ class TelegramReporter:
             "sqli_vulns_found": self.stats.sqli_vulns_found,
             "data_dumps": self.stats.data_dumps,
             "secrets_found": self.stats.secrets_found,
+            "b3_cookies_found": self.stats.b3_cookies_found,
+            "gateway_cookies_found": self.stats.gateway_cookies_found,
+            "commerce_cookies_found": self.stats.commerce_cookies_found,
             "urls_scanned": self.stats.urls_scanned,
             "dorks_processed": self.stats.dorks_processed,
             "messages_sent": self.stats.messages_sent,

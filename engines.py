@@ -14,6 +14,27 @@ import aiohttp
 from loguru import logger
 from collections import defaultdict
 
+# Captcha solver integration (Phase 1)
+try:
+    from captcha_solver import CaptchaSolver, SitekeyExtractor, CaptchaType
+    _HAS_CAPTCHA_SOLVER = True
+except ImportError:
+    _HAS_CAPTCHA_SOLVER = False
+
+# Proxy manager integration (Phase 2)
+try:
+    from proxy_manager import ProxyManager, ProxyInfo
+    _HAS_PROXY_MANAGER = True
+except ImportError:
+    _HAS_PROXY_MANAGER = False
+
+# Headless browser integration (Phase 3 — search resilience)
+try:
+    from browser_engine import BrowserManager, BrowserSearchEngine
+    _HAS_BROWSER = True
+except ImportError:
+    _HAS_BROWSER = False
+
 
 # ────────────────────────── ENGINE HEALTH TRACKER ──────────────────────────
 
@@ -136,9 +157,19 @@ class AdaptiveRateLimiter:
 # ────────────────────────── RATE LIMIT EXCEPTION ──────────────────────────
 
 class RateLimitError(Exception):
-    def __init__(self, engine: str):
+    def __init__(self, engine: str, html: str = "", url: str = ""):
         self.engine = engine
+        self.html = html      # Page body (for captcha detection)
+        self.url = url        # Request URL (for captcha solving)
         super().__init__(f"{engine} rate-limited")
+
+
+class CaptchaDetectedError(RateLimitError):
+    """Raised when a solvable captcha is detected (subclass of RateLimitError)."""
+    def __init__(self, engine: str, html: str = "", url: str = "",
+                 captcha_info: Optional[Dict] = None):
+        super().__init__(engine, html, url)
+        self.captcha_info = captcha_info or {}
 
 
 # ────────────────────────── SEARCH ENGINE BASE ──────────────────────────
@@ -188,6 +219,24 @@ class SearchEngine:
                 return True
         return False
 
+    def _detect_captcha_in_response(self, status: int, body: str, url: str):
+        """Check if response contains a solvable captcha. Raises CaptchaDetectedError if so,
+        RateLimitError if rate-limited but no solvable captcha, or does nothing if OK."""
+        if not self._is_rate_limited(status, body):
+            return  # Not rate limited, proceed normally
+
+        # Check if we can detect a solvable captcha
+        if _HAS_CAPTCHA_SOLVER:
+            captcha_info = SitekeyExtractor.detect(body)
+            if captcha_info and captcha_info.get("sitekey"):
+                raise CaptchaDetectedError(
+                    engine=self.name, html=body, url=url,
+                    captcha_info=captcha_info
+                )
+
+        # Generic rate limit (no solvable captcha found)
+        raise RateLimitError(self.name, html=body, url=url)
+
 
 # ────────────────────────── ENGINE IMPLEMENTATIONS ──────────────────────────
 
@@ -206,8 +255,7 @@ class DuckDuckGoSearch(SearchEngine):
                     if resp.status != 200:
                         return []
                     html = await resp.text()
-                    if self._is_rate_limited(resp.status, html):
-                        raise RateLimitError(self.name)
+                    self._detect_captcha_in_response(resp.status, html, url)
                     soup = BeautifulSoup(html, "html.parser")
                     results = []
                     for link in soup.find_all("a", class_="result__a"):
@@ -246,8 +294,7 @@ class BingSearch(SearchEngine):
                     if resp.status != 200:
                         return []
                     html = await resp.text()
-                    if self._is_rate_limited(resp.status, html):
-                        raise RateLimitError(self.name)
+                    self._detect_captcha_in_response(resp.status, html, url)
                     soup = BeautifulSoup(html, "html.parser")
                     results = []
                     for li in soup.find_all("li", class_="b_algo"):
@@ -288,8 +335,7 @@ class StartpageSearch(SearchEngine):
                     if resp.status != 200:
                         return []
                     html = await resp.text()
-                    if self._is_rate_limited(resp.status, html):
-                        raise RateLimitError(self.name)
+                    self._detect_captcha_in_response(resp.status, html, "https://www.startpage.com/sp/search")
                     soup = BeautifulSoup(html, "html.parser")
                     results = []
                     for div in soup.find_all("div", class_="w-gl__result"):
@@ -332,8 +378,7 @@ class YahooSearch(SearchEngine):
                     if resp.status != 200:
                         return []
                     html = await resp.text()
-                    if self._is_rate_limited(resp.status, html):
-                        raise RateLimitError(self.name)
+                    self._detect_captcha_in_response(resp.status, html, url)
                     soup = BeautifulSoup(html, "html.parser")
                     results = []
                     for div in soup.find_all("div", class_="compTitle"):
@@ -373,8 +418,7 @@ class EcosiaSearch(SearchEngine):
                     if resp.status != 200:
                         return []
                     html = await resp.text()
-                    if self._is_rate_limited(resp.status, html):
-                        raise RateLimitError(self.name)
+                    self._detect_captcha_in_response(resp.status, html, url)
                     soup = BeautifulSoup(html, "html.parser")
                     results = []
                     for a in soup.find_all("a", class_="result__link"):
@@ -453,8 +497,7 @@ class BraveSearch(SearchEngine):
                     if resp.status != 200:
                         return []
                     html = await resp.text()
-                    if self._is_rate_limited(resp.status, html):
-                        raise RateLimitError(self.name)
+                    self._detect_captcha_in_response(resp.status, html, url)
                     soup = BeautifulSoup(html, "html.parser")
                     results = []
                     for div in soup.find_all("div", class_="snippet"):
@@ -497,8 +540,7 @@ class AOLSearch(SearchEngine):
                     if resp.status != 200:
                         return []
                     html = await resp.text()
-                    if self._is_rate_limited(resp.status, html):
-                        raise RateLimitError(self.name)
+                    self._detect_captcha_in_response(resp.status, html, url)
                     soup = BeautifulSoup(html, "html.parser")
                     results = []
                     for div in soup.find_all("div", class_="algo-sr"):
@@ -520,9 +562,184 @@ class AOLSearch(SearchEngine):
             return []
 
 
+# ────────────────────────── FIRECRAWL ENGINE ──────────────────────────
+
+class FirecrawlSearch(SearchEngine):
+    """Firecrawl-powered search — no captchas, no rate limits, JS rendering built-in."""
+    name = "firecrawl"
+
+    def __init__(self, api_key: str = "", search_limit: int = 20,
+                 proxy: Optional[str] = None, session: aiohttp.ClientSession = None,
+                 as_fallback: bool = False):
+        super().__init__(proxy=proxy, session=session)
+        self.api_key = api_key
+        self.search_limit = search_limit
+        self.as_fallback = as_fallback
+        self._fc = None
+
+    def _get_firecrawl(self):
+        if self._fc is None:
+            try:
+                from firecrawl import FirecrawlApp
+                self._fc = FirecrawlApp(api_key=self.api_key)
+            except ImportError:
+                logger.error("[Firecrawl] firecrawl-py not installed: pip install firecrawl-py")
+                return None
+            except Exception as e:
+                logger.error(f"[Firecrawl] Init error: {e}")
+                return None
+        return self._fc
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        """Search via Firecrawl API. Page param ignored — FC handles internally."""
+        if page > 0:
+            return []  # Firecrawl doesn't paginate like HTTP engines
+
+        fc = self._get_firecrawl()
+        if not fc:
+            return []
+
+        try:
+            limit = min(num_results, self.search_limit)
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: fc.search(query=query, limit=limit)
+            )
+
+            urls = []
+            # v2 API: result.web is a list of SearchResultWeb objects
+            web_results = []
+            if result and hasattr(result, 'web') and result.web:
+                web_results = result.web
+            elif result and hasattr(result, 'data') and result.data:
+                # Fallback for potential older API
+                web_results = result.data
+
+            for item in web_results:
+                url = None
+                if hasattr(item, 'url'):
+                    url = item.url
+                elif isinstance(item, dict):
+                    url = item.get("url", "")
+                if url and url.startswith("http"):
+                    urls.append(url)
+                    if len(urls) >= num_results:
+                        break
+
+            logger.info(f"[Firecrawl] Search returned {len(urls)} URLs for: {query[:60]}")
+            return urls
+
+        except Exception as e:
+            logger.error(f"[Firecrawl] Search error: {e}")
+            return []
+
+    async def scrape(self, url: str, formats: List[str] = None) -> Optional[Dict]:
+        """Scrape a page via Firecrawl — returns markdown, HTML, links."""
+        fc = self._get_firecrawl()
+        if not fc:
+            return None
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: fc.scrape(url, formats=formats or ["markdown", "html", "links"])
+            )
+            if result:
+                # v2 API: result is a Document (pydantic model)
+                doc = {}
+                if hasattr(result, 'model_dump'):
+                    doc = result.model_dump()
+                elif hasattr(result, '__dict__'):
+                    doc = vars(result)
+                elif isinstance(result, dict):
+                    doc = result
+                # Flatten metadata.url into top-level
+                meta = doc.get("metadata")
+                if meta:
+                    if hasattr(meta, 'url'):
+                        doc["url"] = meta.url
+                    elif isinstance(meta, dict):
+                        doc["url"] = meta.get("url", "") or meta.get("source_url", "")
+                return doc
+        except Exception as e:
+            logger.error(f"[Firecrawl] Scrape error for {url}: {e}")
+        return None
+
+    async def crawl(self, url: str, limit: int = 100) -> List[Dict]:
+        """Crawl a domain via Firecrawl — returns all pages with content."""
+        fc = self._get_firecrawl()
+        if not fc:
+            return []
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: fc.crawl(url=url, limit=limit)
+            )
+            pages = []
+            if result and hasattr(result, 'data') and result.data:
+                for pg in result.data:
+                    page_dict = {}
+                    if hasattr(pg, 'model_dump'):
+                        page_dict = pg.model_dump()
+                    elif hasattr(pg, '__dict__'):
+                        page_dict = vars(pg)
+                    elif isinstance(pg, dict):
+                        page_dict = pg
+                    if page_dict:
+                        # Normalize metadata for consumer code
+                        meta = page_dict.get("metadata")
+                        if meta:
+                            if hasattr(meta, 'model_dump'):
+                                page_dict["metadata"] = meta.model_dump()
+                            elif hasattr(meta, '__dict__') and not isinstance(meta, dict):
+                                page_dict["metadata"] = vars(meta)
+                        pages.append(page_dict)
+
+            logger.info(f"[Firecrawl] Crawl returned {len(pages)} pages for: {url}")
+            return pages
+
+        except Exception as e:
+            logger.error(f"[Firecrawl] Crawl error for {url}: {e}")
+        return []
+
+    async def map_urls(self, url: str, limit: int = 500) -> List[str]:
+        """Map a domain — discover all URLs without scraping content."""
+        fc = self._get_firecrawl()
+        if not fc:
+            return []
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: fc.map(url=url, limit=limit)
+            )
+            urls = []
+            if result and hasattr(result, 'links') and result.links:
+                # v2 API: result.links is list of LinkResult(url, title, description)
+                for item in result.links:
+                    u = None
+                    if hasattr(item, 'url'):
+                        u = item.url
+                    elif isinstance(item, str):
+                        u = item
+                    elif isinstance(item, dict):
+                        u = item.get("url", "")
+                    if u and u.startswith("http"):
+                        urls.append(u)
+
+            logger.info(f"[Firecrawl] Map found {len(urls)} URLs for: {url}")
+            return urls
+
+        except Exception as e:
+            logger.error(f"[Firecrawl] Map error for {url}: {e}")
+        return []
+
+
 # ────────────────────────── ENGINE REGISTRY ──────────────────────────
 
 ENGINE_REGISTRY = {
+    "firecrawl": FirecrawlSearch,
     "duckduckgo": DuckDuckGoSearch,
     "bing": BingSearch,
     "startpage": StartpageSearch,
@@ -551,6 +768,22 @@ class MultiSearch:
         self.rate_limiter = AdaptiveRateLimiter(base_min=3, base_max=8)
         self.dork_scorer = DorkScorer()
         self._session: Optional[aiohttp.ClientSession] = None
+        
+        # Firecrawl config (set by pipeline after init)
+        self.firecrawl_api_key: str = ""
+        self.firecrawl_search_limit: int = 20
+        self.firecrawl_as_fallback: bool = False
+        
+        # Captcha solver (set by pipeline after init)
+        self.captcha_solver = None  # CaptchaSolver instance
+        
+        # Proxy manager (Phase 2 — set by pipeline after init)
+        self.proxy_manager: Optional['ProxyManager'] = None  # Smart proxy rotation
+        
+        # Headless browser (Phase 3 — search resilience, set by pipeline after init)
+        self.browser_manager: Optional['BrowserManager'] = None
+        self.browser_fallback_enabled: bool = False
+        self.browser_engines: List[str] = ["google", "bing", "duckduckgo", "startpage"]
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -563,6 +796,8 @@ class MultiSearch:
     async def close(self):
         if self._session and not self._session.closed:
             await self._session.close()
+        if self.browser_manager:
+            await self.browser_manager.stop()
 
     def _get_proxy(self) -> Optional[str]:
         if not self.proxies:
@@ -573,15 +808,31 @@ class MultiSearch:
         if self.proxies:
             self.proxy_index = (self.proxy_index + 1) % len(self.proxies)
 
+    async def _get_smart_proxy(self, domain: str = "") -> Tuple[Optional[str], Optional['ProxyInfo']]:
+        """Get proxy URL from ProxyManager if available, else fallback to legacy list.
+        Returns (proxy_url_string, proxy_info_object)."""
+        if self.proxy_manager and self.proxy_manager.has_proxies:
+            proxy_info = await self.proxy_manager.get_proxy(domain)
+            if proxy_info:
+                return proxy_info.url, proxy_info
+        # Fallback to legacy proxy list
+        url = self._get_proxy()
+        return url, None
+
     async def search(self, query: str, num_results: int = 10) -> List[str]:
-        proxy = self._get_proxy()
         self.search_count += 1
-        if self.search_count % 5 == 0:
-            self._rotate_proxy()
+        
+        # Smart proxy selection (ProxyManager → legacy fallback → None)
+        proxy_url, proxy_info = await self._get_smart_proxy()
+        if not proxy_url:
+            # Legacy fallback
+            proxy_url = self._get_proxy()
+            if self.search_count % 5 == 0:
+                self._rotate_proxy()
 
         session = await self._get_session()
 
-        for attempt, use_proxy in enumerate([proxy, None] if proxy else [None]):
+        for attempt, use_proxy in enumerate([proxy_url, None] if proxy_url else [None]):
             if attempt > 0:
                 logger.info("SEARCH | Retrying without proxy...")
 
@@ -598,10 +849,25 @@ class MultiSearch:
                 engine_cls = ENGINE_REGISTRY.get(name)
                 if not engine_cls:
                     continue
-                engine = engine_cls(proxy=use_proxy, session=session)
+                
+                # Firecrawl needs API key; skip if fallback-only (handled below)
+                if name == "firecrawl":
+                    if not self.firecrawl_api_key:
+                        continue
+                    if self.firecrawl_as_fallback:
+                        continue  # Will try after all others fail
+                    engine = engine_cls(
+                        api_key=self.firecrawl_api_key,
+                        search_limit=self.firecrawl_search_limit,
+                        proxy=use_proxy,
+                        session=session,
+                    )
+                else:
+                    engine = engine_cls(proxy=use_proxy, session=session)
 
                 for pg in range(self.max_pages):
                     try:
+                        _req_start = time.time()
                         results = await engine.search(query, num_results, page=pg)
                         if results:
                             all_errored = False
@@ -609,6 +875,10 @@ class MultiSearch:
                             self.rate_limiter.got_success()
                             all_results.extend(results)
                             engine_results[name] = engine_results.get(name, 0) + len(results)
+                            # Report proxy success
+                            if proxy_info and self.proxy_manager:
+                                latency = (time.time() - _req_start) * 1000
+                                await self.proxy_manager.report_success(proxy_info, latency)
                             if len(all_results) >= num_results:
                                 break
                             await asyncio.sleep(random.uniform(1, 2))
@@ -617,19 +887,94 @@ class MultiSearch:
                                 engine_results[name] = 0
                             all_errored = False
                             break
+                    except CaptchaDetectedError as ce:
+                        # Solvable captcha detected — try to solve it
+                        if (self.captcha_solver and _HAS_CAPTCHA_SOLVER
+                                and self.captcha_solver.available
+                                and self.captcha_solver.auto_solve_search):
+                            logger.info(f"SEARCH | {name} served captcha ({ce.captcha_info.get('type', '?')}), attempting solve...")
+                            solve_result = await self.captcha_solver.solve(
+                                ce.captcha_info, ce.url
+                            )
+                            if solve_result.success:
+                                logger.info(f"SEARCH | Captcha solved via {solve_result.provider} "
+                                           f"in {solve_result.solve_time:.1f}s — retrying {name}")
+                                engine_results[name] = "CAPTCHA_SOLVED"
+                                # Retry this engine page (captcha token can't be injected into
+                                # search engine responses easily, but solving may clear the block
+                                # on the provider side for future requests)
+                                await asyncio.sleep(2)  # Brief pause after solve
+                                continue  # Retry this page
+                            else:
+                                logger.warning(f"SEARCH | Captcha solve failed for {name}: {solve_result.error}")
+                        # Fall through to rate limit handling
+                        self.health.record_failure(name)
+                        self.rate_limiter.got_rate_limited()
+                        engine_results[name] = f"CAPTCHA_{ce.captcha_info.get('type', 'unknown').upper()}"
+                        break
                     except RateLimitError:
                         self.health.record_failure(name)
                         self.rate_limiter.got_rate_limited()
                         engine_results[name] = "RATE_LIMITED"
+                        # Report rate limit to proxy manager — ban this proxy
+                        if proxy_info and self.proxy_manager:
+                            await self.proxy_manager.report_rate_limited(proxy_info)
+                            # Get a fresh proxy for remaining engines
+                            proxy_url_new, proxy_info_new = await self._get_smart_proxy()
+                            if proxy_url_new:
+                                use_proxy = proxy_url_new
+                                proxy_info = proxy_info_new
                         break
                     except Exception as e:
                         self.health.record_failure(name)
                         engine_results[name] = f"ERROR: {str(e)[:50]}"
+                        # Report generic failure to proxy manager
+                        if proxy_info and self.proxy_manager:
+                            await self.proxy_manager.report_failure(proxy_info)
                         break
 
                 if len(all_results) >= num_results:
                     break
                 await asyncio.sleep(random.uniform(0.5, 1.5))
+
+            # Firecrawl fallback: if all engines returned 0 and FC is fallback-only
+            if not all_results and self.firecrawl_as_fallback and self.firecrawl_api_key:
+                if "firecrawl" not in engine_results:
+                    fc_engine = FirecrawlSearch(
+                        api_key=self.firecrawl_api_key,
+                        search_limit=self.firecrawl_search_limit,
+                        session=session,
+                    )
+                    try:
+                        fc_results = await fc_engine.search(query, num_results)
+                        if fc_results:
+                            all_results.extend(fc_results)
+                            engine_results["firecrawl"] = len(fc_results)
+                            self.health.record_success("firecrawl", len(fc_results))
+                            all_errored = False
+                    except Exception as e:
+                        engine_results["firecrawl"] = f"ERROR: {str(e)[:50]}"
+                        self.health.record_failure("firecrawl")
+
+            # Browser fallback: if all engines + Firecrawl returned 0
+            if (not all_results and self.browser_fallback_enabled
+                    and self.browser_manager and _HAS_BROWSER
+                    and self.browser_manager.available):
+                try:
+                    browser_se = BrowserSearchEngine(
+                        browser_manager=self.browser_manager,
+                        captcha_solver=self.captcha_solver if _HAS_CAPTCHA_SOLVER else None,
+                        engines=self.browser_engines,
+                    )
+                    br_results = await browser_se.search(query, num_results)
+                    if br_results:
+                        all_results.extend(br_results)
+                        engine_results["browser"] = len(br_results)
+                        all_errored = False
+                    else:
+                        engine_results["browser"] = 0
+                except Exception as e:
+                    engine_results["browser"] = f"ERROR: {str(e)[:50]}"
 
             summary = " | ".join([f"{k}: {v}" for k, v in engine_results.items()])
             logger.info(f"SEARCH | {summary}")
