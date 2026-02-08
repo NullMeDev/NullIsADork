@@ -18,7 +18,9 @@ v3.16 — Phase: SPA/API Intelligence
 
 import asyncio
 import json
+import os
 import re
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
@@ -61,7 +63,37 @@ class BruteforceResult:
     interesting_headers: Dict[str, str] = field(default_factory=dict)
     openapi_spec_url: str = ""       # URL of discovered OpenAPI/Swagger spec
     openapi_endpoints: List[Dict] = field(default_factory=list)  # Parsed API endpoints from spec
+    admin_panels: List[ProbeResult] = field(default_factory=list)  # Found admin panel URLs
     error: str = ""
+
+
+# ── Admin panel wordlist (params/admin_paths.txt with %EXT% expansion) ────────
+
+def _load_admin_paths() -> List[str]:
+    """Load admin panel paths from params/admin_paths.txt, expanding %EXT% templates."""
+    wordlist_path = os.path.join(os.path.dirname(__file__), "params", "admin_paths.txt")
+    raw_paths = []
+    try:
+        with open(wordlist_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    raw_paths.append(line)
+    except FileNotFoundError:
+        logger.debug(f"[APIBrute] Admin wordlist not found: {wordlist_path}")
+        return []
+    
+    EXTENSIONS = ['php', 'asp', 'aspx', 'jsp', 'cfm', 'cgi', 'html']
+    expanded = []
+    for p in raw_paths:
+        if '%EXT%' in p:
+            for ext in EXTENSIONS:
+                expanded.append('/' + p.replace('%EXT%', ext).lstrip('/'))
+        else:
+            expanded.append('/' + p.lstrip('/'))
+    return list(dict.fromkeys(expanded))  # dedupe preserving order
+
+ADMIN_PANEL_PATHS = _load_admin_paths()
 
 
 # ── Endpoint wordlists per framework ─────────────────────────────────────────
@@ -411,12 +443,22 @@ class APIBruteforcer:
                     result.open_endpoints.append(sw)
                     result.endpoints_found.append(sw)
 
+            # Phase 5: Admin panel discovery (298 paths from dic_admin.txt with %EXT% expansion)
+            if ADMIN_PANEL_PATHS:
+                admin_found = await self._discover_admin_panels(session, base_url)
+                if admin_found:
+                    result.admin_panels = admin_found
+                    for ap in admin_found:
+                        result.endpoints_found.append(ap)
+                    logger.info(f"[APIBrute] Found {len(admin_found)} admin panel(s)")
+
         logger.info(
             f"[APIBrute] Complete for {parsed.netloc}: "
             f"{len(result.endpoints_found)} endpoints found, "
             f"{len(result.open_endpoints)} open, "
             f"graphql={'yes' if result.graphql_found else 'no'}, "
-            f"openapi={'yes (' + str(len(result.openapi_endpoints)) + ' endpoints)' if result.openapi_spec_url else 'no'}"
+            f"openapi={'yes (' + str(len(result.openapi_endpoints)) + ' endpoints)' if result.openapi_spec_url else 'no'}, "
+            f"admin_panels={len(result.admin_panels)}"
         )
         return result
 
@@ -797,6 +839,76 @@ class APIBruteforcer:
         if switched:
             logger.info(f"[APIBrute] 🔀 Method switching found {len(switched)} bypasses")
         return switched
+
+    async def _discover_admin_panels(
+        self, session: aiohttp.ClientSession, base_url: str
+    ) -> List[ProbeResult]:
+        """Discover admin panels using 297-entry wordlist (with %EXT% expansion).
+        
+        Tests each path looking for:
+        - 200 OK with login form indicators
+        - 302 redirect to login pages
+        - 401/403 (confirms panel exists, just protected)
+        """
+        found = []
+        login_indicators = re.compile(
+            r'(login|sign[\s_-]?in|log[\s_-]?in|password|username|email'
+            r'|admin.?panel|control.?panel|dashboard|authenticate'
+            r'|<input[^>]*type=["\']password["\']|wp-login|cpanel)',
+            re.I,
+        )
+        
+        for path in ADMIN_PANEL_PATHS:
+            url = base_url.rstrip('/') + path
+            try:
+                async with session.get(
+                    url, ssl=False, allow_redirects=False,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout),
+                ) as resp:
+                    status = resp.status
+                    headers = dict(resp.headers)
+                    
+                    if status == 200:
+                        body = await resp.text(errors='replace')
+                        if login_indicators.search(body[:5000]):
+                            probe = ProbeResult(
+                                url=url, status=status, method="GET",
+                                content_type=headers.get('Content-Type', ''),
+                                interesting=True,
+                                auth_required=False,
+                                reason=f"🔐 Admin panel login page: {path}",
+                            )
+                            found.append(probe)
+                            logger.info(f"[APIBrute] 🔐 Admin panel: {url}")
+                    
+                    elif status in (301, 302, 303, 307, 308):
+                        location = headers.get('Location', '')
+                        if 'login' in location.lower() or 'auth' in location.lower():
+                            probe = ProbeResult(
+                                url=url, status=status, method="GET",
+                                content_type=headers.get('Content-Type', ''),
+                                interesting=True,
+                                auth_required=True,
+                                reason=f"🔐 Admin panel (redirects to login): {path} → {location}",
+                            )
+                            found.append(probe)
+                    
+                    elif status in (401, 403):
+                        probe = ProbeResult(
+                            url=url, status=status, method="GET",
+                            content_type=headers.get('Content-Type', ''),
+                            interesting=True,
+                            auth_required=True,
+                            reason=f"🔐 Admin panel (protected {status}): {path}",
+                        )
+                        found.append(probe)
+                        
+            except Exception:
+                continue
+            
+            await asyncio.sleep(random.uniform(0.05, 0.15))
+        
+        return found
 
 
 # ── Convenience function ──────────────────────────────────────────────────────

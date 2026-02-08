@@ -236,6 +236,7 @@ class AutoDumper:
                         parameter=sqli_result.parameter,
                         session=session,
                         hint_dbms=dbms,
+                        prefix=getattr(sqli_result, 'prefix', "'"),
                     )
                     if union_result and union_result.rows_extracted > 0:
                         dump_data = self._union_result_to_dump(union_result, url)

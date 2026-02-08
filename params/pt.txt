@@ -15,3 +15,12 @@
 .jspx
 .py
 .rb
+.php3
+.php4
+.php5
+.phtml
+.jsf
+.ashx
+.asmx
+.json
+.xml
