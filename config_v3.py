@@ -201,6 +201,9 @@ class DorkerConfig:
     # =============== MADY BOT INTEGRATION ===============
     mady_bot_feed: bool = True  # Auto-feed found gateways to Mady bot
     mady_bot_path: str = os.getenv("MADY_BOT_PATH", "/home/null/Desktop/Mady7.0.2/Mady_Version7.0.0")
+    mady_bot_chat_id: str = os.getenv("MADY_BOT_CHAT_ID", "8385066318")  # DM Mady Bot directly
+    mady_feed_channel_id: str = os.getenv("MADY_FEED_CHANNEL_ID", "-1003720958643")  # Dedicated findings channel
+    mady_feed_show_full_key: bool = True  # Show full key values in Telegram messages
     
     # =============== DAEMON MODE ===============
     continuous: bool = True

