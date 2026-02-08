@@ -16,7 +16,7 @@ from loguru import logger
 
 
 class DorkerDB:
-    """SQLite persistence for MedyDorker v3.0."""
+    """SQLite persistence for MadyDorker v3.0."""
 
     def __init__(self, db_path: str = None):
         if db_path is None:

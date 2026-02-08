@@ -1,5 +1,5 @@
 """
-MedyDorker v3.12 — Multi-DBMS Union-Based Data Dumper
+MadyDorker v3.12 — Multi-DBMS Union-Based Data Dumper
 
 Enhanced union injection extraction for:
 - MySQL / MariaDB   (GROUP_CONCAT, information_schema)

@@ -1,5 +1,5 @@
 """
-MedyDorker v3.0 — Master Configuration
+MadyDorker v3.0 — Master Configuration
 
 Full-pipeline config: Dorker → Scanner → Exploiter → Dumper → Reporter
 """
@@ -11,7 +11,7 @@ from typing import List, Dict, Optional
 
 @dataclass
 class DorkerConfig:
-    """Configuration for MedyDorker v3.0."""
+    """Configuration for MadyDorker v3.0."""
     
     # =============== TELEGRAM ===============
     telegram_bot_token: str = os.getenv("DORKER_BOT_TOKEN", "8187477232:AAEh3X22b1ddY9ZaVxc0x-j9MZQyTK9Wbp4")

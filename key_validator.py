@@ -1,5 +1,5 @@
 """
-MedyDorker v3.13 — API Key Validator
+MadyDorker v3.13 — API Key Validator
 
 Tests if extracted API keys / secrets are LIVE and usable.
 

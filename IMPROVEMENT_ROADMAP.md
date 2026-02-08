@@ -1,4 +1,4 @@
-# MedyDorker v4.0 — Improvement Roadmap
+# MadyDorker v4.0 — Improvement Roadmap
 
 ## Current State: v3.1 (~18,000 lines, 30+ modules)
 **Strengths:** SQLi pipeline (9/10), secret detection (8/10), 9 search engines, WAF detection (30+), anti-bot evasion (9/10)  
@@ -78,7 +78,7 @@
 - Template selection based on detected technology stack
 - Severity filtering (critical + high by default)
 - Parse nuclei JSON output → feed into reporter
-- Custom templates for MedyDorker-specific findings
+- Custom templates for MadyDorker-specific findings
 - **Bot command:** `/nuclei <url>` — run nuclei scan against target
 
 ### 8. Enhanced Secret Validation (`secret_extractor.py` upgrade)

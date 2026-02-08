@@ -5,11 +5,11 @@
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
 </p>
 
-# MedyDorker v3.0
+# MadyDorker v3.0
 
 **Automated Reconnaissance & Vulnerability Scanner — Telegram Bot Interface**
 
-MedyDorker is an all-in-one automated web reconnaissance framework controlled via Telegram. It combines Google dorking, secret extraction, SQL injection scanning, LFI detection, admin panel discovery, and data extraction into a single pipeline that runs continuously in the background.
+MadyDorker is an all-in-one automated web reconnaissance framework controlled via Telegram. It combines Google dorking, secret extraction, SQL injection scanning, LFI detection, admin panel discovery, and data extraction into a single pipeline that runs continuously in the background.
 
 ---
 
@@ -130,8 +130,8 @@ python3 main_v3.py
 ### Docker
 
 ```bash
-docker build -t medydorker .
-docker run -d --env-file .env medydorker
+docker build -t madydorker .
+docker run -d --env-file .env madydorker
 ```
 
 ---

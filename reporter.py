@@ -351,7 +351,7 @@ class TelegramReporter:
         minutes = int((uptime.total_seconds() % 3600) // 60)
         
         text = (
-            f"📊 <b>MedyDorker v3.5 STATUS</b> 📊\n"
+            f"📊 <b>MadyDorker v3.5 STATUS</b> 📊\n"
             f"\n"
             f"⏱ <b>Uptime:</b> {hours}h {minutes}m\n"
             f"🔍 <b>URLs Scanned:</b> {self.stats.urls_scanned}\n"
@@ -385,7 +385,7 @@ class TelegramReporter:
     async def report_startup(self, config_info: Dict = None):
         """Send startup notification."""
         text = (
-            f"🚀 <b>MedyDorker v3.0 STARTED</b> 🚀\n"
+            f"🚀 <b>MadyDorker v3.0 STARTED</b> 🚀\n"
             f"\n"
             f"<b>Pipeline:</b> Dorker → Scanner → Exploiter → Dumper → Reporter\n"
             f"<b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -396,7 +396,7 @@ class TelegramReporter:
             for k, v in config_info.items():
                 text += f"  {html.escape(str(k))}: {html.escape(str(v))}\n"
         
-        text += "\n#startup #medydorker #v3"
+        text += "\n#startup #madydorker #v3"
         
         await self._send_message(text)
 

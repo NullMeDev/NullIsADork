@@ -1,20 +1,470 @@
 ======================================================================
   MadyDorker v3.15 — Hourly Export #1
-  Generated: 2026-02-08 09:21:28
-  Uptime: 
+  Generated: 2026-02-08 14:20:34
+  Uptime: 0h 26m
 ======================================================================
 
 --- SUMMARY ---
-Cycles completed: 0
-URLs scanned: 0
-Domains seen: 153
-SQLi vulns: 298
-Secrets found: 0
-Gateways found: 20
+Cycles completed: 1
+URLs scanned: 31
+Domains seen: 422
+SQLi vulns: 525
+Secrets found: 8
+Gateways found: 161
 Cards found: 0
 Cookies: 0 (B3: 0)
 
 --- VULNERABLE URLs (SQLi) ---
+  [/mssql] param=POST:_wpcf7_ak_hp_textarea
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus#wpcf7-f1716-o1
+  [/mssql] param=POST:your-email
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus#wpcf7-f1716-o1
+  [/mssql] param=POST:quantity
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus/
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus
+  [/mssql] param=Cookie:woocommerce_recently_viewed
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus
+  [/mssql] param=POST:_wpcf7_ak_hp_textarea
+    https://digitallicense.shop/shop/?s=VMware+Workstation#wpcf7-f1716-o1
+  [/mssql] param=POST:your-email
+    https://digitallicense.shop/shop/?s=VMware+Workstation#wpcf7-f1716-o1
+  [/mssql] param=POST:count
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=POST:orderby
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/?s=VMware+Workstation&#038;post_type=product
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/?s=Ashampoo&
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/?s=Ashampoo&
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/?s=Ashampoo&
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/?s=Ashampoo&
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/?s=Ashampoo&
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/?s=Ashampoo&
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/?s=Ashampoo&
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/?s=Ashampoo&
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/?s=Ashampoo&
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/?s=Ashampoo&
+  [/mssql] param=s
+    https://digitallicense.shop/?s=Ashampoo&
+  [/mssql] param=POST:_wpcf7_ak_hp_textarea
+    https://digitallicense.shop/autodesk-autocad-lt#wpcf7-f1716-o1
+  [/mssql] param=POST:your-email
+    https://digitallicense.shop/autodesk-autocad-lt#wpcf7-f1716-o1
+  [/mssql] param=POST:quantity
+    https://digitallicense.shop/autodesk-autocad-lt/
+  [/mssql] param=POST:attribute_pa_subscription-period
+    https://digitallicense.shop/autodesk-autocad-lt/
+  [/mssql] param=POST:attribute_pa_year-version
+    https://digitallicense.shop/autodesk-autocad-lt/
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/autodesk-autocad-lt
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/autodesk-autocad-lt
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/autodesk-autocad-lt
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/autodesk-autocad-lt
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/autodesk-autocad-lt
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/autodesk-autocad-lt
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/autodesk-autocad-lt
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/autodesk-autocad-lt
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/autodesk-autocad-lt
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/autodesk-autocad-lt
+  [/mssql] param=Cookie:woocommerce_recently_viewed
+    https://digitallicense.shop/autodesk-autocad-lt
+  [/mssql] param=POST:_wpcf7_ak_hp_textarea
+    https://digitallicense.shop/shop?add-to-cart=26348#wpcf7-f1716-o1
+  [/mssql] param=POST:your-email
+    https://digitallicense.shop/shop?add-to-cart=26348#wpcf7-f1716-o1
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/kaspersky-standard-antivirus/
+  [/mssql] param=POST:attribute_pa_subscription-period
+    https://digitallicense.shop/easeus-data-recovery-wizard-professional/
+  [/mssql] param=POST:count
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=POST:orderby
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Cookie:wp_woocommerce_session_b9381e1fdb3531ce3b51d9104f376eb4
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Cookie:woocommerce_cart_hash
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Cookie:tk_ai
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=Cookie:woocommerce_items_in_cart
+    https://digitallicense.shop/shop?add-to-cart=26348
+  [/mssql] param=POST:_wpcf7_ak_hp_textarea
+    https://digitallicense.shop/my-account/lost-password#wpcf7-f1716-o1
+  [/mssql] param=POST:your-email
+    https://digitallicense.shop/my-account/lost-password#wpcf7-f1716-o1
+  [/mssql] param=POST:user_login
+    https://digitallicense.shop/my-account/lost-password
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/my-account/lost-password
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/my-account/lost-password
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/my-account/lost-password
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/my-account/lost-password
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/my-account/lost-password
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/my-account/lost-password
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/my-account/lost-password
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/my-account/lost-password
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/my-account/lost-password
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/my-account/lost-password
+  [/mssql] param=POST:_wpcf7_ak_hp_textarea
+    https://digitallicense.shop/shop/page/17?gridcookie=list#wpcf7-f1716-o1
+  [/mssql] param=POST:your-email
+    https://digitallicense.shop/shop/page/17?gridcookie=list#wpcf7-f1716-o1
+  [/mssql] param=POST:count
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=POST:orderby
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/shop/page/17?gridcookie=list
+  [/mssql] param=POST:_wpcf7_ak_hp_textarea
+    https://digitallicense.shop/autodesk-maya#wpcf7-f1716-o1
+  [/mssql] param=POST:your-email
+    https://digitallicense.shop/autodesk-maya#wpcf7-f1716-o1
+  [/mssql] param=POST:attribute_pa_subscription-period
+    https://digitallicense.shop/parallels-desktop-standard-20-mac/
+  [/mssql] param=POST:quantity
+    https://digitallicense.shop/autodesk-maya/
+  [/mssql] param=POST:attribute_pa_subscription-period
+    https://digitallicense.shop/autodesk-maya/
+  [/mssql] param=POST:attribute_pa_year-version
+    https://digitallicense.shop/autodesk-maya/
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/autodesk-maya
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/autodesk-maya
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/autodesk-maya
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/autodesk-maya
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/autodesk-maya
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/autodesk-maya
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/autodesk-maya
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/autodesk-maya
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/autodesk-maya
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/autodesk-maya
+  [/mssql] param=Cookie:woocommerce_recently_viewed
+    https://digitallicense.shop/autodesk-maya
+  [Time-based header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://www.asp.net/
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://www.asp.net/
+  [/mssql] param=POST:_wpcf7_ak_hp_textarea
+    https://digitallicense.shop/avast-premium-security#wpcf7-f1716-o1
+  [/mssql] param=POST:your-email
+    https://digitallicense.shop/avast-premium-security#wpcf7-f1716-o1
+  [/mssql] param=POST:attribute_pa_subscription-period
+    https://digitallicense.shop/norton-360-deluxe-europe-only/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/norton-360-deluxe-europe-only/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/eset-nod32-antivirus/
+  [/mssql] param=POST:quantity
+    https://digitallicense.shop/avast-premium-security/
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/avast-premium-security
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/avast-premium-security
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/avast-premium-security
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/avast-premium-security
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/avast-premium-security
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/avast-premium-security
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/avast-premium-security
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/avast-premium-security
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/avast-premium-security
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/avast-premium-security
+  [/mssql] param=Cookie:woocommerce_recently_viewed
+    https://digitallicense.shop/avast-premium-security
+  [/mssql] param=POST:_wpcf7_ak_hp_textarea
+    https://digitallicense.shop/avast-ultimate-suite#wpcf7-f1716-o1
+  [/mssql] param=POST:your-email
+    https://digitallicense.shop/avast-ultimate-suite#wpcf7-f1716-o1
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/mcafee-antivirus-plus/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/kaspersky-premium-total-security/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/kaspersky-plus-internet-security/
+  [/mssql] param=POST:attribute_pa_subscription-period
+    https://digitallicense.shop/avg-internet-security/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/avg-internet-security/
+  [/mssql] param=POST:attribute_pa_subscription-period
+    https://digitallicense.shop/avast-premium-security/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/avast-premium-security/
+  [/mssql] param=POST:quantity
+    https://digitallicense.shop/avast-ultimate-suite/
+  [/mssql] param=POST:attribute_pa_subscription-period
+    https://digitallicense.shop/avast-ultimate-suite/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/avast-ultimate-suite/
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/avast-ultimate-suite
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/avast-ultimate-suite
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/avast-ultimate-suite
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/avast-ultimate-suite
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/avast-ultimate-suite
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/avast-ultimate-suite
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/avast-ultimate-suite
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/avast-ultimate-suite
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/avast-ultimate-suite
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/avast-ultimate-suite
+  [/mssql] param=Cookie:woocommerce_recently_viewed
+    https://digitallicense.shop/avast-ultimate-suite
+  [/mssql] param=POST:_wpcf7_ak_hp_textarea
+    https://digitallicense.shop/shop/?s=VMware#wpcf7-f1716-o1
+  [/mssql] param=POST:your-email
+    https://digitallicense.shop/shop/?s=VMware#wpcf7-f1716-o1
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/vmware-workstation-17-5-pro/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/vmware-workstation-17-pro/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/vmware-workstation-17-player/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/vmware-vsphere-7-0-enterprise-plus/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/vmware-vcenter-server-7-standard/
+  [/mssql] param=POST:attribute_pa_devices
+    https://digitallicense.shop/vmware-vcenter-server-8-standard/
+  [/mssql] param=POST:count
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=POST:orderby
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/?s=VMware&#038;post_type=product
+  [/mssql] param=POST:_wpcf7_ak_hp_textarea
+    https://digitallicense.shop/shop/?s=Corel#wpcf7-f1716-o1
+  [/mssql] param=POST:your-email
+    https://digitallicense.shop/shop/?s=Corel#wpcf7-f1716-o1
+  [/mssql] param=POST:max_price
+    https://digitallicense.shop/shop/
+  [/mssql] param=POST:min_price
+    https://digitallicense.shop/shop/
+  [/mssql] param=POST:attribute_pa_year-version
+    https://digitallicense.shop/coreldraw-graphics-suite-mac/
+  [/mssql] param=POST:attribute_pa_year-version
+    https://digitallicense.shop/corel-painter/
+  [/mssql] param=POST:attribute_pa_year-version
+    https://digitallicense.shop/coreldraw-technical-suite/
+  [/mssql] param=POST:count
+    https://digitallicense.shop/?s=Corel&
+  [/mssql] param=POST:orderby
+    https://digitallicense.shop/?s=Corel&
+  [/mssql] param=POST:s
+    https://digitallicense.shop/
+  [/mssql] param=Header:Client-IP
+    https://digitallicense.shop/?s=Corel&
+  [/mssql] param=Header:True-Client-IP
+    https://digitallicense.shop/?s=Corel&
+  [/mssql] param=Header:X-Originating-IP
+    https://digitallicense.shop/?s=Corel&
+  [/mssql] param=Header:X-Custom-IP-Authorization
+    https://digitallicense.shop/?s=Corel&
+  [/mssql] param=Header:Referer
+    https://digitallicense.shop/?s=Corel&
+  [/mssql] param=Header:X-Real-IP
+    https://digitallicense.shop/?s=Corel&
+  [/mssql] param=Header:X-Client-IP
+    https://digitallicense.shop/?s=Corel&
+  [/mssql] param=Header:X-Forwarded-Host
+    https://digitallicense.shop/?s=Corel&
+  [/mssql] param=Header:X-Forwarded-For
+    https://digitallicense.shop/?s=Corel&
+  [/mssql] param=Cookie:porto_active_lang
+    https://digitallicense.shop/?s=Corel&
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://www.revistajaraysedal.es/wp-content/uploads/2025/12/image-12.webp
+  [Time-based header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://immunebytes.com/blog/list-of-compromised-private-key-crypto-hacks/
+  [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://immunebytes.com/blog/list-of-compromised-private-key-crypto-hacks/
+  [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://immunebytes.com/blog/list-of-compromised-private-key-crypto-hacks/
+  [Time-based header injection (Referer)/mssql] param=Header:Referer
+    https://immunebytes.com/blog/list-of-compromised-private-key-crypto-hacks/
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://immunebytes.com/blog/list-of-compromised-private-key-crypto-hacks/
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://immunebytes.com/blog/list-of-compromised-private-key-crypto-hacks/
+  [Time-based header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://bowerbird.nz/collections/vendors?q=Kwik%20Knit
+  [Time-based header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://education.minecraft.net/lessonsupportfiles/9092173469664616-HOAI25_Solutions%20Guide%20FINAL%20ENG%20X1X.pdf
+  [Header injection (Client-IP)/mssql] param=Header:Client-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (True-Client-IP)/mssql] param=Header:True-Client-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (CF-Connecting-IP)/mssql] param=Header:CF-Connecting-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (Referer)/mssql] param=Header:Referer
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (X-Real-IP)/mssql] param=Header:X-Real-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [Header injection (X-Forwarded-For)/mssql] param=Header:X-Forwarded-For
+    https://remotepulse.42web.io/job/salesforce-admin-developer-9
+  [UNION ALL SELECT/mysql] param=pic
+    http://testphp.vulnweb.com/product.php?pic=3
+  [UNION ALL SELECT/mysql] param=cat
+    http://testphp.vulnweb.com/listproducts.php?cat=4
+  [UNION ALL SELECT/mysql] param=cat
+    http://testphp.vulnweb.com/listproducts.php?cat=3
+  [EXTRACTVALUE/mysql] param=test
+    http://testphp.vulnweb.com/search.php?test=query
+  [UNION ALL SELECT/mysql] param=pic
+    http://testphp.vulnweb.com/product.php?pic=5
   [Time-based header injection (X-Custom-IP-Authorization)/mssql] param=Header:X-Custom-IP-Authorization
     https://dev.to/users/auth/facebook?callback_url=https%3A%2F%2Fdev.to%2Fusers%2Fauth%2Ffacebook%2Fcallback&amp;state=navbar_basic
   [Time-based header injection (X-Originating-IP)/mssql] param=Header:X-Originating-IP
@@ -611,8 +1061,132 @@ Cookies: 0 (B3: 0)
     http://testphp.vulnweb.com/artists.php?artist=1
   [UNION ALL SELECT/mysql] param=cat
     http://testphp.vulnweb.com/listproducts.php?cat=1
+  [Time-based header injection (X-Forwarded-Host)/mssql] param=Header:X-Forwarded-Host
+    https://app.squareup.com/login
+  [Time-based header injection (X-Client-IP)/mssql] param=Header:X-Client-IP
+    https://app.squareup.com/login
+
+--- SECRETS ---
+  [wp_ajax_url] https://www.virginmobile.ae/wp-admin/admin-ajax.php
+    Source: https://www.virginmobile.ae/how-to-pay/
+  [gcp_key] AIzaSyBF3pdc0P_b01scP-_t_fOvFseyH16Wub0
+    Source: https://www.virginmobile.ae/how-to-pay/
+  [wp_nonce] 78769d7bc4
+    Source: https://www.davita.com/care-support/tools/patient-payment-portal/
+  [wp_nonce] 1a1dc855e7
+    Source: https://www.davita.com/care-support/tools/patient-payment-portal/
+  [wp_nonce] 12235f9090
+    Source: https://www.va.gov/health-care/pay-copay-bill/
+  [wp_nonce] 6bab9ae6b3
+    Source: https://www.va.gov/health-care/pay-copay-bill/
+  [wp_nonce] 4e8c03e3b8
+    Source: https://www.va.gov/health-care/pay-copay-bill/
+  [aws_access] AKIArAC2AMAAygDUAN4A
+    Source: https://www.pldthome.com/paymentcenters
 
 --- GATEWAYS ---
+  [?] https://docs.pay.jp/v1/api/
+  [?] https://digitallicense.shop/checkout/
+  [?] https://www.lawcabs.ac.uk/application-process
+  [?] https://estore.law.ac.uk/faqs?srsltid=AfmBOooSo4jJY0axfZNo6FDoiJ8kY2Vfu2R9TZ-mmjlyQKqvx5wy268k
+  [?] https://nexus.shop/collections/all
+  [?] https://kpopomo.shop/
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] http://bag.org.tw/demo/tr/index.php?news=top-stories/latest/trump-patel-fbi-recruitment-standards-lower-rcna226690
+  [?] https://www.rubinbrown.com/payment
+  [?] https://catalytic.org.nz/donate
+  [?] https://catalytic.org.nz/donate
+  [?] https://cct.org.nz/donate/
+  [?] https://donate.wingspan.org.nz/
+  [?] https://donate.wingspan.org.nz/
+  [?] https://donate.wingspan.org.nz/
+  [?] https://www.datacamp.com/tutorial/text-analytics-beginners-nltk
+  [?] https://www.datacamp.com/tutorial/text-analytics-beginners-nltk
+  [?] https://www.shopify.co.nz/retail/retail-payment-options
+  [?] https://www.shopify.co.nz/retail/retail-payment-options
+  [?] https://www.getapp.co.nz/directory/1183/mobile-credit-card-processing/software
+  [?] https://multiples-ac.org.nz/faq/
+  [?] https://multiples-ac.org.nz/faq/
+  [?] https://multiples-ac.org.nz/faq/
+  [?] https://bowerbird.nz/products/dina-wakley-media-stamp-set-text-profiles
+  [?] https://bowerbird.nz/products/dina-wakley-media-stamp-set-text-profiles
+  [?] https://developer.squareup.com/us/en/online-payment-apis
+  [?] https://developer.squareup.com/us/en/online-payment-apis
+  [?] https://developer.squareup.com/us/en/online-payment-apis
+  [?] https://tacticals.be/product-categorie/holsters-pouches-allerlei/accessorie-admin-pouches/
+  [?] https://www.art-store.be/author/admin/
+  [?] https://emby.media/community/index.php?/topic/113844-updating-a-specific-library-via-api/
+  [?] https://sia-dashboard.oneorigin.us/
+  [?] https://sia-dashboard.oneorigin.us/
+  [?] https://sia-dashboard.oneorigin.us/
   [?] https://www.mini-focus.com/index.php?route=bossthemes/filter&filter=&page=4
   [?] https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
   [?] https://www.fag-consult.ch/2025/05/27/education/how-transaction-processing-works-an-interview-with-experts/
@@ -633,8 +1207,197 @@ Cookies: 0 (B3: 0)
   [?] https://www.parkinson.org/donate
   [?] https://icrd.org/donate/
   [?] https://icrd.org/donate/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
+  [worldpay_key] https://www.davita.com/care-support/tools/patient-payment-portal/
 
 --- B3 COOKIES ---
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
+  ?=?
+    Domain: ?
   ?=?
     Domain: ?
   ?=?
@@ -709,158 +1472,427 @@ Cookies: 0 (B3: 0)
 --- SCANNED DOMAINS ---
   admin.burgodistribuzioneprod.nohup.it
   admin.kanpla.dk
+  admin.kuleuven.be
   admin.tis.edu.sa
   admin.vuestic.dev
+  adminandy.io
   adminforth.dev
+  affmaven.com
+  algolia.com
   android.googlesource.com
+  ankoletimes.co.ug
   aol-direct.univr.it
+  api.deriv.be
   apkpure.com
+  apnasewakendra.shop
   app.daily.dev
+  app.squareup.com
   assuredautomation.com
   avforum.no
+  avrdc.org
+  bag.org.tw
+  baice.ac.uk
   barbarossasoftair.it
+  bestfresh.be
   biblioteche.unipv.it
   biomarintforum.no
+  blacktwitter.io
   blog.platformatic.dev
+  blog.rootshell.be
   blogs.loc.gov
   booksadmin.nz
+  bowerbird.nz
   buildlogs.cdn.centos.org
   careers.panda.com.sa
+  catalytic.org.nz
+  cct.org.nz
   central.owncloud.org
   cetaceans.ices.dk
+  changelog.contentstudio.io
+  chaoscode.io
+  chatgpt.com
+  community.containo.us
+  community.deeplearning.ai
+  community.openai.com
   community.shopify.dev
+  community.sonatype.com
+  cornerstonevc.tw
+  cpadmin.casapadel.fr
+  cronus.shop
   csrc.nist.gov
+  d.comenity.net
   darceramica.co.tz
+  dashboard.ocularium.be
+  dashboard.smarteye.be
+  datascope.io
+  dave.dev
+  de.gov
+  deliveroo.fr
+  deloitteconnect.deloitte.com
+  demo.testfire.net
   dev.to
+  developer.bitcoin.org
+  developer.paypal.com
+  developer.squareup.com
   developer.unigine.com
+  digitallicense.shop
+  discuss.elastic.co
   discuss.google.dev
+  disneycruise.disney.go.com
+  docs.easyacp.shop
   docs.khoj.dev
+  docs.pay.jp
   docs.slack.dev
+  donate.wingspan.org.nz
   dot.ca.gov
   download.oracle.com
+  e-services.empower.ae
+  education.minecraft.net
+  emby.media
+  en.ryte.com
+  epaymentportal.landbank.com
   eprints.ost.ch
   erc.europa.eu
   esranet.eu
+  estore.law.ac.uk
+  eurogrow.es
+  fellows.ras.ac.uk
+  fics.us
+  findeth.io
+  fintechnz.org.nz
+  flexprice.io
+  forge.inrae.fr
   forum.babyverden.no
   forum.kvinneguiden.no
   forum.mensa.no
   freak.no
   ftp.funet.fi
   fynweb.dk
+  galiciapress.es
+  gbhackers.com
+  givingday.trin.cam.ac.uk
   givingitbacktokids.org
   globalbean.eu
+  gogreek.shop
+  gperformance.eu
   gruppoinventa.it
+  hackerone.com
+  hagar.org.nz
+  hariannegeri.online
+  healthcare.ascension.org
   help.count.it
+  help.pay.jp
+  help.puppet.com
+  help.quentn.com
+  help.wingfield.io
+  help.yahoo.com
+  hortitec.es
   hub.hslu.ch
+  immunebytes.com
   impetus4cs.eu
+  info.eipa.eu
   jira.getxray.app
+  jrswab.com
+  juanwei.e-land.gov.tw
   kalilinuxtutorials.com
+  kidneykids.org.nz
+  kp.org
+  kpopomo.shop
   larsenconfigmgr.blogspot.dk
+  litteraction.fr
+  makeawish.org.nz
   makerkit.dev
   marine.copernicus.eu
+  member.medmutual.com
+  meta.discourse.org
   mettesigernej.dk
   mjmotors.co.tz
+  multiples-ac.org.nz
   mundialis.dev
+  myista.ae
+  mypvm.shop
+  myrealproperty.online
+  n8n.io
+  naturalsystems.es
+  nawad.co.ug
+  nexus.shop
   nocture.dk
   norgespartiet.no
+  nowpayments.io
   ns3.ucc.edu.gh
   nsf-gov-resources.nsf.gov
   ntrs.nasa.gov
+  nzinitiative.outreach.co.nz
+  oakywood.shop
   onecompiler.com
   onskebarn.no
   orizio.it
+  patient.labcorp.com
+  pay.amazon.fr
+  payment.patientfirst.com
+  paymentnavigator.elavon.com
+  phlpost.gov.ph
+  pikore.shop
   pkg.go.dev
   precisionmatters.biz
+  provider.zelispayments.com
+  purelab.es
   quickcuts.co.nz
   redmine.pfsense.org
+  remotepulse.42web.io
+  retail360.us
+  reutersinstitute.politics.ox.ac.uk
+  rmi.org
+  rocketsoftware-prod.zoominsoftware.io
+  rootplanner.io
   rotary.no
+  sandbag.be
   secure-computing.net
+  secure.bankofamerica.com
+  secure.verizon.com
+  sendpulse.fr
   sgse.eu
+  shopee.sg
   shopify.dev
+  shoppay.affirm.com
+  sia-dashboard.oneorigin.us
   simracewebshop.eu
   sjakkhistorie.no
+  spatie.be
+  squareup.com
+  storebuild.shop
+  studentaid.gov
+  studylib.es
+  support.cloudm.io
+  support.connexus.com
+  support.sertifi.com
+  support.vivint.com
+  support.zoom.us
+  systeme.io
+  tacticals.be
   tcrn.ch
   testphp.vulnweb.com
+  tolt.io
+  tourism-dashboard.ec.europa.eu
   traba.it
+  translations.openemr.io
+  trumpetnews.co.ug
   ugpayments.ch
+  upflow.io
+  usersearch.org
+  vanherteryck.be
+  vida.io
+  vintage.com.pk
+  vintageofficial.pk
   w-webdesign.dk
+  waldo.be
   web.unicz.it
+  webcatalog.io
   webdrift.org.ntnu.no
   webgate.ec.europa.eu
   wgamer.dk
+  whaufoundation.org.nz
+  wishforasmile.org.nz
+  www.104.com.tw
   www.3rdarmadmin.co.nz
+  www.abss.k12.nc.us
+  www.actrust.org.nz
+  www.addc.ae
+  www.admin.pinnemouche.be
+  www.admin.serengety.be
   www.admin.v68.framesi.idspace.it
   www.admin4tradies.co.nz
   www.adminoutsourced.co.nz
+  www.airsoftshop.be
+  www.alleghenycounty.us
   www.allnews.ch
   www.als.org
+  www.altruon.io
   www.alz.org
+  www.amazon.sg
+  www.americanexpress.com
   www.appbrain.com
+  www.appypie.io
+  www.arlingtonva.us
+  www.art-store.be
+  www.asp.net
+  www.att.com
+  www.automates.be
   www.baboon.eu
+  www.barrow.k12.ga.us
   www.bestfriends.org
   www.bing.com
+  www.bir.gov.ph
   www.bizcommunity.com.gh
+  www.bohol.ph
+  www.boltic.io
+  www.bonsecours.com
+  www.boxpiper.com
+  www.bukedde.co.ug
   www.cancer.org
+  www.capterra.co.nz
   www.cars45.com.gh
   www.census.gov
+  www.checkout.com
+  www.chinabank.ph
+  www.cloudextend.io
+  www.coface.us
+  www.colorsteel.co.nz
+  www.commongood.org.nz
+  www.compusoft.eu
   www.crewplan.dk
+  www.crick.ac.uk
+  www.customerly.io
+  www.cvs.com
   www.cybersecuritymumbai.com
   www.cybrary.it
+  www.datacamp.com
+  www.davita.com
+  www.de.gov
   www.deltics.co.nz
   www.diabetes.org
+  www.dictionary.com
+  www.discover.com
   www.diskusjon.no
   www.e-tankless.com
+  www.eclinicalworks.com
+  www.edgeverve.com
+  www.emtshop.be
   www.envox.eu
   www.epilepsy.com
+  www.etisalat.ae
+  www.etymonline.com
+  www.eurideproject.eu
+  www.exploit-db.com
   www.fag-consult.ch
   www.fema.gov
   www.finansavisen.no
+  www.findchips.com
+  www.fortebet.ug
+  www.getapp.co.nz
+  www.gettysburg.k12.pa.us
+  www.glassdoor.sg
+  www.growlet.es
+  www.hdb.gov.sg
+  www.health.state.mn.us
   www.heart.org
+  www.hobart.k12.in.us
   www.home-water-purifiers-and-filters.com
+  www.hostpapa.be
   www.hostpapa.eu
   www.htcmfg.com
+  www.hubspot.fr
+  www.humana.com
+  www.huskymarketingplan.be
   www.inde.nz
+  www.instagram.com
+  www.interakt.shop
+  www.ionos.com
   www.ipcamlive.com
+  www.kaiserpermanente.org
+  www.kuleuven.be
   www.ladyadmin.co.nz
+  www.lamda.ac.uk
+  www.lamppost.io
+  www.landata.online
+  www.law.ntu.edu.tw
+  www.lawcabs.ac.uk
   www.lewisdoes.dev
+  www.library.ur.ac.rw
+  www.logitechg.fr
+  www.lse.ac.uk
+  www.lululemon.fr
   www.lungusa.org
   www.manageengine.eu
   www.marketbook.com.gh
+  www.mass-solutions.com.tw
+  www.mcda.us
+  www.merriam-webster.com
   www.messinaline.it
   www.milamaurizi.it
   www.mini-focus.com
+  www.mof-mof.co.jp
   www.montgomerycountypa.gov
   www.morningsidechurchofchrist.org.nz
+  www.mrcooper.com
   www.mrstradie.co.nz
+  www.msn.com
+  www.myecp.com
+  www.mypaymentsinsider.com
   www.nbs.go.tz
+  www.ncdc.go.ug
+  www.newvision.co.ug
   www.nga.gov
+  www.nurselink.co.nz
+  www.nztimberprofiles.co.nz
+  www.outdoorsy.fr
+  www.oxfordlearnersdictionaries.com
   www.panel.tz
   www.parkinson.org
+  www.pay.be
+  www.paymentnet.jpmorgan.com
+  www.paymentservicenetwork.com
+  www.payoneer.com
+  www.paypal.com
   www.pinterest.dk
+  www.pldthome.com
+  www.pplelectric.com
+  www.preston.ac.uk
+  www.pricewell.io
   www.princegeorgescountymd.gov
+  www.profilesgym.co.nz
+  www.protoxide.eu
   www.quickmar.ch
   www.radicaltuning.eu
+  www.raymourflanigan.com
+  www.republicservices.com
+  www.revistajaraysedal.es
+  www.rmp.eu
+  www.rubinbrown.com
   www.saloneuropa.it
   www.sandia.gov
   www.segway-parts.eu
   www.sevelstedviborg.dk
   www.sgbox.eu
+  www.shopify.co.nz
+  www.shopify.com
+  www.six-group.com
   www.skolelederforbundet.no
   www.speakerhardware.com
+  www.sssd.k12.ca.us
+  www.stigg.io
   www.strictlysavvy.co.nz
+  www.stroohm.be
   www.sveis.no
+  www.takealot.com
   www.theadminangels.co.nz
+  www.thebodyshop.com.sg
+  www.thefreedictionary.com
+  www.thegreenparadise.es
+  www.tiendeo.sg
   www.torai.it
   www.toyotavantech.com
   www.transcendadmin.co.nz
+  www.ubs.com
   www.ubuy.com.gh
+  www.ubuy.rw
+  www.ulta.com
+  www.va.gov
+  www.vanillaluxury.sg
+  www.vintageandrare.com
+  www.virginmobile.ae
   www.virtualmelbas.co.nz
+  www.virustotal.com
+  www.vivocity.com.sg
+  www.wazebelgium.be
+  www.yzu.edu.tw
   www.zesha.tz
   www.zgraggi.ch
   www.zhaw.ch
   www.zipleaf.co.nz
   zenn.dev
+  zip.co
 
 ======================================================================
-  End of export — 864 lines
+  End of export — 1896 lines
 ======================================================================

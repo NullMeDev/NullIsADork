@@ -1,5 +1,5 @@
 """
-MedyDorker v3.14 — ML False Positive Filter
+MadyDorker v3.14 — ML False Positive Filter
 
 Machine-learning-based classifier to reduce false positives in:
 - SQLi detection results

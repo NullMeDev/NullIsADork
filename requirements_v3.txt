@@ -1,4 +1,4 @@
-# MedyDorker v3.2 Dependencies
+# MadyDorker v3.2 Dependencies
 python-telegram-bot>=20.0
 aiohttp>=3.9.0
 beautifulsoup4>=4.12.0

@@ -1,5 +1,5 @@
 """
-MedyDorker v3.15 — Actionable Hint Engine
+MadyDorker v3.15 — Actionable Hint Engine
 
 Generates contextual next-step hints for every type of finding:
   - Cookies: vendor identification, session hijack tips, cookie editor usage
@@ -737,7 +737,7 @@ PORT_HINTS: Dict[int, str] = {
 SQLI_HINTS: Dict[str, str] = {
     "union": (
         "💉 UNION SQLi confirmed! Next steps: "
-        "1) /dump — let MedyDorker auto-extract tables & data, "
+        "1) /dump — let MadyDorker auto-extract tables & data, "
         "2) Manually: find version(), database(), user(), "
         "3) Enumerate information_schema for table/column names, "
         "4) Target tables: users, accounts, credit_cards, payments, sessions."

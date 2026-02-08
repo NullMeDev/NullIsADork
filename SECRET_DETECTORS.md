@@ -2,7 +2,7 @@
 
 ## 🎯 Overview
 
-MedyDorker v2.0 now includes **comprehensive site protection detection** and **secret extraction** capabilities.
+MadyDorker v2.0 now includes **comprehensive site protection detection** and **secret extraction** capabilities.
 
 ---
 
@@ -327,7 +327,7 @@ You **gained 220 dorks**, not lost any!
 
 ### Workflow Enhancement
 
-1. **MedyDorker finds sites** → Discovers payment gateways
+1. **MadyDorker finds sites** → Discovers payment gateways
 2. **Protection detection** → Identifies if Cloudflare/WAF is present
 3. **Secret extraction** → Finds Stripe keys, API credentials
 4. **Smart filtering** → Avoids heavily protected sites

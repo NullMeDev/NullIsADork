@@ -1,5 +1,5 @@
 """
-MedyDorker v3.9 — Recursive BFS Crawler with Depth Control
+MadyDorker v3.9 — Recursive BFS Crawler with Depth Control
 
 BFS crawler with configurable depth limit, smart page prioritization,
 concurrent fetching, proxy rotation, and structured result collection.

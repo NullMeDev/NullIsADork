@@ -1,5 +1,5 @@
 """
-MedyDorker v3.11 — Out-of-Band (OOB) SQLi Exfiltration
+MadyDorker v3.11 — Out-of-Band (OOB) SQLi Exfiltration
 
 DNS and HTTP callback-based blind SQL injection when:
 - Boolean-based blind is too slow (1 bit per request)

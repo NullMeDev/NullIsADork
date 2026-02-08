@@ -31,7 +31,7 @@ class MadyFeeder:
     XDumpGO-complete support for 50+ gateway types!
     """
     
-    # Map MedyDorker key types to Mady bot key types (comprehensive XDumpGO mapping)
+    # Map MadyDorker key types to Mady bot key types (comprehensive XDumpGO mapping)
     KEY_TYPE_MAP = {
         # ========== STRIPE ==========
         "stripe_pk": "stripe_pk",
@@ -316,7 +316,7 @@ class MadyFeeder:
                 new_entry = {
                     "url": url,
                     "keys": [[normalized_type, [key_value]]],
-                    "source": "medydorker",
+                    "source": "madydorker",
                     "timestamp": datetime.now().isoformat(),
                 }
                 if extra:

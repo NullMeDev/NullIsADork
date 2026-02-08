@@ -1,5 +1,5 @@
 """
-MedyDorker v3.10 — Port Scanner & Service Discovery
+MadyDorker v3.10 — Port Scanner & Service Discovery
 
 Async TCP port scanner with:
 - Configurable port lists (common, web, database, full)

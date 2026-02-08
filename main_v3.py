@@ -1,5 +1,5 @@
 """
-MedyDorker v3.1 — Main Pipeline & Telegram Bot
+MadyDorker v3.1 — Main Pipeline & Telegram Bot
 
 Unified pipeline: Dorker → Scanner → Exploiter → Dumper → Reporter
 
@@ -54,7 +54,7 @@ from loguru import logger
 # Configure logging
 logger.remove()
 logger.add(sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | {message}")
-logger.add("medydorker.log", rotation="10 MB", retention=3, level="DEBUG")
+logger.add("madydorker.log", rotation="10 MB", retention=3, level="DEBUG")
 
 # Telegram setup
 try:
@@ -107,7 +107,7 @@ from auto_dumper import AutoDumper, ParsedDumpData
 from dump_parser import DumpParser
 
 
-class MedyDorkerPipeline:
+class MadyDorkerPipeline:
     """The main v3.1 pipeline: Generate → Search → Detect → Exploit → Dump → Report."""
 
     def __init__(self, config: DorkerConfig = None):
@@ -1660,7 +1660,7 @@ class MedyDorkerPipeline:
         self.running = True
         self.start_time = datetime.now()
         
-        logger.info("🚀 MedyDorker v3.0 Starting...")
+        logger.info("🚀 MadyDorker v3.0 Starting...")
         
         # Start proxy manager (load files, health check, background tasks)
         if self.proxy_manager:
@@ -1848,7 +1848,7 @@ class MedyDorkerPipeline:
         
         lines = []
         lines.append("=" * 70)
-        lines.append(f"  MedyDorker v3.15 — Hourly Export #{self._export_counter}")
+        lines.append(f"  MadyDorker v3.15 — Hourly Export #{self._export_counter}")
         lines.append(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"  Uptime: {stats.get('uptime', 'N/A')}")
         lines.append("=" * 70)
@@ -2002,16 +2002,16 @@ class MedyDorkerPipeline:
 
 # ==================== TELEGRAM BOT HANDLERS ====================
 
-pipeline: Optional[MedyDorkerPipeline] = None
+pipeline: Optional[MadyDorkerPipeline] = None
 pipeline_task: Optional[asyncio.Task] = None
 scan_tasks: Dict[int, asyncio.Task] = {}  # chat_id -> running scan task
 
 
-def get_pipeline() -> MedyDorkerPipeline:
+def get_pipeline() -> MadyDorkerPipeline:
     """Get or create the pipeline instance."""
     global pipeline
     if pipeline is None:
-        pipeline = MedyDorkerPipeline()
+        pipeline = MadyDorkerPipeline()
     return pipeline
 
 
@@ -2032,7 +2032,7 @@ def _build_stats_header() -> str:
     stats = p.get_stats()
     running = stats["running"]
     return (
-        f"⚡ <b>MedyDorker v3.16</b>\n"
+        f"⚡ <b>MadyDorker v3.16</b>\n"
         f"<i>Automated Recon &amp; Exploitation</i>\n"
         f"\n"
         f"{'🟢 <b>ACTIVE</b>' if running else '⚫ Idle'}"
@@ -2251,7 +2251,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = (
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"  {status_icon} <b>MedyDorker — {status_text}</b>\n"
+        f"  {status_icon} <b>MadyDorker — {status_text}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"\n"
         f"  ⏱ Uptime: <b>{stats.get('uptime', '—')}</b>\n"
@@ -4273,7 +4273,7 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 document=f,
                 filename=os.path.basename(filepath),
                 caption=(
-                    f"📁 MedyDorker Export\n"
+                    f"📁 MadyDorker Export\n"
                     f"URLs: {stats['urls_scanned']} | "
                     f"SQLi: {stats['sqli_vulns']} | "
                     f"Secrets: {stats['secrets_found']} | "
@@ -4592,11 +4592,11 @@ def main():
         logger.warning("python-telegram-bot not installed, running pipeline without bot interface")
         # Run pipeline directly
         global pipeline
-        pipeline = MedyDorkerPipeline(config)
+        pipeline = MadyDorkerPipeline(config)
         asyncio.run(pipeline.start())
         return
     
-    logger.info("Starting MedyDorker v3.0 Telegram Bot...")
+    logger.info("Starting MadyDorker v3.0 Telegram Bot...")
     
     app = Application.builder().token(config.telegram_bot_token).build()
     

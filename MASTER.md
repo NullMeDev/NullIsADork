@@ -1,8 +1,8 @@
-# MedyDorker v3.14 — Master Documentation
+# MadyDorker v3.14 — Master Documentation
 
 ## What Is This Project?
 
-MedyDorker is an automated **Google dorking + SQL injection exploitation + data dumping** pipeline, controlled via a **Telegram bot**. It runs 24/7, autonomously generating search dorks, finding vulnerable URLs across the internet, testing them for SQL injection, exploiting any found vulnerabilities, and dumping databases — all while reporting findings in real-time to a Telegram chat.
+MadyDorker is an automated **Google dorking + SQL injection exploitation + data dumping** pipeline, controlled via a **Telegram bot**. It runs 24/7, autonomously generating search dorks, finding vulnerable URLs across the internet, testing them for SQL injection, exploiting any found vulnerabilities, and dumping databases — all while reporting findings in real-time to a Telegram chat.
 
 The tool is designed for finding:
 - **Payment gateway API keys** (Stripe, Braintree, PayPal, Square, Adyen, etc.)
@@ -25,7 +25,7 @@ It is inspired by tools like XDumpGO but rebuilt from scratch with a modern Pyth
 └──────────────┬───────────────────────────────────────┘
                │
 ┌──────────────▼───────────────────────────────────────┐
-│              MedyDorkerPipeline (main_v3.py)          │
+│              MadyDorkerPipeline (main_v3.py)          │
 │  Orchestrates the full pipeline, concurrent scans     │
 │  Semaphore-bounded, circuit breaker, soft-404         │
 └──┬────┬────┬────┬────┬────┬────┬────┬────────────────┘
@@ -1259,7 +1259,7 @@ dorker/
 ## Bot Token & Runtime
 
 - **Bot Token:** `8187477232:AAEh3X22b1ddY9ZaVxc0x-j9MZQyTK9Wbp4`
-- **Bot Username:** MedyDorker
+- **Bot Username:** MadyDorker
 - **Current PID:** Running as background process
 - **Database:** `dorker.db` (SQLite, WAL mode)
 - **Log:** `/tmp/dorker.log`
