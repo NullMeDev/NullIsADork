@@ -634,49 +634,55 @@ class MadyDorkerPipeline:
                     
                     # Step 0: Soft-404 detection
                     if self.config.soft404_detection:
-                        await self._detect_soft_404(domain, session)
+                        try:
+                            await self._detect_soft_404(domain, session)
+                        except Exception as e:
+                            logger.debug(f"Soft-404 detection failed for {domain}: {e}")
                     
                     # Step 1: WAF Detection
                     waf_info = None
                     waf_name = None
                     if self.config.waf_detection_enabled:
-                        waf_info = await self.waf_detector.detect(url, session)
-                        waf_name = waf_info.waf
-                        result["waf"] = {
-                            "name": waf_info.waf,
-                            "cdn": waf_info.cdn,
-                            "bot_protection": waf_info.bot_protection,
-                            "risk": waf_info.risk_level,
-                            "cms": waf_info.cms,
-                        }
-                        
-                        # Skip if too protected (unless captcha can be solved)
-                        should_skip = False
-                        if self.config.waf_skip_extreme and waf_info.risk_level == "extreme":
-                            should_skip = True
-                        if self.config.waf_skip_high and waf_info.risk_level == "high":
-                            should_skip = True
-                        
-                        # Attempt captcha solving if bot protection detected
-                        if waf_info.bot_protection and self.captcha_solver and self.captcha_solver.auto_solve_target:
-                            from captcha_solver import SitekeyExtractor
-                            captcha_type = SitekeyExtractor.detect_type_from_name(waf_info.bot_protection)
-                            if captcha_type:
-                                logger.info(f"Bot protection ({waf_info.bot_protection}) on {url} — attempting captcha solve")
-                                # Fetch page HTML for sitekey extraction
-                                try:
-                                    async with session.get(url, ssl=False) as captcha_resp:
-                                        captcha_html = await captcha_resp.text()
-                                    solve_result = await self.captcha_solver.solve_from_html(captcha_html, url)
-                                    if solve_result.success:
-                                        logger.info(f"Captcha solved for {url} via {solve_result.provider} — proceeding")
-                                        should_skip = False  # Override skip, we solved the captcha
-                                except Exception as e:
-                                    logger.debug(f"Captcha solve attempt failed for {url}: {e}")
-                        
-                        if should_skip:
-                            logger.info(f"Skipping {url} — {waf_info.risk_level} protection ({waf_info.waf or waf_info.bot_protection})")
-                            return result
+                        try:
+                            waf_info = await self.waf_detector.detect(url, session)
+                            waf_name = waf_info.waf
+                            result["waf"] = {
+                                "name": waf_info.waf,
+                                "cdn": waf_info.cdn,
+                                "bot_protection": waf_info.bot_protection,
+                                "risk": waf_info.risk_level,
+                                "cms": waf_info.cms,
+                            }
+                            
+                            # Skip if too protected (unless captcha can be solved)
+                            should_skip = False
+                            if self.config.waf_skip_extreme and waf_info.risk_level == "extreme":
+                                should_skip = True
+                            if self.config.waf_skip_high and waf_info.risk_level == "high":
+                                should_skip = True
+                            
+                            # Attempt captcha solving if bot protection detected
+                            if waf_info.bot_protection and self.captcha_solver and self.captcha_solver.auto_solve_target:
+                                from captcha_solver import SitekeyExtractor
+                                captcha_type = SitekeyExtractor.detect_type_from_name(waf_info.bot_protection)
+                                if captcha_type:
+                                    logger.info(f"Bot protection ({waf_info.bot_protection}) on {url} — attempting captcha solve")
+                                    # Fetch page HTML for sitekey extraction
+                                    try:
+                                        async with session.get(url, ssl=False) as captcha_resp:
+                                            captcha_html = await captcha_resp.text()
+                                        solve_result = await self.captcha_solver.solve_from_html(captcha_html, url)
+                                        if solve_result.success:
+                                            logger.info(f"Captcha solved for {url} via {solve_result.provider} — proceeding")
+                                            should_skip = False  # Override skip, we solved the captcha
+                                    except Exception as e:
+                                        logger.debug(f"Captcha solve attempt failed for {url}: {e}")
+                            
+                            if should_skip:
+                                logger.info(f"Skipping {url} — {waf_info.risk_level} protection ({waf_info.waf or waf_info.bot_protection})")
+                                return result
+                        except Exception as e:
+                            logger.debug(f"WAF detection failed for {url}: {e}")
                     
                     # Step 1b: Port Scanning (v3.10)
                     if self.port_scanner:
@@ -881,6 +887,7 @@ class MadyDorkerPipeline:
                     # Step 4: SQLi Testing (now with cookie/header/POST injection + WAF bypass)
                     # Also test param URLs discovered by the recursive crawler
                     if self.config.sqli_enabled:
+                      try:
                         sqli_results = await self.sqli_scanner.scan(
 
                             url, session,
@@ -1017,6 +1024,8 @@ class MadyDorkerPipeline:
                                                 "tables": len(dump.tables), "rows": dump.total_rows,
                                                 "files": saved,
                                             })
+                      except Exception as e:
+                        logger.warning(f"SQLi scan failed for {url}: {e}")
                     
                     # Step 6: SQLi on crawler-discovered param URLs (v3.9)
                     if (self.config.sqli_enabled and discovered_param_urls and 

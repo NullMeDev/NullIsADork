@@ -138,7 +138,7 @@ class DorkerConfig:
     deep_crawl_concurrent: int = 10         # Max concurrent page fetches
     deep_crawl_delay: float = 0.1           # Delay between fetches (rate limit)
     deep_crawl_robots: bool = False         # Respect robots.txt Disallow rules
-    deep_crawl_sqli_limit: int = 5          # Max crawler-discovered param URLs to SQLi-test in pipeline
+    deep_crawl_sqli_limit: int = 15          # Max crawler-discovered param URLs to SQLi-test in pipeline
     
     # =============== PORT SCANNER (v3.10) ===============
     port_scan_enabled: bool = True
