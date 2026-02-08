@@ -843,3 +843,60 @@ ach-payment
 sepa-transfer
 direct-debit
 standing-order
+authorize.net
+accept.js
+authorizenet
+nuvei
+safecharge
+bluesnap
+paysafe
+opayo
+sage pay
+sagepay
+pin payments
+pinpayments
+bambora
+worldline
+global payments
+globalpay
+sezzle
+gocardless
+dwolla
+plaid
+helcim
+clover
+paytrace
+usaepay
+iats
+shift4
+rapyd
+dlocal
+ebanx
+ccavenue
+paymob
+airwallex
+payoneer
+skrill
+gcash
+maya
+paymaya
+lightspeed
+toast pos
+payment nonce
+card tokenization
+hosted fields
+payment form
+secure checkout
+merchant session
+drop-in checkout
+payment widget
+payment iframe
+tokenize card
+one time token
+card vault
+payment handle
+gateway token
+recurring billing
+saved cards
+subscription payment
+payment method token

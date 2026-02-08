@@ -20,14 +20,14 @@ class DorkerConfig:
     
     # =============== DORK GENERATOR ===============
     params_dir: str = os.path.join(os.path.dirname(__file__), "params")
-    max_dorks: int = 3000
-    max_per_pattern: int = 50
+    max_dorks: int = 15000
+    max_per_pattern: int = 200
     dork_shuffle: bool = True
     
     # =============== SEARCH ENGINE ===============
-    search_delay_min: int = 12
-    search_delay_max: int = 30
-    results_per_dork: int = 15
+    search_delay_min: int = 6
+    search_delay_max: int = 15
+    results_per_dork: int = 20
     engines: List[str] = field(default_factory=lambda: [
         "duckduckgo", "bing", "startpage", "yahoo",
         "ecosia", "qwant", "brave",
@@ -192,7 +192,7 @@ class DorkerConfig:
     
     # =============== DAEMON MODE ===============
     continuous: bool = True
-    cycle_delay: int = 120  # Seconds between dork cycles
+    cycle_delay: int = 60  # Seconds between dork cycles
     max_cycles: int = 0  # 0 = infinite
     
     # =============== STORAGE ===============
@@ -208,7 +208,7 @@ class DorkerConfig:
     engine_health_cooldown: int = 300  # Seconds to cool down a failing engine
     
     # =============== CONCURRENT PROCESSING ===============
-    concurrent_url_limit: int = 5  # Max URLs processed in parallel
+    concurrent_url_limit: int = 15  # Max URLs processed in parallel
     
     # =============== CIRCUIT BREAKER ===============
     circuit_breaker_threshold: int = 3  # Failures before blocking domain

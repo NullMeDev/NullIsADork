@@ -165,6 +165,35 @@ class DorkGenerator:
         '"(KW)" inurl:"whmcs" "clientarea" -demo',
         '"(KW)" inurl:"hostbill" payment -github',
         '"(KW)" inurl:"blesta" order -github',
+        
+        # === Authorize.net / Accept.js ===
+        '"(KW)" intext:"apiLoginID" "clientKey" -github',
+        '"(KW)" intext:"Accept.js" "authorize" -github',
+        
+        # === Nuvei / SafeCharge ===
+        '"(KW)" intext:"SafeCharge" "merchantId" -github',
+        '"(KW)" intext:"nuvei" "sessionToken" -github',
+        
+        # === BlueSnap ===
+        '"(KW)" intext:"bluesnap" "data-bluesnap" -github',
+        
+        # === Paysafe ===
+        '"(KW)" intext:"paysafe.checkout" -github',
+        
+        # === Opayo / Sage Pay ===
+        '"(KW)" intext:"sagepay" "vendor" -github',
+        
+        # === Global Payments ===
+        '"(KW)" intext:"GlobalPayments" "accessToken" -github',
+        
+        # === GoCardless ===
+        '"(KW)" intext:"gocardless" "access_token" -github',
+        
+        # === Shift4 ===
+        '"(KW)" intext:"shift4" "api_key" -github',
+        
+        # === Bambora ===
+        '"(KW)" intext:"bambora" "merchant_id" -github',
     ]
 
     # High-value static dorks (always included)
@@ -1333,6 +1362,243 @@ class DorkGenerator:
         'inurl:"productlist.php?fid=" -github',
         'inurl:"product-range.php?rangeID=" -github',
         'inurl:"catalog_main.php?catid=" -github',
+        
+        # ========== AUTHORIZE.NET (Accept.js) ==========
+        'intext:"Accept.dispatchData" -github -docs -authorize.net',
+        'intext:"apiLoginID" "clientKey" -github -docs -authorize.net',
+        'intext:"js.authorize.net" "Accept.js" -github -docs',
+        'intext:"AcceptUI" "apiLoginID" -github -docs',
+        'intext:"authorize.net" "login_id" "transaction_key" -github -docs',
+        'filetype:env "AUTHORIZE_NET" -github',
+        'filetype:env "AUTHORIZENET_LOGIN" OR "AUTHORIZENET_KEY" -github',
+        'intext:"x_login" "x_tran_key" -github -docs -authorize.net',
+        'inurl:"/checkout" intext:"Accept.js" "apiLoginID" -github',
+        '"AUTHORIZE_NET_API_LOGIN_ID" -github -docs',
+        '"AUTHORIZE_NET_TRANSACTION_KEY" -github -docs',
+        
+        # ========== NUVEI / SAFECHARGE ==========
+        'intext:"SafeCharge" "merchantId" "merchantSiteId" -github -docs',
+        'intext:"safecharge.js" -github -docs -nuvei.com -safecharge.com',
+        'intext:"SafeCharge.checkout" -github -docs',
+        'intext:"SafeCharge.fields" -github -docs -nuvei.com',
+        'intext:"nuvei" "merchantId" "merchantSiteId" -github -docs',
+        'filetype:env "NUVEI" OR "SAFECHARGE" -github',
+        'intext:"cdn.safecharge.com" -github -docs',
+        '"NUVEI_MERCHANT_ID" OR "SAFECHARGE_MERCHANT_ID" -github',
+        
+        # ========== BLUESNAP ==========
+        'intext:"bluesnap" "hostedPaymentFieldsCreate" -github -docs -bluesnap.com',
+        'intext:"data-bluesnap" -github -docs -bluesnap.com',
+        'intext:"bluesnap.js" "token" -github -docs',
+        'intext:"pay.bluesnap.com" -github -docs -bluesnap.com',
+        'intext:"sandpay.bluesnap.com" -github -docs',
+        'filetype:env "BLUESNAP" -github',
+        '"BLUESNAP_API_KEY" OR "BLUESNAP_PASSWORD" -github',
+        
+        # ========== PAYSAFE ==========
+        'intext:"paysafe.checkout.setup" -github -docs -paysafe.com',
+        'intext:"hosted.paysafe.com" -github -docs',
+        'intext:"paysafe" "apiKey" "environment" "LIVE" -github -docs',
+        'intext:"paysafe.checkout" -github -docs -paysafe.com',
+        'filetype:env "PAYSAFE" -github',
+        '"PAYSAFE_API_KEY" OR "PAYSAFE_API_SECRET" -github',
+        
+        # ========== OPAYO / SAGE PAY ==========
+        'intext:"sagepay" "tokeniseCardDetails" -github -docs',
+        'intext:"sagepay.js" "merchantSessionKey" -github -docs',
+        'intext:"opayo" "merchantSessionKey" -github -docs',
+        'intext:"pi-live.sagepay.com" -github -docs -sagepay.com',
+        'filetype:env "SAGEPAY" OR "OPAYO" -github',
+        '"SAGEPAY_VENDOR" OR "OPAYO_VENDOR" -github',
+        'intext:"sagepay" "vendor" "integration_key" -github -docs',
+        
+        # ========== PIN PAYMENTS (AUSTRALIA) ==========
+        'intext:"Pin.Api" -github -docs -pinpayments.com',
+        'intext:"cdn.pinpayments.com" "pin.v2.js" -github -docs',
+        'intext:"pinpayments" "publishable" -github -docs',
+        'filetype:env "PIN_PAYMENTS" OR "PINPAYMENTS" -github',
+        '"PIN_SECRET_KEY" OR "PIN_PUBLISHABLE_KEY" -github',
+        
+        # ========== BAMBORA / WORLDLINE ==========
+        'intext:"customcheckout" "bambora" -github -docs -bambora.com',
+        'intext:"customcheckout.bambora" -github -docs',
+        'intext:"bambora" "merchant_id" "passcode" -github -docs',
+        'filetype:env "BAMBORA" -github',
+        '"BAMBORA_MERCHANT_ID" OR "BAMBORA_API_KEY" -github',
+        
+        # ========== GLOBAL PAYMENTS ==========
+        'intext:"GlobalPayments.configure" -github -docs -globalpayments.com',
+        'intext:"GlobalPayments.creditCard" -github -docs',
+        'intext:"js.globalpay.com" -github -docs -globalpayments.com',
+        'intext:"globalpayments" "app_id" "app_key" -github -docs',
+        'filetype:env "GLOBAL_PAYMENTS" OR "GLOBALPAY" -github',
+        '"GP_APP_ID" OR "GP_APP_KEY" -github',
+        
+        # ========== SEZZLE ==========
+        'intext:"checkout-sdk.sezzle.com" -github -docs -sezzle.com',
+        'intext:"sezzle" "publicKey" "apiMode" -github -docs',
+        'intext:"Sezzle" "sz-checkout-button" -github -docs -sezzle.com',
+        'filetype:env "SEZZLE" -github',
+        '"SEZZLE_PUBLIC_KEY" OR "SEZZLE_PRIVATE_KEY" -github',
+        
+        # ========== GOCARDLESS ==========
+        'intext:"GoCardlessDropin.create" -github -docs -gocardless.com',
+        'intext:"pay.gocardless.com" "dropin" -github -docs',
+        'intext:"gocardless" "access_token" -github -docs -gocardless.com',
+        'filetype:env "GOCARDLESS" -github',
+        '"GOCARDLESS_ACCESS_TOKEN" OR "GOCARDLESS_ENVIRONMENT" -github',
+        
+        # ========== DWOLLA ==========
+        'intext:"dwolla" "client_id" "client_secret" -github -docs -dwolla.com',
+        'intext:"dwolla.js" -github -docs -dwolla.com',
+        'intext:"dwolla" "environment" "api_key" -github -docs',
+        'filetype:env "DWOLLA" -github',
+        '"DWOLLA_KEY" OR "DWOLLA_SECRET" -github',
+        
+        # ========== PLAID ==========
+        'intext:"Plaid.create" "public_key" -github -docs -plaid.com',
+        'intext:"plaid" "client_id" "secret" -github -docs -plaid.com',
+        'intext:"cdn.plaid.com" "link-initialize" -github -docs',
+        'filetype:env "PLAID_SECRET" OR "PLAID_CLIENT_ID" -github',
+        '"PLAID_PUBLIC_KEY" -github -docs',
+        
+        # ========== HELCIM ==========
+        'intext:"helcim" "api-token" -github -docs -helcim.com',
+        'intext:"helcimjs" -github -docs -helcim.com',
+        'filetype:env "HELCIM" -github',
+        '"HELCIM_API_TOKEN" -github',
+        
+        # ========== CLOVER ==========
+        'intext:"clover" "access_token" "merchant_id" -github -docs -clover.com',
+        'intext:"clover.js" -github -docs -clover.com',
+        'intext:"sandbox.dev.clover.com" OR "api.clover.com" "access_token" -github',
+        'filetype:env "CLOVER" -github',
+        '"CLOVER_API_KEY" OR "CLOVER_MERCHANT_ID" -github',
+        
+        # ========== PAYTRACE ==========
+        'intext:"paytrace" "api_key" -github -docs -paytrace.com',
+        'intext:"paytrace" "user_name" "password" -github -docs',
+        'filetype:env "PAYTRACE" -github',
+        '"PAYTRACE_API_KEY" OR "PAYTRACE_USERNAME" -github',
+        
+        # ========== USAEPAY ==========
+        'intext:"usaepay" "source_key" "pin" -github -docs -usaepay.com',
+        'intext:"usaepay" "UmKey" -github -docs',
+        'filetype:env "USAEPAY" -github',
+        '"USAEPAY_SOURCE_KEY" OR "USAEPAY_PIN" -github',
+        
+        # ========== iATS PAYMENTS ==========
+        'intext:"iats" "agentcode" "password" -github -docs -iatspayments.com',
+        'intext:"iatspayments" "agent_code" -github -docs',
+        'filetype:env "IATS" -github',
+        
+        # ========== SHIFT4 ==========
+        'intext:"shift4" "api_key" -github -docs -shift4.com',
+        'intext:"js.shift4.com" -github -docs',
+        'filetype:env "SHIFT4" -github',
+        '"SHIFT4_SECRET_KEY" OR "SHIFT4_PUBLIC_KEY" -github',
+        
+        # ========== RAPYD ==========
+        'intext:"rapyd" "access_key" "secret_key" -github -docs -rapyd.net',
+        'intext:"sandboxapi.rapyd.net" OR "api.rapyd.net" -github -docs',
+        'filetype:env "RAPYD" -github',
+        '"RAPYD_ACCESS_KEY" OR "RAPYD_SECRET_KEY" -github',
+        
+        # ========== DLOCAL ==========
+        'intext:"dlocal" "x_login" "x_trans_key" -github -docs -dlocal.com',
+        'intext:"dlocal" "api_key" "secret_key" -github -docs',
+        'filetype:env "DLOCAL" -github',
+        '"DLOCAL_API_KEY" OR "DLOCAL_SECRET_KEY" -github',
+        
+        # ========== EBANX ==========
+        'intext:"ebanx" "integration_key" -github -docs -ebanx.com',
+        'intext:"ebanx" "public_integration_key" -github -docs',
+        'filetype:env "EBANX" -github',
+        '"EBANX_INTEGRATION_KEY" -github',
+        
+        # ========== CCAVENUE ==========
+        'intext:"ccavenue" "merchant_id" "access_code" "working_key" -github -docs',
+        'intext:"ccavenue" "merchant_id" -github -docs -ccavenue.com',
+        'filetype:env "CCAVENUE" -github',
+        '"CCAVENUE_MERCHANT_ID" OR "CCAVENUE_WORKING_KEY" -github',
+        
+        # ========== PAYMOB (EGYPT/MENA) ==========
+        'intext:"paymob" "api_key" "integration_id" -github -docs -paymob.com',
+        'intext:"accept.paymob.com" -github -docs',
+        'filetype:env "PAYMOB" -github',
+        '"PAYMOB_API_KEY" OR "PAYMOB_INTEGRATION_ID" -github',
+        
+        # ========== AIRWALLEX ==========
+        'intext:"airwallex" "client_id" "api_key" -github -docs -airwallex.com',
+        'intext:"checkout.airwallex.com" -github -docs',
+        'filetype:env "AIRWALLEX" -github',
+        '"AIRWALLEX_API_KEY" OR "AIRWALLEX_CLIENT_ID" -github',
+        
+        # ========== PAYONEER ==========
+        'intext:"payoneer" "client_id" "client_secret" -github -docs -payoneer.com',
+        'filetype:env "PAYONEER" -github',
+        '"PAYONEER_API_KEY" -github',
+        
+        # ========== SKRILL ==========
+        'intext:"skrill" "merchant_id" "secret_word" -github -docs -skrill.com',
+        'intext:"pay.skrill.com" "pay_to_email" -github -docs',
+        'filetype:env "SKRILL" -github',
+        '"SKRILL_MERCHANT_ID" OR "SKRILL_SECRET" -github',
+        
+        # ========== GCASH / MAYA (PHILIPPINES) ==========
+        'intext:"gcash" "api_key" "merchant" -github -docs',
+        'intext:"maya" "public_key" "secret_key" checkout -github -docs',
+        'intext:"paymaya" "pk-" -github -docs -paymaya.com',
+        
+        # ========== LIGHTSPEED ==========
+        'intext:"lightspeed" "api_key" "api_secret" -github -docs -lightspeedhq.com',
+        'filetype:env "LIGHTSPEED" -github',
+        '"LIGHTSPEED_API_KEY" -github',
+        
+        # ========== TOAST (RESTAURANT POS) ==========
+        'intext:"toast" "client_id" "client_secret" "restaurant" -github -docs -toasttab.com',
+        'filetype:env "TOAST_CLIENT" -github',
+        
+        # ========== ADDITIONAL PAYMENT .ENV LEAKS ==========
+        'filetype:env "PAYMENT_SECRET" OR "PAYMENT_API_KEY" -github',
+        'filetype:env "MERCHANT_SECRET" OR "MERCHANT_KEY" -github',
+        'filetype:env "GATEWAY_KEY" OR "GATEWAY_SECRET" -github',
+        'filetype:env "CHECKOUT_SECRET" OR "CHECKOUT_KEY" -github',
+        'filetype:env "TRANSACTION_KEY" -github',
+        'filetype:env "CARD_PROCESSING" -github',
+        
+        # ========== ADDITIONAL JS BUNDLE LEAKS ==========
+        'inurl:".js" "apiLoginID" "clientKey" -github',
+        'inurl:".js" "SafeCharge" "merchantId" -github',
+        'inurl:".js" "bluesnap" "token" -github',
+        'inurl:".js" "paysafe" "apiKey" -github',
+        'inurl:".js" "sagepay" "merchantSessionKey" -github',
+        'inurl:".js" "GlobalPayments.configure" -github',
+        'inurl:".js" "Pin.Api" -github',
+        'inurl:".js" "customcheckout" "bambora" -github',
+        'inurl:".js.map" "authorize" "login" "transaction_key" -github',
+        'inurl:".js.map" "nuvei" OR "safecharge" "merchant" -github',
+        
+        # ========== CONFIG FILE LEAKS (MULTI-PROCESSOR) ==========
+        'filetype:json "api_key" "merchant_id" "payment" -github -npm',
+        'filetype:yaml "payment_gateway" "api_key" "secret" -github',
+        'filetype:xml "merchantID" "transactionKey" -github',
+        'filetype:properties "payment" "api.key" "secret" -github',
+        'filetype:conf "merchant" "password" "payment" -github',
+        'filetype:ini "payment" "secret_key" "api_key" -github',
+        'filetype:toml "payment" "api_key" -github',
+        
+        # ========== CHECKOUT PAGE DISCOVERY (GENERIC INJECTABLE) ==========
+        'inurl:"payment.php?order_id=" -github',
+        'inurl:"checkout.php?session=" -github',
+        'inurl:"pay.php?invoice=" -github',
+        'inurl:"process_payment.php?id=" -github',
+        'inurl:"complete_order.php?ref=" -github',
+        'inurl:"billing.php?account=" -github',
+        'inurl:"subscribe.php?plan=" -github',
+        'inurl:"donate.php?amount=" -github',
+        'inurl:"purchase.php?item=" -github',
+        'inurl:"transaction.php?txn=" -github',
     ]
 
     def __init__(self, params_dir: str = None):
@@ -1443,7 +1709,7 @@ class DorkGenerator:
         
         return dorks
 
-    def generate_all(self, max_total: int = 50000, max_per_pattern: int = 500) -> List[str]:
+    def generate_all(self, max_total: int = 100000, max_per_pattern: int = 500) -> List[str]:
         """Generate all dorks from all patterns + static dorks.
         
         Args:
