@@ -2862,11 +2862,15 @@ async def _do_scan(update: Update, url: str):
                 
                 # Add JS-discovered secrets to our collection
                 for s in js_analysis_result.secrets:
-                    all_secrets.append(type('Secret', (), {
-                        'url': url, 'type': s.secret_type, 'value': s.value,
-                        'category': 'js_bundle', 'confidence': s.confidence,
-                        'source': s.source_file,
-                    })())
+                    all_secrets.append(ExtractedSecret(
+                        url=url,
+                        type=s.secret_type,
+                        category='js_bundle',
+                        key_name=s.key_name,
+                        value=s.value,
+                        confidence=s.confidence,
+                        context=s.source_file,
+                    ))
                 
                 # Add page routes as URLs to crawl
                 for route in js_analysis_result.page_routes:
