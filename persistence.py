@@ -257,8 +257,19 @@ class DorkerDB:
             CREATE INDEX IF NOT EXISTS idx_port_domain ON port_scans(domain);
             CREATE INDEX IF NOT EXISTS idx_oob_url ON oob_results(url);
             CREATE INDEX IF NOT EXISTS idx_key_type ON key_validations(key_type);
+            CREATE TABLE IF NOT EXISTS failed_urls (
+                url_hash TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                fail_count INTEGER DEFAULT 1,
+                last_error TEXT,
+                first_failed REAL NOT NULL,
+                last_failed REAL NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_processed_domain ON processed_urls(domain);
             CREATE INDEX IF NOT EXISTS idx_processed_at ON processed_urls(processed_at);
+            CREATE INDEX IF NOT EXISTS idx_failed_domain ON failed_urls(domain);
             CREATE INDEX IF NOT EXISTS idx_stripe_keys_domain ON stripe_keys(domain);
             CREATE INDEX IF NOT EXISTS idx_shopify_domain ON shopify_stores(domain);
         """)
@@ -275,22 +286,27 @@ class DorkerDB:
     def add_seen_domain(self, domain: str):
         now = time.time()
         conn = self._get_conn()
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO seen_domains (domain, first_seen, last_seen, scan_count) 
             VALUES (?, ?, ?, 1)
             ON CONFLICT(domain) DO UPDATE SET 
                 last_seen = ?, scan_count = scan_count + 1
-        """, (domain, now, now, now))
+        """,
+            (domain, now, now, now),
+        )
         conn.commit()
 
     def is_domain_seen(self, domain: str) -> bool:
         conn = self._get_conn()
-        row = conn.execute("SELECT 1 FROM seen_domains WHERE domain = ?", (domain,)).fetchone()
+        row = conn.execute(
+            "SELECT 1 FROM seen_domains WHERE domain = ?", (domain,)
+        ).fetchone()
         return row is not None
 
     def is_domain_on_cooldown(self, domain: str, cooldown_hours: int = 24) -> bool:
         """Check if domain was scanned within the cooldown period.
-        
+
         Returns True if domain should be skipped (still on cooldown).
         Returns False if domain can be revisited (cooldown expired or never seen).
         If cooldown_hours == 0, acts as permanent block (old behavior).
@@ -301,28 +317,35 @@ class DorkerDB:
         cutoff = time.time() - (cooldown_hours * 3600)
         row = conn.execute(
             "SELECT last_seen FROM seen_domains WHERE domain = ? AND last_seen > ?",
-            (domain, cutoff)
+            (domain, cutoff),
         ).fetchone()
         return row is not None
 
     def add_processed_url(self, url: str, domain: str):
         """Record a URL as processed (permanent URL-level dedup)."""
         import hashlib
-        url_hash = hashlib.md5(url.encode(errors='ignore')).hexdigest()
+
+        url_hash = hashlib.md5(url.encode(errors="ignore")).hexdigest()
         now = time.time()
         conn = self._get_conn()
-        conn.execute("""
+        conn.execute(
+            """
             INSERT OR IGNORE INTO processed_urls (url_hash, url, domain, processed_at)
             VALUES (?, ?, ?, ?)
-        """, (url_hash, url[:2000], domain, now))
+        """,
+            (url_hash, url[:2000], domain, now),
+        )
         conn.commit()
 
     def is_url_processed(self, url: str) -> bool:
         """Check if this exact URL has been processed before."""
         import hashlib
-        url_hash = hashlib.md5(url.encode(errors='ignore')).hexdigest()
+
+        url_hash = hashlib.md5(url.encode(errors="ignore")).hexdigest()
         conn = self._get_conn()
-        row = conn.execute("SELECT 1 FROM processed_urls WHERE url_hash = ?", (url_hash,)).fetchone()
+        row = conn.execute(
+            "SELECT 1 FROM processed_urls WHERE url_hash = ?", (url_hash,)
+        ).fetchone()
         return row is not None
 
     def get_processed_url_count(self) -> int:
@@ -336,6 +359,54 @@ class DorkerDB:
         conn = self._get_conn()
         conn.execute("DELETE FROM processed_urls WHERE processed_at < ?", (cutoff,))
         conn.commit()
+
+    # ═══════════════ FAILED URL TRACKING (retry logic) ═══════════════
+
+    def record_url_failure(self, url: str, domain: str, error: str = ""):
+        """Record a URL processing failure. Increments fail_count on each call."""
+        import hashlib
+
+        url_hash = hashlib.md5(url.encode(errors="ignore")).hexdigest()
+        now = time.time()
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """
+                INSERT INTO failed_urls (url_hash, url, domain, fail_count, last_error, first_failed, last_failed)
+                VALUES (?, ?, ?, 1, ?, ?, ?)
+                ON CONFLICT(url_hash) DO UPDATE SET
+                    fail_count = fail_count + 1,
+                    last_error = ?,
+                    last_failed = ?
+            """,
+                (url_hash, url[:2000], domain, error, now, now, error, now),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"DB record_url_failure error: {e}")
+
+    def get_url_fail_count(self, url: str) -> int:
+        """Return the number of times this URL has failed processing."""
+        import hashlib
+
+        url_hash = hashlib.md5(url.encode(errors="ignore")).hexdigest()
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT fail_count FROM failed_urls WHERE url_hash = ?", (url_hash,)
+        ).fetchone()
+        return row["fail_count"] if row else 0
+
+    def clear_url_failure(self, url: str):
+        """Remove failure record for a URL (called on successful processing)."""
+        import hashlib
+
+        url_hash = hashlib.md5(url.encode(errors="ignore")).hexdigest()
+        conn = self._get_conn()
+        try:
+            conn.execute("DELETE FROM failed_urls WHERE url_hash = ?", (url_hash,))
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"DB clear_url_failure error: {e}")
 
     def get_seen_domains(self) -> set:
         conn = self._get_conn()
@@ -352,21 +423,30 @@ class DorkerDB:
     def add_vulnerable_url(self, vuln: Dict):
         conn = self._get_conn()
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR IGNORE INTO vulnerable_urls 
                 (url, parameter, injection_type, dbms, technique, confidence,
                  injection_point, db_version, current_db, current_user,
                  column_count, payload_used, found_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                vuln.get("url", ""), vuln.get("param", ""),
-                vuln.get("type", ""), vuln.get("dbms", ""),
-                vuln.get("technique", ""), vuln.get("confidence", 0),
-                vuln.get("injection_point", "url"),
-                vuln.get("db_version", ""), vuln.get("current_db", ""),
-                vuln.get("current_user", ""), vuln.get("column_count", 0),
-                vuln.get("payload_used", ""), time.time(),
-            ))
+            """,
+                (
+                    vuln.get("url", ""),
+                    vuln.get("param", ""),
+                    vuln.get("type", ""),
+                    vuln.get("dbms", ""),
+                    vuln.get("technique", ""),
+                    vuln.get("confidence", 0),
+                    vuln.get("injection_point", "url"),
+                    vuln.get("db_version", ""),
+                    vuln.get("current_db", ""),
+                    vuln.get("current_user", ""),
+                    vuln.get("column_count", 0),
+                    vuln.get("payload_used", ""),
+                    time.time(),
+                ),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB insert vuln error: {e}")
@@ -385,15 +465,24 @@ class DorkerDB:
 
     # ═══════════════ GATEWAY KEYS ═══════════════
 
-    def add_gateway_key(self, url: str, key_type: str, key_value: str,
-                        source: str = "", confidence: float = 0.0):
+    def add_gateway_key(
+        self,
+        url: str,
+        key_type: str,
+        key_value: str,
+        source: str = "",
+        confidence: float = 0.0,
+    ):
         conn = self._get_conn()
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR IGNORE INTO gateway_keys 
                 (url, key_type, key_value, source, confidence, found_at)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (url, key_type, key_value, source, confidence, time.time()))
+            """,
+                (url, key_type, key_value, source, confidence, time.time()),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB insert gateway error: {e}")
@@ -412,15 +501,25 @@ class DorkerDB:
 
     # ═══════════════ SECRETS ═══════════════
 
-    def add_secret(self, url: str, secret_type: str, key_name: str,
-                   value: str, category: str = "", confidence: float = 0.0):
+    def add_secret(
+        self,
+        url: str,
+        secret_type: str,
+        key_name: str,
+        value: str,
+        category: str = "",
+        confidence: float = 0.0,
+    ):
         conn = self._get_conn()
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR IGNORE INTO found_secrets 
                 (url, secret_type, key_name, value, category, confidence, found_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (url, secret_type, key_name, value, category, confidence, time.time()))
+            """,
+                (url, secret_type, key_name, value, category, confidence, time.time()),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB insert secret error: {e}")
@@ -442,15 +541,22 @@ class DorkerDB:
     def add_card_data(self, url: str, card: Dict):
         conn = self._get_conn()
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO card_data 
                 (url, card_number, expiry, cvv, cardholder, source, found_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                url, card.get("card_number", ""), card.get("expiry", ""),
-                card.get("cvv", ""), card.get("cardholder", ""),
-                card.get("source", ""), time.time(),
-            ))
+            """,
+                (
+                    url,
+                    card.get("card_number", ""),
+                    card.get("expiry", ""),
+                    card.get("cvv", ""),
+                    card.get("cardholder", ""),
+                    card.get("source", ""),
+                    time.time(),
+                ),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB insert card error: {e}")
@@ -464,20 +570,26 @@ class DorkerDB:
 
     def update_dork_score(self, dork: str, url_count: int):
         conn = self._get_conn()
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO dork_scores (dork, hits, uses, last_used)
             VALUES (?, ?, 1, ?)
             ON CONFLICT(dork) DO UPDATE SET
                 hits = hits + ?, uses = uses + 1, last_used = ?
-        """, (dork, url_count, time.time(), url_count, time.time()))
+        """,
+            (dork, url_count, time.time(), url_count, time.time()),
+        )
         conn.commit()
 
     def get_top_dorks(self, limit: int = 50) -> List[Tuple[str, float]]:
         conn = self._get_conn()
-        rows = conn.execute("""
+        rows = conn.execute(
+            """
             SELECT dork, CAST(hits AS REAL) / CASE WHEN uses = 0 THEN 1 ELSE uses END as score
             FROM dork_scores ORDER BY score DESC LIMIT ?
-        """, (limit,)).fetchall()
+        """,
+            (limit,),
+        ).fetchall()
         return [(r["dork"], r["score"]) for r in rows]
 
     # ═══════════════ ENGINE HEALTH ═══════════════
@@ -485,14 +597,18 @@ class DorkerDB:
     def update_engine_health(self, engine: str, success: bool):
         conn = self._get_conn()
         if success:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO engine_health (engine, successes, failures, consecutive_failures, last_used)
                 VALUES (?, 1, 0, 0, ?)
                 ON CONFLICT(engine) DO UPDATE SET
                     successes = successes + 1, consecutive_failures = 0, last_used = ?
-            """, (engine, time.time(), time.time()))
+            """,
+                (engine, time.time(), time.time()),
+            )
         else:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO engine_health (engine, successes, failures, consecutive_failures, last_used)
                 VALUES (?, 0, 1, 1, ?)
                 ON CONFLICT(engine) DO UPDATE SET
@@ -503,7 +619,9 @@ class DorkerDB:
                         ELSE cooldown_until 
                     END,
                     last_used = ?
-            """, (engine, time.time(), time.time() + 300, time.time()))
+            """,
+                (engine, time.time(), time.time() + 300, time.time()),
+            )
         conn.commit()
 
     def get_engine_stats(self) -> Dict:
@@ -516,7 +634,8 @@ class DorkerDB:
     def record_domain_failure(self, domain: str):
         now = time.time()
         conn = self._get_conn()
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO circuit_breaker (domain, failures, last_failure, blocked_until)
             VALUES (?, 1, ?, 0)
             ON CONFLICT(domain) DO UPDATE SET
@@ -526,14 +645,16 @@ class DorkerDB:
                     WHEN failures + 1 >= 3 THEN ?
                     ELSE blocked_until
                 END
-        """, (domain, now, now, now + 1800))  # Block for 30 minutes after 3 failures
+        """,
+            (domain, now, now, now + 1800),
+        )  # Block for 30 minutes after 3 failures
         conn.commit()
 
     def reset_domain_failure(self, domain: str):
         conn = self._get_conn()
         conn.execute(
             "UPDATE circuit_breaker SET failures = 0, blocked_until = 0 WHERE domain = ?",
-            (domain,)
+            (domain,),
         )
         conn.commit()
 
@@ -559,7 +680,9 @@ class DorkerDB:
     def is_content_seen(self, content: str) -> bool:
         h = hashlib.md5(content.encode(errors="ignore")).hexdigest()
         conn = self._get_conn()
-        row = conn.execute("SELECT 1 FROM content_hashes WHERE hash = ?", (h,)).fetchone()
+        row = conn.execute(
+            "SELECT 1 FROM content_hashes WHERE hash = ?", (h,)
+        ).fetchone()
         return row is not None
 
     def add_content_hash(self, content: str, url: str):
@@ -568,7 +691,7 @@ class DorkerDB:
         try:
             conn.execute(
                 "INSERT OR IGNORE INTO content_hashes (hash, url, first_seen) VALUES (?, ?, ?)",
-                (h, url, time.time())
+                (h, url, time.time()),
             )
             conn.commit()
         except Exception:
@@ -583,15 +706,28 @@ class DorkerDB:
 
     def add_cookie(self, url: str, name: str, value: str, cookie_type: str = ""):
         from urllib.parse import urlparse
+
         domain = urlparse(url).netloc
         conn = self._get_conn()
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO cookies (url, domain, cookie_name, cookie_value, cookie_type, found_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(domain, cookie_name) DO UPDATE SET
                     cookie_value = ?, found_at = ?
-            """, (url, domain, name, value, cookie_type, time.time(), value, time.time()))
+            """,
+                (
+                    url,
+                    domain,
+                    name,
+                    value,
+                    cookie_type,
+                    time.time(),
+                    value,
+                    time.time(),
+                ),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB insert cookie error: {e}")
@@ -599,10 +735,13 @@ class DorkerDB:
     def add_b3_cookie(self, url: str, header_name: str, header_value: str):
         conn = self._get_conn()
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO b3_cookies (url, header_name, header_value, found_at)
                 VALUES (?, ?, ?, ?)
-            """, (url, header_name, header_value, time.time()))
+            """,
+                (url, header_name, header_value, time.time()),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB insert b3 error: {e}")
@@ -611,7 +750,8 @@ class DorkerDB:
         conn = self._get_conn()
         if domain:
             rows = conn.execute(
-                "SELECT * FROM cookies WHERE domain = ? ORDER BY found_at DESC", (domain,)
+                "SELECT * FROM cookies WHERE domain = ? ORDER BY found_at DESC",
+                (domain,),
             ).fetchall()
         else:
             rows = conn.execute(
@@ -664,10 +804,13 @@ class DorkerDB:
 
     def add_scan_record(self, url: str, scan_type: str = "auto", findings: int = 0):
         conn = self._get_conn()
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO scan_history (url, scan_type, findings_count, scanned_at)
             VALUES (?, ?, ?, ?)
-        """, (url, scan_type, findings, time.time()))
+        """,
+            (url, scan_type, findings, time.time()),
+        )
         conn.commit()
 
     # ═══════════════ SOFT-404 FINGERPRINTING ═══════════════
@@ -682,11 +825,12 @@ class DorkerDB:
 
     # ═══════════════ MIGRATION FROM JSON FILES ═══════════════
 
-    def import_from_json_files(self, seen_file: str = None, vuln_file: str = None,
-                                gateway_file: str = None):
+    def import_from_json_files(
+        self, seen_file: str = None, vuln_file: str = None, gateway_file: str = None
+    ):
         """Import data from old JSON/text files into SQLite."""
         imported = 0
-        
+
         if seen_file and os.path.exists(seen_file):
             with open(seen_file) as f:
                 for line in f:
@@ -694,7 +838,7 @@ class DorkerDB:
                     if domain:
                         self.add_seen_domain(domain)
                         imported += 1
-        
+
         if vuln_file and os.path.exists(vuln_file):
             try:
                 with open(vuln_file) as f:
@@ -704,36 +848,61 @@ class DorkerDB:
                     imported += 1
             except Exception:
                 pass
-        
+
         if gateway_file and os.path.exists(gateway_file):
             try:
                 with open(gateway_file) as f:
                     gateways = json.load(f)
                 for g in gateways:
                     self.add_gateway_key(
-                        g.get("url", ""), g.get("type", ""),
-                        g.get("value", ""), g.get("source", "")
+                        g.get("url", ""),
+                        g.get("type", ""),
+                        g.get("value", ""),
+                        g.get("source", ""),
                     )
                     imported += 1
             except Exception:
                 pass
-        
+
         if imported > 0:
             logger.info(f"Imported {imported} records from JSON files")
         return imported
 
     # ═══════════════ PORT SCANS (v3.10) ═══════════════
 
-    def add_port_scan(self, url: str, domain: str, ip: str, port: int,
-                      service: str = "", banner: str = "", version: str = "",
-                      risk: str = "", notes: str = ""):
+    def add_port_scan(
+        self,
+        url: str,
+        domain: str,
+        ip: str,
+        port: int,
+        service: str = "",
+        banner: str = "",
+        version: str = "",
+        risk: str = "",
+        notes: str = "",
+    ):
         conn = self._get_conn()
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO port_scans 
                 (url, domain, ip, port, service, banner, version, risk, notes, found_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (url, domain, ip, port, service, banner, version, risk, notes, time.time()))
+            """,
+                (
+                    url,
+                    domain,
+                    ip,
+                    port,
+                    service,
+                    banner,
+                    version,
+                    risk,
+                    notes,
+                    time.time(),
+                ),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB insert port scan error: {e}")
@@ -743,7 +912,7 @@ class DorkerDB:
         if domain:
             rows = conn.execute(
                 "SELECT * FROM port_scans WHERE domain = ? ORDER BY found_at DESC LIMIT ?",
-                (domain, limit)
+                (domain, limit),
             ).fetchall()
         else:
             rows = conn.execute(
@@ -756,17 +925,23 @@ class DorkerDB:
     def add_oob_result(self, result: Dict):
         conn = self._get_conn()
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR IGNORE INTO oob_results 
                 (url, parameter, dbms, channel, extraction, callbacks, payloads_sent, found_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                result.get("url", ""), result.get("parameter", ""),
-                result.get("dbms", ""), result.get("channel", ""),
-                json.dumps(result.get("extraction", {})),
-                result.get("callbacks", 0), result.get("payloads_sent", 0),
-                time.time(),
-            ))
+            """,
+                (
+                    result.get("url", ""),
+                    result.get("parameter", ""),
+                    result.get("dbms", ""),
+                    result.get("channel", ""),
+                    json.dumps(result.get("extraction", {})),
+                    result.get("callbacks", 0),
+                    result.get("payloads_sent", 0),
+                    time.time(),
+                ),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB insert OOB error: {e}")
@@ -776,22 +951,25 @@ class DorkerDB:
     def add_key_validation(self, validation: Dict):
         conn = self._get_conn()
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR IGNORE INTO key_validations
                 (key_type, key_hash, is_live, confidence, risk_level,
                  account_info, permissions, source_url, found_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                validation.get("key_type", ""),
-                validation.get("key_hash", ""),
-                1 if validation.get("is_live") else 0,
-                validation.get("confidence", 0),
-                validation.get("risk_level", ""),
-                validation.get("account_info", "{}"),
-                validation.get("permissions", "[]"),
-                validation.get("source_url", ""),
-                time.time(),
-            ))
+            """,
+                (
+                    validation.get("key_type", ""),
+                    validation.get("key_hash", ""),
+                    1 if validation.get("is_live") else 0,
+                    validation.get("confidence", 0),
+                    validation.get("risk_level", ""),
+                    validation.get("account_info", "{}"),
+                    validation.get("permissions", "[]"),
+                    validation.get("source_url", ""),
+                    time.time(),
+                ),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB insert key validation error: {e}")
@@ -800,25 +978,35 @@ class DorkerDB:
         conn = self._get_conn()
         rows = conn.execute(
             "SELECT * FROM key_validations WHERE is_live = 1 ORDER BY found_at DESC LIMIT ?",
-            (limit,)
+            (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
 
     # ═══════════════ STRIPE KEYS ═══════════════
 
-    def add_stripe_key(self, domain: str, url: str, sk_live: str,
-                       pk_live: str = None, sk_test: str = None, pk_test: str = None):
+    def add_stripe_key(
+        self,
+        domain: str,
+        url: str,
+        sk_live: str,
+        pk_live: str = None,
+        sk_test: str = None,
+        pk_test: str = None,
+    ):
         """Insert or update a Stripe key pair. Deduplicates on sk_live."""
         conn = self._get_conn()
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO stripe_keys (domain, url, sk_live, pk_live, sk_test, pk_test, found_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(sk_live) DO UPDATE SET
                     pk_live = COALESCE(excluded.pk_live, stripe_keys.pk_live),
                     sk_test = COALESCE(excluded.sk_test, stripe_keys.sk_test),
                     pk_test = COALESCE(excluded.pk_test, stripe_keys.pk_test)
-            """, (domain, url, sk_live, pk_live, sk_test, pk_test, time.time()))
+            """,
+                (domain, url, sk_live, pk_live, sk_test, pk_test, time.time()),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB add_stripe_key error: {e}")
@@ -827,7 +1015,8 @@ class DorkerDB:
         """Update a Stripe key row with validation results."""
         conn = self._get_conn()
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE stripe_keys SET
                     is_validated = 1,
                     is_live = ?,
@@ -844,22 +1033,24 @@ class DorkerDB:
                     permissions = ?,
                     validated_at = ?
                 WHERE sk_live = ?
-            """, (
-                1 if data.get("is_live") else 0,
-                data.get("account_id", ""),
-                data.get("account_email", ""),
-                data.get("business_name", ""),
-                data.get("country", ""),
-                data.get("balance_json", "{}"),
-                data.get("charges_count", 0),
-                data.get("customers_count", 0),
-                data.get("products_count", 0),
-                data.get("subscriptions_count", 0),
-                data.get("risk_level", ""),
-                data.get("permissions", "[]"),
-                time.time(),
-                sk_live,
-            ))
+            """,
+                (
+                    1 if data.get("is_live") else 0,
+                    data.get("account_id", ""),
+                    data.get("account_email", ""),
+                    data.get("business_name", ""),
+                    data.get("country", ""),
+                    data.get("balance_json", "{}"),
+                    data.get("charges_count", 0),
+                    data.get("customers_count", 0),
+                    data.get("products_count", 0),
+                    data.get("subscriptions_count", 0),
+                    data.get("risk_level", ""),
+                    data.get("permissions", "[]"),
+                    time.time(),
+                    sk_live,
+                ),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB update_stripe_key_validation error: {e}")
@@ -869,40 +1060,54 @@ class DorkerDB:
         if live_only:
             rows = conn.execute(
                 "SELECT * FROM stripe_keys WHERE is_live = 1 ORDER BY validated_at DESC LIMIT ?",
-                (limit,)
+                (limit,),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM stripe_keys ORDER BY found_at DESC LIMIT ?",
-                (limit,)
+                "SELECT * FROM stripe_keys ORDER BY found_at DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(r) for r in rows]
 
     def get_stripe_key_count(self, live_only: bool = False) -> int:
         conn = self._get_conn()
         if live_only:
-            return conn.execute("SELECT COUNT(*) FROM stripe_keys WHERE is_live = 1").fetchone()[0]
+            return conn.execute(
+                "SELECT COUNT(*) FROM stripe_keys WHERE is_live = 1"
+            ).fetchone()[0]
         return conn.execute("SELECT COUNT(*) FROM stripe_keys").fetchone()[0]
 
     def get_stripe_key_by_domain(self, domain: str) -> Optional[Dict]:
         conn = self._get_conn()
-        row = conn.execute("SELECT * FROM stripe_keys WHERE domain = ? LIMIT 1", (domain,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM stripe_keys WHERE domain = ? LIMIT 1", (domain,)
+        ).fetchone()
         return dict(row) if row else None
 
     # ═══════════════ SHOPIFY STORES ═══════════════
 
-    def add_shopify_store(self, domain: str, url: str, payment_gateway: str = "",
-                          checkout_url: str = "", confidence: float = 0.0,
-                          store_name: str = "", findings_json: str = "{}",
-                          cookies_json: str = "{}"):
+    def add_shopify_store(
+        self,
+        domain: str,
+        url: str,
+        payment_gateway: str = "",
+        checkout_url: str = "",
+        confidence: float = 0.0,
+        store_name: str = "",
+        findings_json: str = "{}",
+        cookies_json: str = "{}",
+    ):
         """Insert or update a Shopify store. Deduplicates on domain."""
         conn = self._get_conn()
         # Check if stripe keys exist for this domain
-        has_sk = conn.execute(
-            "SELECT COUNT(*) FROM stripe_keys WHERE domain = ?", (domain,)
-        ).fetchone()[0] > 0
+        has_sk = (
+            conn.execute(
+                "SELECT COUNT(*) FROM stripe_keys WHERE domain = ?", (domain,)
+            ).fetchone()[0]
+            > 0
+        )
         try:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO shopify_stores
                     (domain, url, store_name, payment_gateway, checkout_url,
                      has_stripe_keys, platform_confidence, cookies_json, findings_json,
@@ -914,9 +1119,21 @@ class DorkerDB:
                     checkout_url = COALESCE(NULLIF(excluded.checkout_url, ''), shopify_stores.checkout_url),
                     has_stripe_keys = MAX(shopify_stores.has_stripe_keys, excluded.has_stripe_keys),
                     platform_confidence = MAX(shopify_stores.platform_confidence, excluded.platform_confidence)
-            """, (domain, url, store_name, payment_gateway, checkout_url,
-                  1 if has_sk else 0, confidence, cookies_json, findings_json,
-                  time.time(), time.time()))
+            """,
+                (
+                    domain,
+                    url,
+                    store_name,
+                    payment_gateway,
+                    checkout_url,
+                    1 if has_sk else 0,
+                    confidence,
+                    cookies_json,
+                    findings_json,
+                    time.time(),
+                    time.time(),
+                ),
+            )
             conn.commit()
         except Exception as e:
             logger.debug(f"DB add_shopify_store error: {e}")
@@ -924,8 +1141,7 @@ class DorkerDB:
     def get_shopify_stores(self, limit: int = 500) -> List[Dict]:
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT * FROM shopify_stores ORDER BY last_seen DESC LIMIT ?",
-            (limit,)
+            "SELECT * FROM shopify_stores ORDER BY last_seen DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -945,7 +1161,9 @@ class DorkerDB:
             ).rowcount
             conn.commit()
             if deleted > 0:
-                logger.info(f"Purged {deleted} scan_history entries older than {max_age_days} days")
+                logger.info(
+                    f"Purged {deleted} scan_history entries older than {max_age_days} days"
+                )
         except Exception as e:
             logger.debug(f"DB purge_old_scan_history error: {e}")
 
@@ -969,13 +1187,24 @@ class DorkerDB:
     def save_dork_checkpoint(self, cycle: int, dork_index: int, dork_hash: str = ""):
         """Save current dork progress so we can resume after restart."""
         conn = self._get_conn()
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO dork_checkpoint (id, cycle, dork_index, dork_hash, updated_at)
             VALUES (1, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 cycle = ?, dork_index = ?, dork_hash = ?, updated_at = ?
-        """, (cycle, dork_index, dork_hash, time.time(),
-              cycle, dork_index, dork_hash, time.time()))
+        """,
+            (
+                cycle,
+                dork_index,
+                dork_hash,
+                time.time(),
+                cycle,
+                dork_index,
+                dork_hash,
+                time.time(),
+            ),
+        )
         conn.commit()
 
     def get_dork_checkpoint(self) -> Optional[Dict]:
