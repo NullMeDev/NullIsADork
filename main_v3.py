@@ -1673,7 +1673,7 @@ class MadyDorkerPipeline:
                                     for r in xss_results
                                 ]
                                 for xr in xss_results:
-                                    await self.reporter.send_message(
+                                    await self.reporter.report_finding(url,
                                         f"🎯 <b>XSS Found!</b>\n"
                                         f"URL: <code>{url[:80]}</code>\n"
                                         f"Param: <code>{xr.parameter}</code>\n"
@@ -1694,7 +1694,7 @@ class MadyDorkerPipeline:
                                     for r in ssti_results
                                 ]
                                 for sr in ssti_results:
-                                    await self.reporter.send_message(
+                                    await self.reporter.report_finding(url,
                                         f"🔥 <b>SSTI Found!</b>\n"
                                         f"URL: <code>{url[:80]}</code>\n"
                                         f"Param: <code>{sr.parameter}</code>\n"
@@ -1710,17 +1710,17 @@ class MadyDorkerPipeline:
                             nosql_results = await self.nosql_scanner.scan(url, session, waf_name=waf_name)
                             if nosql_results:
                                 result["nosql"] = [
-                                    {"param": r.parameter, "type": r.nosql_type, "db": r.db_type,
-                                     "auth_bypass": r.auth_bypass, "confidence": r.confidence}
+                                    {"param": r.parameter, "type": r.nosql_type, "db": r.dbms,
+                                     "auth_bypass": getattr(r, 'auth_bypass', False), "confidence": r.confidence}
                                     for r in nosql_results
                                 ]
                                 for nr in nosql_results:
-                                    await self.reporter.send_message(
+                                    await self.reporter.report_finding(url,
                                         f"🍃 <b>NoSQL Injection!</b>\n"
                                         f"URL: <code>{url[:80]}</code>\n"
                                         f"Param: <code>{nr.parameter}</code>\n"
-                                        f"DB: {nr.db_type} | Type: {nr.nosql_type}\n"
-                                        f"Auth Bypass: {'YES' if nr.auth_bypass else 'No'}"
+                                        f"DB: {nr.dbms} | Type: {nr.nosql_type}\n"
+                                        f"Auth Bypass: {'YES' if getattr(nr, 'auth_bypass', False) else 'No'}"
                                     )
                         except Exception as e:
                             logger.debug(f"NoSQL scan error: {e}")
@@ -1754,7 +1754,7 @@ class MadyDorkerPipeline:
                                     for r in lfi_results
                                 ]
                                 for lr in lfi_results:
-                                    await self.reporter.send_message(
+                                    await self.reporter.report_finding(url,
                                         f"📂 <b>LFI/Path Traversal!</b>\n"
                                         f"URL: <code>{url[:80]}</code>\n"
                                         f"Param: <code>{lr.parameter}</code>\n"
@@ -1776,7 +1776,7 @@ class MadyDorkerPipeline:
                                     for r in ssrf_results
                                 ]
                                 for sr in ssrf_results:
-                                    await self.reporter.send_message(
+                                    await self.reporter.report_finding(url,
                                         f"🌐 <b>SSRF Found!</b>\n"
                                         f"URL: <code>{url[:80]}</code>\n"
                                         f"Param: <code>{sr.parameter}</code>\n"
@@ -1797,7 +1797,7 @@ class MadyDorkerPipeline:
                                     for r in cors_results
                                 ]
                                 for cr in cors_results:
-                                    await self.reporter.send_message(
+                                    await self.reporter.report_finding(url,
                                         f"🔓 <b>CORS Misconfig!</b>\n"
                                         f"URL: <code>{url[:80]}</code>\n"
                                         f"Type: {cr.cors_type}\n"
@@ -1817,7 +1817,7 @@ class MadyDorkerPipeline:
                                     for r in redir_results
                                 ]
                                 for rr in redir_results:
-                                    await self.reporter.send_message(
+                                    await self.reporter.report_finding(url,
                                         f"↪️ <b>Open Redirect!</b>\n"
                                         f"URL: <code>{url[:80]}</code>\n"
                                         f"Param: <code>{rr.parameter}</code>\n"
@@ -1837,7 +1837,7 @@ class MadyDorkerPipeline:
                                     for r in crlf_results
                                 ]
                                 for cr in crlf_results:
-                                    await self.reporter.send_message(
+                                    await self.reporter.report_finding(url,
                                         f"💉 <b>CRLF Injection!</b>\n"
                                         f"URL: <code>{url[:80]}</code>\n"
                                         f"Param: <code>{cr.parameter}</code>\n"
@@ -4619,11 +4619,12 @@ async def _do_authscan(update: Update, url: str, cookies: Dict[str, str]):
                     all_param_urls.add(ep.url)
             
             for s in js_result.secrets:
-                all_secrets.append(type('Secret', (), {
-                    'url': url, 'type': s.secret_type, 'value': s.value,
-                    'category': 'js_bundle', 'confidence': s.confidence,
-                    'source': s.source_file,
-                })())
+                all_secrets.append(ExtractedSecret(
+                    url=url, type=s.secret_type, category='js_bundle',
+                    key_name=getattr(s, 'key_name', s.secret_type),
+                    value=s.value, confidence=s.confidence,
+                    context=getattr(s, 'source_file', ''),
+                ))
             
             for route in js_result.page_routes:
                 if route.startswith("/"):
