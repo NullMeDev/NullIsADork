@@ -1609,7 +1609,7 @@ class MadyDorkerPipeline:
                                         except Exception:
                                             pass
 
-                                # Report summary to Telegram
+                                # Report summary to Telegram + zip of all findings
                                 js_msg = (
                                     f"🔬 <b>JS Bundle Analysis</b>\n"
                                     f"<code>{url[:60]}</code>\n"
@@ -1633,7 +1633,9 @@ class MadyDorkerPipeline:
                                 if js_analysis_result.env_vars:
                                     js_msg += f"🌐 Env Vars: {len(js_analysis_result.env_vars)} leaked\n"
 
-                                await self.reporter.report_finding(url, js_msg)
+                                await self.reporter.report_js_analysis(
+                                    url, js_analysis_result, caption_text=js_msg
+                                )
                                 logger.info(
                                     f"[JS] {url[:50]} → {len(js_analysis_result.api_endpoints)} endpoints, "
                                     f"{len(js_analysis_result.secrets)} secrets, {len(js_analysis_result.page_routes)} routes"
@@ -4567,6 +4569,11 @@ async def _do_scan(update: Update, url: str):
 
                 await update.message.reply_text(spa_msg, parse_mode="HTML")
 
+                # Attach zip of all JS findings
+                await self.reporter.report_js_analysis(
+                    url, js_analysis_result, caption_text=""
+                )
+
                 # Add JS-discovered endpoints as scan targets
                 for ep in js_analysis_result.api_endpoints:
                     ep_parsed = _urlparse(ep.url)
@@ -6031,6 +6038,11 @@ async def _do_authscan(update: Update, url: str, cookies: Dict[str, str]):
                 msg += f"  Routes: {len(js_result.page_routes)}\n"
 
             await update.message.reply_text(msg, parse_mode="HTML")
+
+            # Attach zip of all JS findings
+            await self.reporter.report_js_analysis(
+                url, js_result, caption_text=""
+            )
 
             for ep in js_result.api_endpoints:
                 all_discovered_endpoints.add(ep.url)

@@ -12,7 +12,9 @@ Posts categorized findings to a Telegram group:
 
 import asyncio
 import html
+import io
 import json
+import zipfile
 from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
@@ -180,6 +182,166 @@ class TelegramReporter:
             if len(chunks) > 1:
                 chunk = f"[{i+1}/{len(chunks)}]\n{chunk}"
             await self._send_message(chunk, parse_mode)
+
+    # ==================== DOCUMENT SENDING ====================
+
+    async def _send_document(self, file_bytes: bytes, filename: str,
+                             caption: str = "", parse_mode: str = "HTML"):
+        """Send a document (file) to the Telegram chat.
+
+        Args:
+            file_bytes: Raw bytes of the file to send
+            filename: Display name for the file
+            caption: Optional caption (max 1024 chars)
+            parse_mode: Parse mode for caption
+        """
+        if not self.chat_id:
+            return None
+
+        for attempt in range(3):
+            try:
+                now = asyncio.get_event_loop().time()
+                elapsed = now - self._last_send
+                if elapsed < self.rate_limit:
+                    await asyncio.sleep(self.rate_limit - elapsed)
+
+                msg = None
+                if HAS_TELEGRAM:
+                    from telegram import InputFile
+                    doc = InputFile(io.BytesIO(file_bytes), filename=filename)
+                    msg = await self.bot.send_document(
+                        chat_id=self.chat_id,
+                        document=doc,
+                        caption=caption[:1024] if caption else None,
+                        parse_mode=parse_mode,
+                    )
+                else:
+                    import aiohttp
+                    form = aiohttp.FormData()
+                    form.add_field("chat_id", str(self.chat_id))
+                    form.add_field("document", io.BytesIO(file_bytes),
+                                   filename=filename,
+                                   content_type="application/zip")
+                    if caption:
+                        form.add_field("caption", caption[:1024])
+                        form.add_field("parse_mode", parse_mode)
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            f"{self.api_url}/sendDocument", data=form
+                        ) as resp:
+                            if resp.status == 429:
+                                body = await resp.json(content_type=None)
+                                retry_after = body.get("parameters", {}).get("retry_after", 30)
+                                logger.debug(f"Telegram 429 — sleeping {retry_after}s (attempt {attempt+1}/3)")
+                                await asyncio.sleep(retry_after)
+                                continue
+                            if resp.status != 200:
+                                error = await resp.text()
+                                logger.error(f"Telegram sendDocument error: {error}")
+                                return None
+
+                self._last_send = asyncio.get_event_loop().time()
+                self.stats.messages_sent += 1
+                return msg
+
+            except RetryAfter as e:
+                logger.debug(f"Telegram 429 — sleeping {e.retry_after}s (attempt {attempt+1}/3)")
+                await asyncio.sleep(e.retry_after)
+                continue
+            except Exception as e:
+                logger.error(f"Failed to send Telegram document: {e}")
+                self.stats.errors += 1
+                return None
+
+        logger.warning("Telegram sendDocument failed after 3 retries")
+        return None
+
+    async def report_js_analysis(self, url: str, js_result, caption_text: str = ""):
+        """Report JS analysis with all findings zipped into a file attachment.
+
+        Produces a zip containing:
+          - endpoints.json   — all discovered API endpoints
+          - secrets.json     — all secrets/tokens found in JS
+          - routes.json      — page routes (React Router, Next.js, etc.)
+          - source_maps.json — leaked .map URLs
+          - env_vars.json    — environment variables
+          - graphql.json     — GraphQL endpoints
+          - websockets.json  — WebSocket URLs
+          - summary.json     — overview with framework, build tool, stats
+        """
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc or "unknown"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Build JSON payloads
+        summary = {
+            "url": url,
+            "domain": domain,
+            "timestamp": datetime.now().isoformat(),
+            "framework": js_result.framework or "",
+            "build_tool": js_result.build_tool or "",
+            "js_files_analyzed": js_result.js_files_analyzed,
+            "total_js_bytes": js_result.total_js_bytes,
+            "api_endpoints_count": len(js_result.api_endpoints),
+            "secrets_count": len(js_result.secrets),
+            "routes_count": len(js_result.page_routes),
+            "source_maps_count": len(js_result.source_maps) if js_result.source_maps else 0,
+            "env_vars_count": len(js_result.env_vars) if js_result.env_vars else 0,
+            "graphql_count": len(js_result.graphql_endpoints) if js_result.graphql_endpoints else 0,
+            "websocket_count": len(js_result.websocket_urls) if js_result.websocket_urls else 0,
+        }
+
+        endpoints_data = [
+            {
+                "url": ep.url,
+                "method": ep.method,
+                "source_file": ep.source_file,
+                "context": ep.context,
+                "auth_required": ep.auth_required,
+                "content_type": ep.content_type,
+            }
+            for ep in js_result.api_endpoints
+        ]
+
+        secrets_data = [
+            {
+                "key_name": s.key_name,
+                "value": s.value,
+                "secret_type": s.secret_type,
+                "source_file": s.source_file,
+                "confidence": s.confidence,
+            }
+            for s in js_result.secrets
+        ]
+
+        # Create zip in memory
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("summary.json", json.dumps(summary, indent=2))
+            if endpoints_data:
+                zf.writestr("endpoints.json", json.dumps(endpoints_data, indent=2))
+            if secrets_data:
+                zf.writestr("secrets.json", json.dumps(secrets_data, indent=2))
+            if js_result.page_routes:
+                zf.writestr("routes.json", json.dumps(js_result.page_routes, indent=2))
+            if js_result.source_maps:
+                zf.writestr("source_maps.json", json.dumps(js_result.source_maps, indent=2))
+            if js_result.env_vars:
+                zf.writestr("env_vars.json", json.dumps(js_result.env_vars, indent=2))
+            if js_result.graphql_endpoints:
+                zf.writestr("graphql.json", json.dumps(js_result.graphql_endpoints, indent=2))
+            if js_result.websocket_urls:
+                zf.writestr("websockets.json", json.dumps(js_result.websocket_urls, indent=2))
+
+        zip_bytes = buf.getvalue()
+        zip_name = f"js_analysis_{domain}_{ts}.zip"
+
+        # Send text summary first, then zip
+        if caption_text:
+            await self._send_long_message(caption_text)
+
+        await self._send_document(zip_bytes, zip_name,
+                                  caption=f"🔬 JS Analysis: {domain}")
 
     # ==================== REPORT METHODS ====================
 
