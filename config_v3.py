@@ -58,11 +58,10 @@ class DorkerConfig:
     engine_fallback: bool = True
 
     # =============== PROXY ===============
-    use_proxies: bool = True  # 250 working proxies on server
+    use_proxies: bool = True  # 990+ working proxies on server
     proxy_files: List[str] = field(
         default_factory=lambda: [
-            "/home/nulladmin/NullIsADork/proxies.csv",  # Server path
-            "/home/null/Desktop/GooglePicsToMoveToPRoton/proxies.csv",  # Local fallback
+            "/home/nulladmin/NullIsADork/proxies.csv",  # Server path (primary)
         ]
     )
     proxy_file: str = os.path.join(
