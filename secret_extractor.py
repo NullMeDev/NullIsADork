@@ -41,23 +41,23 @@ class SecretExtractor:
         
         # Stripe
         ("Stripe Publishable Key", "gateway", "stripe_pk",
-         re.compile(r'(?:pk_live_[A-Za-z0-9]{20,99})', re.I), 0.99),
+         re.compile(r'(?:pk_live_[A-Za-z0-9_-]{20,120})', re.I), 0.99),
         ("Stripe Secret Key", "gateway", "stripe_sk",
-         re.compile(r'(?:sk_live_[A-Za-z0-9]{20,99})', re.I), 0.99),
+         re.compile(r'(?:sk_live_[A-Za-z0-9_-]{20,120})', re.I), 0.99),
         ("Stripe Restricted Key", "gateway", "stripe_rk",
-         re.compile(r'(?:rk_live_[A-Za-z0-9]{20,99})', re.I), 0.99),
+         re.compile(r'(?:rk_live_[A-Za-z0-9_-]{20,120})', re.I), 0.99),
         ("Stripe Webhook Secret", "gateway", "stripe_whsec",
-         re.compile(r'(?:whsec_[A-Za-z0-9]{20,99})', re.I), 0.95),
+         re.compile(r'(?:whsec_[A-Za-z0-9_-]{20,120})', re.I), 0.95),
         ("Stripe Test PK", "gateway", "stripe_pk_test",
-         re.compile(r'(?:pk_test_[A-Za-z0-9]{20,99})', re.I), 0.80),
+         re.compile(r'(?:pk_test_[A-Za-z0-9_-]{20,120})', re.I), 0.80),
         ("Stripe Test SK", "gateway", "stripe_sk_test",
-         re.compile(r'(?:sk_test_[A-Za-z0-9]{20,99})', re.I), 0.85),
+         re.compile(r'(?:sk_test_[A-Za-z0-9_-]{20,120})', re.I), 0.85),
         ("Stripe Connect Account", "gateway", "stripe_acct",
-         re.compile(r'(?:acct_[A-Za-z0-9]{12,30})', re.I), 0.85),
+         re.compile(r'(?:acct_[A-Za-z0-9_-]{12,40})', re.I), 0.85),
         ("Stripe Payment Intent", "gateway", "stripe_pi",
-         re.compile(r'(?:pi_[A-Za-z0-9]{20,50})', re.I), 0.80),
+         re.compile(r'(?:pi_[A-Za-z0-9_-]{20,60})', re.I), 0.80),
         ("Stripe Client Secret", "gateway", "stripe_client_secret",
-         re.compile(r'(?:pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+)', re.I), 0.90),
+         re.compile(r'(?:pi_[A-Za-z0-9_-]+_secret_[A-Za-z0-9_-]+)', re.I), 0.90),
         
         # Braintree
         ("Braintree Tokenization Key", "gateway", "braintree_token",
@@ -65,7 +65,7 @@ class SecretExtractor:
         ("Braintree Merchant ID", "gateway", "braintree_merchant",
          re.compile(r'(?:merchant[_\-]?id|merchantId)["\s:=]+["\']?([a-z0-9]{12,20})["\']?', re.I), 0.75),
         ("Braintree Client Token", "gateway", "braintree_client",
-         re.compile(r'(?:braintree[._-]?(?:client[._-]?)?token)["\s:=]+["\']([A-Za-z0-9+/=]{50,500})["\']', re.I), 0.85),
+         re.compile(r'(?:braintree[._-]?(?:client[._-]?)?token)["\s:=]+["\']([A-Za-z0-9+/=_-]{50,1000})["\']', re.I), 0.85),
         
         # PayPal
         ("PayPal Client ID", "gateway", "paypal_client",
@@ -97,9 +97,9 @@ class SecretExtractor:
         
         # Checkout.com
         ("Checkout.com PK", "gateway", "checkout_pk",
-         re.compile(r'pk_(?:sbox_|test_|live_)?[a-z0-9]{20,60}', re.I), 0.80),
+         re.compile(r'pk_(?:sbox_|test_|live_)?[a-zA-Z0-9_-]{20,80}', re.I), 0.80),
         ("Checkout.com SK", "gateway", "checkout_sk",
-         re.compile(r'sk_(?:sbox_|test_|live_)?[a-z0-9]{20,60}', re.I), 0.85),
+         re.compile(r'sk_(?:sbox_|test_|live_)?[a-zA-Z0-9_-]{20,80}', re.I), 0.85),
         
         # Worldpay
         ("Worldpay Service Key", "gateway", "worldpay_key",
@@ -210,10 +210,11 @@ class SecretExtractor:
          re.compile(r'[MN][A-Za-z0-9]{23,28}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,40}', re.I), 0.80),
         ("Telegram Bot Token", "api", "telegram_bot",
          re.compile(r'\d{8,10}:[A-Za-z0-9_-]{35}', re.I), 0.85),
-        ("Twilio Account SID", "api", "twilio_sid",
-         re.compile(r'AC[a-f0-9]{32}', re.I), 0.90),
-        ("Twilio Auth Token", "api", "twilio_token",
-         re.compile(r'(?:twilio[._-]?(?:auth[._-]?)?token)["\s:=]+["\']?([a-f0-9]{32})["\']?', re.I), 0.85),
+        # Twilio suppressed — AC[a-f0-9]{32} regex is too broad, matches random hex on academic sites
+        # ("Twilio Account SID", "api", "twilio_sid",
+        #  re.compile(r'AC[a-f0-9]{32}', re.I), 0.90),
+        # ("Twilio Auth Token", "api", "twilio_token",
+        #  re.compile(r'(?:twilio[._-]?(?:auth[._-]?)?token)["\s:=]+["\']?([a-f0-9]{32})["\']?', re.I), 0.85),
         ("SendGrid API Key", "api", "sendgrid_key",
          re.compile(r'SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}', re.I), 0.95),
         ("Mailgun API Key", "api", "mailgun_key",

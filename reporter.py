@@ -77,11 +77,11 @@ class TelegramReporter:
             self.api_url = f"https://api.telegram.org/bot{bot_token}"
 
     async def _send_message(self, text: str, parse_mode: str = "HTML", 
-                            disable_preview: bool = True) -> bool:
-        """Send a single message to the chat."""
+                            disable_preview: bool = True):
+        """Send a single message to the chat. Returns the Message object or None."""
         # Guard: skip if no chat_id is set (e.g. test/CLI mode)
         if not self.chat_id:
-            return False
+            return None
         try:
             # Rate limiting
             now = asyncio.get_event_loop().time()
@@ -89,8 +89,9 @@ class TelegramReporter:
             if elapsed < self.rate_limit:
                 await asyncio.sleep(self.rate_limit - elapsed)
             
+            msg = None
             if HAS_TELEGRAM:
-                await self.bot.send_message(
+                msg = await self.bot.send_message(
                     chat_id=self.chat_id,
                     text=text[:4096],  # Telegram limit
                     parse_mode=parse_mode,
@@ -111,16 +112,30 @@ class TelegramReporter:
                         if resp.status != 200:
                             error = await resp.text()
                             logger.error(f"Telegram API error: {error}")
-                            return False
+                            return None
             
             self._last_send = asyncio.get_event_loop().time()
             self.stats.messages_sent += 1
-            return True
+            return msg
         
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")
             self.stats.errors += 1
-            return False
+            return None
+
+    async def pin_message(self, message):
+        """Pin a message in the chat. Bot needs 'Pin Messages' admin permission."""
+        try:
+            if message and hasattr(message, 'pin'):
+                await message.pin(disable_notification=True)
+                return True
+        except Exception as e:
+            logger.debug(f"Failed to pin message: {e}")
+        return False
+
+    # Alias for backwards compat — callers that checked bool(result) still work
+    # since Message objects are truthy and None is falsy
+    send_message = _send_message
 
     async def _send_long_message(self, text: str, parse_mode: str = "HTML"):
         """Send a long message, splitting into chunks if needed."""

@@ -212,11 +212,55 @@ class DorkerDB:
                 updated_at REAL
             );
 
+            CREATE TABLE IF NOT EXISTS stripe_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                domain TEXT NOT NULL,
+                url TEXT NOT NULL,
+                sk_live TEXT NOT NULL,
+                pk_live TEXT,
+                sk_test TEXT,
+                pk_test TEXT,
+                is_validated INTEGER DEFAULT 0,
+                is_live INTEGER DEFAULT 0,
+                account_id TEXT,
+                account_email TEXT,
+                business_name TEXT,
+                country TEXT,
+                balance_json TEXT,
+                charges_count INTEGER DEFAULT 0,
+                customers_count INTEGER DEFAULT 0,
+                products_count INTEGER DEFAULT 0,
+                subscriptions_count INTEGER DEFAULT 0,
+                risk_level TEXT,
+                permissions TEXT,
+                found_at REAL,
+                validated_at REAL,
+                UNIQUE(sk_live)
+            );
+
+            CREATE TABLE IF NOT EXISTS shopify_stores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                domain TEXT NOT NULL,
+                url TEXT NOT NULL,
+                store_name TEXT,
+                payment_gateway TEXT,
+                checkout_url TEXT,
+                has_stripe_keys INTEGER DEFAULT 0,
+                platform_confidence REAL,
+                cookies_json TEXT,
+                findings_json TEXT,
+                found_at REAL,
+                last_seen REAL,
+                UNIQUE(domain)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_port_domain ON port_scans(domain);
             CREATE INDEX IF NOT EXISTS idx_oob_url ON oob_results(url);
             CREATE INDEX IF NOT EXISTS idx_key_type ON key_validations(key_type);
             CREATE INDEX IF NOT EXISTS idx_processed_domain ON processed_urls(domain);
             CREATE INDEX IF NOT EXISTS idx_processed_at ON processed_urls(processed_at);
+            CREATE INDEX IF NOT EXISTS idx_stripe_keys_domain ON stripe_keys(domain);
+            CREATE INDEX IF NOT EXISTS idx_shopify_domain ON shopify_stores(domain);
         """)
         conn.commit()
         logger.info(f"Database initialized at {self.db_path}")
@@ -759,6 +803,151 @@ class DorkerDB:
             (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ═══════════════ STRIPE KEYS ═══════════════
+
+    def add_stripe_key(self, domain: str, url: str, sk_live: str,
+                       pk_live: str = None, sk_test: str = None, pk_test: str = None):
+        """Insert or update a Stripe key pair. Deduplicates on sk_live."""
+        conn = self._get_conn()
+        try:
+            conn.execute("""
+                INSERT INTO stripe_keys (domain, url, sk_live, pk_live, sk_test, pk_test, found_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(sk_live) DO UPDATE SET
+                    pk_live = COALESCE(excluded.pk_live, stripe_keys.pk_live),
+                    sk_test = COALESCE(excluded.sk_test, stripe_keys.sk_test),
+                    pk_test = COALESCE(excluded.pk_test, stripe_keys.pk_test)
+            """, (domain, url, sk_live, pk_live, sk_test, pk_test, time.time()))
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"DB add_stripe_key error: {e}")
+
+    def update_stripe_key_validation(self, sk_live: str, data: Dict):
+        """Update a Stripe key row with validation results."""
+        conn = self._get_conn()
+        try:
+            conn.execute("""
+                UPDATE stripe_keys SET
+                    is_validated = 1,
+                    is_live = ?,
+                    account_id = ?,
+                    account_email = ?,
+                    business_name = ?,
+                    country = ?,
+                    balance_json = ?,
+                    charges_count = ?,
+                    customers_count = ?,
+                    products_count = ?,
+                    subscriptions_count = ?,
+                    risk_level = ?,
+                    permissions = ?,
+                    validated_at = ?
+                WHERE sk_live = ?
+            """, (
+                1 if data.get("is_live") else 0,
+                data.get("account_id", ""),
+                data.get("account_email", ""),
+                data.get("business_name", ""),
+                data.get("country", ""),
+                data.get("balance_json", "{}"),
+                data.get("charges_count", 0),
+                data.get("customers_count", 0),
+                data.get("products_count", 0),
+                data.get("subscriptions_count", 0),
+                data.get("risk_level", ""),
+                data.get("permissions", "[]"),
+                time.time(),
+                sk_live,
+            ))
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"DB update_stripe_key_validation error: {e}")
+
+    def get_stripe_keys(self, limit: int = 500, live_only: bool = False) -> List[Dict]:
+        conn = self._get_conn()
+        if live_only:
+            rows = conn.execute(
+                "SELECT * FROM stripe_keys WHERE is_live = 1 ORDER BY validated_at DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM stripe_keys ORDER BY found_at DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_stripe_key_count(self, live_only: bool = False) -> int:
+        conn = self._get_conn()
+        if live_only:
+            return conn.execute("SELECT COUNT(*) FROM stripe_keys WHERE is_live = 1").fetchone()[0]
+        return conn.execute("SELECT COUNT(*) FROM stripe_keys").fetchone()[0]
+
+    def get_stripe_key_by_domain(self, domain: str) -> Optional[Dict]:
+        conn = self._get_conn()
+        row = conn.execute("SELECT * FROM stripe_keys WHERE domain = ? LIMIT 1", (domain,)).fetchone()
+        return dict(row) if row else None
+
+    # ═══════════════ SHOPIFY STORES ═══════════════
+
+    def add_shopify_store(self, domain: str, url: str, payment_gateway: str = "",
+                          checkout_url: str = "", confidence: float = 0.0,
+                          store_name: str = "", findings_json: str = "{}",
+                          cookies_json: str = "{}"):
+        """Insert or update a Shopify store. Deduplicates on domain."""
+        conn = self._get_conn()
+        # Check if stripe keys exist for this domain
+        has_sk = conn.execute(
+            "SELECT COUNT(*) FROM stripe_keys WHERE domain = ?", (domain,)
+        ).fetchone()[0] > 0
+        try:
+            conn.execute("""
+                INSERT INTO shopify_stores
+                    (domain, url, store_name, payment_gateway, checkout_url,
+                     has_stripe_keys, platform_confidence, cookies_json, findings_json,
+                     found_at, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(domain) DO UPDATE SET
+                    last_seen = excluded.last_seen,
+                    payment_gateway = COALESCE(NULLIF(excluded.payment_gateway, ''), shopify_stores.payment_gateway),
+                    checkout_url = COALESCE(NULLIF(excluded.checkout_url, ''), shopify_stores.checkout_url),
+                    has_stripe_keys = MAX(shopify_stores.has_stripe_keys, excluded.has_stripe_keys),
+                    platform_confidence = MAX(shopify_stores.platform_confidence, excluded.platform_confidence)
+            """, (domain, url, store_name, payment_gateway, checkout_url,
+                  1 if has_sk else 0, confidence, cookies_json, findings_json,
+                  time.time(), time.time()))
+            conn.commit()
+        except Exception as e:
+            logger.debug(f"DB add_shopify_store error: {e}")
+
+    def get_shopify_stores(self, limit: int = 500) -> List[Dict]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM shopify_stores ORDER BY last_seen DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_shopify_store_count(self) -> int:
+        conn = self._get_conn()
+        return conn.execute("SELECT COUNT(*) FROM shopify_stores").fetchone()[0]
+
+    # ═══════════════ SCAN HISTORY PURGE ═══════════════
+
+    def purge_old_scan_history(self, max_age_days: int = 14):
+        """Delete scan_history entries older than max_age_days."""
+        conn = self._get_conn()
+        cutoff = time.time() - (max_age_days * 86400)
+        try:
+            deleted = conn.execute(
+                "DELETE FROM scan_history WHERE scanned_at < ?", (cutoff,)
+            ).rowcount
+            conn.commit()
+            if deleted > 0:
+                logger.info(f"Purged {deleted} scan_history entries older than {max_age_days} days")
+        except Exception as e:
+            logger.debug(f"DB purge_old_scan_history error: {e}")
 
     # ═══════════════ STATS ═══════════════
 

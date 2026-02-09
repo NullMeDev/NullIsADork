@@ -20,6 +20,7 @@ build/
 
 # ==================== DATA / RUNTIME ====================
 dumps/
+exports/
 logs/
 *.log
 found_sites.json
@@ -30,7 +31,10 @@ proxies.txt
 *.csv
 *.sqlite
 *.db
+*.db-shm
+*.db-wal
 data/
+params/custom_dorks*.txt
 
 # ==================== ANALYSIS / THIRD-PARTY ====================
 _dumptool_analysis/

@@ -37,9 +37,13 @@ B3_HEADER_NAMES: Set[str] = {
     # Extended Zipkin/Jaeger headers
     "x-request-id", "x-trace-id", "traceparent", "tracestate",
     "uber-trace-id",  # Jaeger
-    "x-cloud-trace-context",  # Google Cloud
-    "x-amzn-trace-id",  # AWS X-Ray
     "x-datadog-trace-id", "x-datadog-parent-id",  # Datadog
+}
+
+# Cloud provider trace headers — present on every GCP/AWS request, not useful
+CLOUD_TRACE_NOISE: Set[str] = {
+    "x-cloud-trace-context",  # Google Cloud — every GCP-hosted site has this
+    "x-amzn-trace-id",        # AWS X-Ray — every AWS-hosted site has this
 }
 
 
@@ -75,9 +79,9 @@ GATEWAY_COOKIE_PATTERNS: List[GatewayCookiePattern] = [
     GatewayCookiePattern("paypal", r"paypal.*", "", "PayPal cookie", "high"),
     GatewayCookiePattern("paypal", r"pp_.*", r".", "PayPal prefixed cookie", "medium"),
     GatewayCookiePattern("paypal", r"X-PP-.*", "", "PayPal header cookie", "high"),
-    GatewayCookiePattern("paypal", r"enforce_policy", "", "PayPal policy cookie", "medium"),
-    GatewayCookiePattern("paypal", r"tsrce", "", "PayPal source tracking", "medium"),
     GatewayCookiePattern("paypal", r"PYPF", "", "PayPal session", "high"),
+    # NOTE: enforce_policy (CCPA compliance) and tsrce (source tracking) removed —
+    # these are standard PayPal infrastructure cookies present on every donate/checkout page
 
     # ---- Square ----
     GatewayCookiePattern("square", r"sq_.*", "", "Square payment cookie", "high"),
@@ -186,6 +190,20 @@ CHECKOUT_PATHS: List[str] = [
     "/.well-known/apple-pay",  # Apple Pay
 ]
 
+# Gateway provider domains — cookies FROM these domains are their own infra,
+# not leaked integration cookies from the target site. Skip them.
+GATEWAY_PROVIDER_DOMAINS: Set[str] = {
+    "paypal.com", "www.paypal.com",
+    "stripe.com", "js.stripe.com", "checkout.stripe.com",
+    "braintreegateway.com", "braintree-api.com",
+    "square.com", "squareup.com",
+    "adyen.com", "checkout.adyen.com",
+    "2checkout.com", "verifone.com",
+    "authorize.net", "worldpay.com",
+    "klarna.com", "afterpay.com",
+    "razorpay.com", "mollie.com",
+}
+
 
 # ====================== DATA CLASSES ======================
 
@@ -205,11 +223,8 @@ class CookieFind:
 
     @property
     def display_value(self) -> str:
-        """Truncated display value for Telegram."""
-        v = self.cookie_value
-        if len(v) > 80:
-            return v[:40] + "..." + v[-20:]
-        return v
+        """Full cookie value for Telegram — no truncation for key data."""
+        return self.cookie_value
 
 
 @dataclass
@@ -353,6 +368,13 @@ class CookieHunter:
                         probe_url = urljoin(base, path)
                         if probe_url not in probe_urls:
                             probe_urls.append(probe_url)
+                
+                # Filter out third-party gateway provider URLs — their cookies
+                # are their own infra, not the target's leaked integration
+                probe_urls = [
+                    u for u in probe_urls
+                    if urlparse(u).hostname not in GATEWAY_PROVIDER_DOMAINS
+                ]
                 
                 probe_urls = probe_urls[:8]  # Hard cap at 8 probes
                 
@@ -599,10 +621,14 @@ class CookieHunter:
             # Check if it looks like a checkout/payment page
             href_lower = href.lower()
             if any(kw in href_lower for kw in [
-                "checkout", "cart", "basket", "payment", "pay",
+                "checkout", "cart", "basket", "payment",
                 "billing", "order", "purchase", "shop/cart",
             ]):
                 full_url = urljoin(base_url, href)
+                # Skip third-party gateway provider domains (paypal.com/donate, etc.)
+                parsed_href = urlparse(full_url)
+                if parsed_href.hostname and parsed_href.hostname in GATEWAY_PROVIDER_DOMAINS:
+                    continue
                 if full_url not in seen:
                     seen.add(full_url)
                     links.append(full_url)

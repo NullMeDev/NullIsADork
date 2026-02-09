@@ -1601,12 +1601,14 @@ class DorkGenerator:
         'inurl:"transaction.php?txn=" -github',
     ]
 
-    def __init__(self, params_dir: str = None):
+    def __init__(self, params_dir: str = None, custom_dork_file: str = None):
         """Initialize the dork generator.
         
         Args:
             params_dir: Directory containing keyword parameter files.
                         Defaults to ./params/ relative to this file.
+            custom_dork_file: Path to external custom dorks file (one dork per line).
+                              Defaults to params/custom_dorks.txt if it exists.
         """
         if params_dir is None:
             params_dir = os.path.join(os.path.dirname(__file__), "params")
@@ -1614,12 +1616,36 @@ class DorkGenerator:
         self.params_dir = Path(params_dir)
         self.params: Dict[str, List[str]] = {}
         self.patterns = self.DEFAULT_PATTERNS.copy()
+        self.custom_dorks: List[str] = []
         
         # Load parameter files
         self._load_params()
         
+        # Load custom dorks from external file
+        if custom_dork_file is None:
+            custom_dork_file = str(self.params_dir / "custom_dorks.txt")
+        self._load_custom_dorks(custom_dork_file)
+        
         logger.info(f"DorkGenerator initialized: {len(self.patterns)} patterns, "
-                    f"{sum(len(v) for v in self.params.values())} total keywords")
+                    f"{sum(len(v) for v in self.params.values())} total keywords, "
+                    f"{len(self.custom_dorks)} custom dorks")
+
+    def _load_custom_dorks(self, filepath: str):
+        """Load pre-built dorks from an external file (one dork per line)."""
+        path = Path(filepath)
+        if not path.exists():
+            logger.info(f"No custom dork file found at {filepath} — skipping")
+            return
+        
+        count = 0
+        with open(path, "r", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    self.custom_dorks.append(line)
+                    count += 1
+        
+        logger.info(f"Loaded {count:,} custom dorks from {path.name}")
 
     def _load_params(self):
         """Load all parameter files from the params directory."""
@@ -1709,7 +1735,7 @@ class DorkGenerator:
         
         return dorks
 
-    def generate_all(self, max_total: int = 100000, max_per_pattern: int = 500) -> List[str]:
+    def generate_all(self, max_total: int = 250000, max_per_pattern: int = 500) -> List[str]:
         """Generate all dorks from all patterns + static dorks.
         
         Args:
@@ -1721,13 +1747,25 @@ class DorkGenerator:
         """
         all_dorks: Set[str] = set()
         
-        # Add static dorks first (high priority)
+        # 1. Add static dorks first (highest priority — operator-rich, SK-focused)
         for dork in self.STATIC_DORKS:
             all_dorks.add(dork)
         
-        logger.info(f"Added {len(self.STATIC_DORKS)} static dorks")
+        static_count = len(all_dorks)
+        logger.info(f"Added {static_count} static dorks")
         
-        # Generate from patterns
+        # 2. Add custom dorks (high priority — user-supplied, converted to operators)
+        custom_added = 0
+        for dork in self.custom_dorks:
+            if len(all_dorks) >= max_total:
+                break
+            all_dorks.add(dork)
+            custom_added += 1
+        
+        custom_count = len(all_dorks) - static_count
+        logger.info(f"Added {custom_count:,} custom dorks (from {len(self.custom_dorks):,} loaded)")
+        
+        # 3. Generate from patterns (fill remaining capacity)
         for pattern in self.patterns:
             if len(all_dorks) >= max_total:
                 break
@@ -1740,8 +1778,9 @@ class DorkGenerator:
         result = list(all_dorks)
         random.shuffle(result)
         
-        logger.info(f"Generated {len(result)} total unique dorks "
-                    f"({len(self.STATIC_DORKS)} static + {len(result) - len(self.STATIC_DORKS)} dynamic)")
+        dynamic_count = len(result) - static_count - custom_count
+        logger.info(f"Generated {len(result):,} total unique dorks "
+                    f"({static_count} static + {custom_count:,} custom + {dynamic_count:,} dynamic)")
         
         return result
 

@@ -134,8 +134,17 @@ JS_SECRET_PATTERNS = [
     (re.compile(r'''["'`](AKIA[A-Z0-9]{16})["'`]'''), "aws_access_key"),
     (re.compile(r'''["'`]([a-zA-Z0-9/+=]{40})["'`]'''), "possible_aws_secret"),
     # Stripe keys
-    (re.compile(r'''["'`](sk_(?:live|test)_[a-zA-Z0-9]{24,})["'`]'''), "stripe_secret"),
-    (re.compile(r'''["'`](pk_(?:live|test)_[a-zA-Z0-9]{24,})["'`]'''), "stripe_publishable"),
+    (re.compile(r'''["'`](sk_(?:live|test)_[a-zA-Z0-9_-]{24,})["'`]'''), "stripe_secret"),
+    (re.compile(r'''["'`](pk_(?:live|test)_[a-zA-Z0-9_-]{24,})["'`]'''), "stripe_publishable"),
+    # Stripe restricted/webhook keys
+    (re.compile(r'''["'`](rk_live_[a-zA-Z0-9_-]{24,})["'`]'''), "stripe_restricted"),
+    (re.compile(r'''["'`](whsec_[a-zA-Z0-9_-]{24,})["'`]'''), "stripe_webhook_secret"),
+    # Checkout.com keys
+    (re.compile(r'''["'`](sk_(?:sbox_|test_|live_)?[a-zA-Z0-9_-]{20,})["'`]'''), "checkout_secret"),
+    (re.compile(r'''["'`](pk_(?:sbox_|test_|live_)?[a-zA-Z0-9_-]{20,})["'`]'''), "checkout_publishable"),
+    # Square keys
+    (re.compile(r'''["'`](sq0atp-[a-zA-Z0-9_-]{22,})["'`]'''), "square_access_token"),
+    (re.compile(r'''["'`](sq0csp-[a-zA-Z0-9_-]{40,})["'`]'''), "square_oauth_secret"),
     # Firebase
     (re.compile(r'''["'`](AIza[a-zA-Z0-9_\-]{35})["'`]'''), "firebase_api_key"),
     # JWT tokens
@@ -652,7 +661,7 @@ class JSBundleAnalyzer:
 
                 result.secrets.append(JSSecret(
                     key_name=secret_type,
-                    value=value[:200],  # truncate for safety
+                    value=value[:500],  # allow full key length for long tokens
                     secret_type=secret_type,
                     source_file=js_url,
                     confidence=confidence,
