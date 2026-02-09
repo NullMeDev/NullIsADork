@@ -204,6 +204,14 @@ class DorkerDB:
                 processed_at REAL NOT NULL
             );
             
+            CREATE TABLE IF NOT EXISTS dork_checkpoint (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                cycle INTEGER NOT NULL DEFAULT 0,
+                dork_index INTEGER NOT NULL DEFAULT 0,
+                dork_hash TEXT,
+                updated_at REAL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_port_domain ON port_scans(domain);
             CREATE INDEX IF NOT EXISTS idx_oob_url ON oob_results(url);
             CREATE INDEX IF NOT EXISTS idx_key_type ON key_validations(key_type);
@@ -766,3 +774,31 @@ class DorkerDB:
             "content_hashes": self.get_content_hash_count(),
             "blocked_domains": len(self.get_blocked_domains()),
         }
+
+    # ═══════════════ DORK CHECKPOINT ═══════════════
+
+    def save_dork_checkpoint(self, cycle: int, dork_index: int, dork_hash: str = ""):
+        """Save current dork progress so we can resume after restart."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO dork_checkpoint (id, cycle, dork_index, dork_hash, updated_at)
+            VALUES (1, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                cycle = ?, dork_index = ?, dork_hash = ?, updated_at = ?
+        """, (cycle, dork_index, dork_hash, time.time(),
+              cycle, dork_index, dork_hash, time.time()))
+        conn.commit()
+
+    def get_dork_checkpoint(self) -> Optional[Dict]:
+        """Get the last saved dork checkpoint, or None if no checkpoint."""
+        conn = self._get_conn()
+        row = conn.execute("SELECT * FROM dork_checkpoint WHERE id = 1").fetchone()
+        if row:
+            return dict(row)
+        return None
+
+    def clear_dork_checkpoint(self):
+        """Clear the checkpoint (e.g. after completing a full cycle)."""
+        conn = self._get_conn()
+        conn.execute("DELETE FROM dork_checkpoint WHERE id = 1")
+        conn.commit()

