@@ -1165,9 +1165,6 @@ class MadyDorkerPipeline:
                                     == "shopify"
                                 ):
                                     try:
-                                        from urllib.parse import urlparse
-
-                                        domain = urlparse(url).netloc
                                         gw_list = [
                                             gf.data.get("gateway", "")
                                             for gf in ecom_result.gateway_plugins
@@ -1326,6 +1323,11 @@ class MadyDorkerPipeline:
 
                             # Report each secret
                             for secret in secrets:
+                                # Skip suppressed (noise/non-actionable) types
+                                if secret.type in self.config.suppressed_secret_types:
+                                    logger.debug(f"Suppressed secret type '{secret.type}' from {url[:50]}")
+                                    continue
+
                                 if secret.category == "gateway":
                                     self.found_gateways.append(
                                         {
@@ -1415,9 +1417,6 @@ class MadyDorkerPipeline:
                     # ─── Step 3a-2: SK/PK Pairing for stripe_keys DB ──────────
                     if secrets:
                         try:
-                            from urllib.parse import urlparse
-
-                            domain = urlparse(url).netloc
                             sk_lives = [
                                 s.value
                                 for s in secrets

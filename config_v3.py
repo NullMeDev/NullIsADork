@@ -58,13 +58,11 @@ class DorkerConfig:
     engine_fallback: bool = True
 
     # =============== PROXY ===============
-    use_proxies: bool = (
-        False  # All 1150 proxies expired (407). Re-enable when you get fresh ones
-    )
+    use_proxies: bool = True  # 250 working proxies on server
     proxy_files: List[str] = field(
         default_factory=lambda: [
-            "/home/null/Desktop/GooglePicsToMoveToPRoton/proxies.csv",
-            "/home/null/Desktop/1000Proxies.csv",
+            "/home/nulladmin/NullIsADork/proxies.csv",  # Server path
+            "/home/null/Desktop/GooglePicsToMoveToPRoton/proxies.csv",  # Local fallback
         ]
     )
     proxy_file: str = os.path.join(
@@ -139,6 +137,23 @@ class DorkerConfig:
     secret_extraction_enabled: bool = True
     secret_timeout: int = 10
     secret_max_concurrent: int = 200
+    # Secret types to suppress from Telegram reporting (noise/non-actionable)
+    suppressed_secret_types: List[str] = field(
+        default_factory=lambda: [
+            "jwt",              # JWTs are short-lived, worthless by the time they're found
+            "bearer",           # Same — ephemeral bearer tokens
+            "password",         # Hardcoded passwords from docs/examples
+            "email_password",   # Combo from docs/HTML, almost always fake
+            "wp_nonce",         # WordPress nonces — per-session, useless
+            "wp_ajax_url",      # Just a URL, not a secret
+            "wc_ajax_url",      # WooCommerce AJAX endpoint, not a secret
+            "generic_merchant", # Low-confidence merchant ID fragments
+            "mapbox_token",     # Public mapbox tokens (pk.*) are not secrets
+            "env_var",          # ENV var references, not actual values
+            "db_host",          # Database hostnames from config, not creds
+            "discord_bot",      # Discord bot tokens from public docs/examples
+        ]
+    )
 
     # =============== SQL INJECTION SCANNER ===============
     sqli_enabled: bool = True
