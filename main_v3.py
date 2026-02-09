@@ -638,8 +638,8 @@ class MadyDorkerPipeline:
             "crlf": [],
             "js_analysis": None,
             "api_bruteforce": None,
-            "subdomains": None,
-            "dir_fuzz": None,
+            "subdomains": [],
+            "dir_fuzz": [],
             "mady_fed": 0,
         }
         
