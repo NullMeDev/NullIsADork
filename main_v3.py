@@ -680,6 +680,23 @@ class MadyDorkerPipeline:
                 if skip in domain:
                     return True
 
+            # Skip search engine redirect/tracking URLs (common patterns)
+            _redirect_patterns = (
+                "/click/", "/redirect", "/r/", "/url?", "/search?",
+                "/aclk?", "/pagead/", "/adurl=",
+            )
+            path_lower = parsed.path.lower()
+            for pat in _redirect_patterns:
+                if pat in path_lower or pat in (parsed.query or ""):
+                    # Only skip if the domain itself is a search engine
+                    _se_domains = (
+                        "aol.com", "yahoo.com", "bing.com", "google.com",
+                        "duckduckgo.com", "yandex.", "ask.com", "dogpile.com",
+                        "naver.com", "brave.com",
+                    )
+                    if any(se in domain for se in _se_domains):
+                        return True
+
             # Circuit breaker check
             if self.db.is_domain_blocked(domain):
                 logger.debug(f"Domain {domain} is circuit-broken, skipping")
@@ -2860,10 +2877,11 @@ class MadyDorkerPipeline:
         self, url: str, results_list: list, findings_counter: list
     ):
         """Process a URL with error handling for concurrent use."""
+        _timeout = getattr(self.config, "url_process_timeout", 120)
         try:
             result = await asyncio.wait_for(
                 self.process_url(url),
-                timeout=180,  # 3 min max per URL
+                timeout=_timeout,
             )
             results_list.append(result)
 
@@ -2924,7 +2942,7 @@ class MadyDorkerPipeline:
                         logger.debug(f"Auto-export error: {e}")
         except asyncio.TimeoutError:
             logger.warning(
-                f"URL processing timed out (180s): {url[:60]} — "
+                f"URL processing timed out ({_timeout}s): {url[:60]} — "
                 f"URL remains eligible for retry on next cycle"
             )
         except Exception as e:
@@ -2939,6 +2957,8 @@ class MadyDorkerPipeline:
         - Concurrent URL processing (semaphore-bounded)
         - Content deduplication
         - Soft-404 filtering
+        - Per-cycle dork batching (rotates through full pool)
+        - Per-cycle time limit and URL cap for 24/7 continuous operation
 
         Args:
             dorks: Optional specific dorks to use (otherwise generates all)
@@ -2946,6 +2966,7 @@ class MadyDorkerPipeline:
         """
         self.cycle_count += 1
         self.skip_cycle = False  # Reset skip flag for new cycle
+        cycle_start_time = asyncio.get_event_loop().time()
         logger.info(f"=== CYCLE {self.cycle_count} STARTING ===")
 
         # Periodic cleanup: remove processed URL entries older than 30 days
@@ -2983,44 +3004,99 @@ class MadyDorkerPipeline:
         elif self.config.dork_shuffle:
             random.shuffle(dorks)
 
+        # --- Per-cycle dork batching: only process a slice of dorks per cycle ---
+        _dorks_per_cycle = getattr(self.config, "dorks_per_cycle", 500)
+        if _dorks_per_cycle > 0 and len(dorks) > _dorks_per_cycle:
+            # Rotate through the full pool using self._dork_offset
+            if not hasattr(self, "_dork_offset"):
+                self._dork_offset = 0
+            start_idx = self._dork_offset % len(dorks)
+            end_idx = start_idx + _dorks_per_cycle
+            if end_idx <= len(dorks):
+                cycle_dorks = dorks[start_idx:end_idx]
+            else:
+                # Wrap around
+                cycle_dorks = dorks[start_idx:] + dorks[: end_idx - len(dorks)]
+            self._dork_offset = end_idx % len(dorks)
+            logger.info(
+                f"Dork batch: {start_idx}→{end_idx} of {len(dorks)} "
+                f"({_dorks_per_cycle} this cycle)"
+            )
+        else:
+            cycle_dorks = dorks
+
         # Compute dork list fingerprint for checkpoint validation
         import hashlib as _hl
 
-        dork_hash = _hl.md5("|".join(dorks[:20]).encode()).hexdigest()[:12]
+        dork_hash = _hl.md5("|".join(cycle_dorks[:20]).encode()).hexdigest()[:12]
 
         # Check for resume checkpoint from previous crash/reboot
         resume_index = 0
         checkpoint = self.db.get_dork_checkpoint()
         if checkpoint and checkpoint.get("dork_hash") == dork_hash:
             resume_index = checkpoint.get("dork_index", 0)
-            if resume_index > 0 and resume_index < len(dorks):
+            if resume_index > 0 and resume_index < len(cycle_dorks):
                 logger.info(
-                    f"Resuming from dork {resume_index}/{len(dorks)} (checkpoint)"
+                    f"Resuming from dork {resume_index}/{len(cycle_dorks)} (checkpoint)"
                 )
                 await self._send_progress(
-                    f"⏩ <b>Resuming</b> from dork {resume_index}/{len(dorks)} (saved checkpoint)"
+                    f"⏩ <b>Resuming</b> from dork {resume_index}/{len(cycle_dorks)} (saved checkpoint)"
                 )
             else:
                 resume_index = 0
 
-        logger.info(f"Processing {len(dorks)} dorks this cycle")
+        # Per-cycle limits
+        _cycle_max_time = getattr(self.config, "cycle_max_time", 3600)
+        _cycle_max_urls = getattr(self.config, "cycle_max_urls", 300)
+
+        logger.info(
+            f"Processing {len(cycle_dorks)} dorks this cycle "
+            f"(time limit: {_cycle_max_time}s, URL cap: {_cycle_max_urls or 'unlimited'})"
+        )
         await self._send_progress(
-            f"🔄 <b>Cycle {self.cycle_count}</b> — Processing {len(dorks)} dorks...\n"
-            f"Concurrent limit: {self.config.concurrent_url_limit}"
+            f"🔄 <b>Cycle {self.cycle_count}</b> — {len(cycle_dorks)}/{len(dorks)} dorks\n"
+            f"⏱ Max {_cycle_max_time}s | 🔗 Max {_cycle_max_urls or '∞'} URLs\n"
+            f"Concurrent: {self.config.concurrent_url_limit}"
         )
 
         cycle_urls_found = 0
+        cycle_urls_processed = 0  # Track URLs actually processed for cap
         cycle_findings = []  # Use list for thread-safe counting
         cycle_results = []
         cycle_cookies = 0
 
-        for i, dork in enumerate(dorks):
+        for i, dork in enumerate(cycle_dorks):
             if not self.running:
                 logger.info("Pipeline stopped, breaking cycle")
                 break
             if self.skip_cycle:
                 logger.info(
-                    f"Cycle skipped at dork {i}/{len(dorks)} — moving to next cycle"
+                    f"Cycle skipped at dork {i}/{len(cycle_dorks)} — moving to next cycle"
+                )
+                break
+
+            # --- Per-cycle time limit check ---
+            elapsed = asyncio.get_event_loop().time() - cycle_start_time
+            if _cycle_max_time > 0 and elapsed >= _cycle_max_time:
+                logger.info(
+                    f"Cycle time limit reached ({_cycle_max_time}s) at dork "
+                    f"{i}/{len(cycle_dorks)} — advancing to next cycle"
+                )
+                await self._send_progress(
+                    f"⏱ <b>Time limit</b> ({_cycle_max_time}s) reached at dork "
+                    f"{i}/{len(cycle_dorks)} — moving to next cycle"
+                )
+                break
+
+            # --- Per-cycle URL cap check ---
+            if _cycle_max_urls > 0 and cycle_urls_processed >= _cycle_max_urls:
+                logger.info(
+                    f"Cycle URL cap reached ({_cycle_max_urls}) at dork "
+                    f"{i}/{len(cycle_dorks)} — advancing to next cycle"
+                )
+                await self._send_progress(
+                    f"🔗 <b>URL cap</b> ({_cycle_max_urls}) reached at dork "
+                    f"{i}/{len(cycle_dorks)} — moving to next cycle"
                 )
                 break
 
@@ -3039,9 +3115,11 @@ class MadyDorkerPipeline:
 
             # Progress update every 50 dorks (reduced from 10 to cut spam)
             if (i + 1) % 50 == 0:
+                _elapsed_min = (asyncio.get_event_loop().time() - cycle_start_time) / 60
                 await self._send_progress(
-                    f"⏳ Dork <b>{i + 1}/{len(dorks)}</b> | "
-                    f"URLs found: {cycle_urls_found} | Hits: {len(cycle_findings)}"
+                    f"⏳ Dork <b>{i + 1}/{len(cycle_dorks)}</b> | "
+                    f"URLs: {cycle_urls_processed}/{_cycle_max_urls or '∞'} | "
+                    f"Hits: {len(cycle_findings)} | ⏱ {_elapsed_min:.0f}m"
                 )
                 await asyncio.sleep(0)  # Yield to event loop
             # Warn if no results after first 50
@@ -3115,7 +3193,7 @@ class MadyDorkerPipeline:
 
                 cycle_urls_found += len(filtered_urls)
                 logger.info(
-                    f"[{i + 1}/{len(dorks)}] Dork: {dork[:60]}... → {len(filtered_urls)} new URLs"
+                    f"[{i + 1}/{len(cycle_dorks)}] Dork: {dork[:60]}... → {len(filtered_urls)} new URLs"
                 )
 
                 # Notify when URLs found (only for big batches to reduce noise)
@@ -3124,6 +3202,17 @@ class MadyDorkerPipeline:
                         f"🔗 Dork {i + 1}: <b>{len(filtered_urls)} new URLs</b>\n"
                         f"<code>{dork[:80]}</code>"
                     )
+
+                # Enforce per-cycle URL cap on how many we actually process
+                urls_remaining = len(filtered_urls)
+                if _cycle_max_urls > 0:
+                    urls_remaining = min(
+                        urls_remaining,
+                        _cycle_max_urls - cycle_urls_processed,
+                    )
+                    if urls_remaining <= 0:
+                        break
+                    filtered_urls = filtered_urls[:urls_remaining]
 
                 # Process URLs concurrently (bounded by semaphore)
                 batch_results = []
@@ -3142,6 +3231,7 @@ class MadyDorkerPipeline:
                     await asyncio.gather(*tasks, return_exceptions=True)
                     cycle_results.extend(batch_results)
                     cycle_findings.extend(batch_findings)
+                    cycle_urls_processed += len(tasks)
 
                 # Delay between dorks
                 delay = random.uniform(
@@ -3167,17 +3257,18 @@ class MadyDorkerPipeline:
         cookie_count = self.db.get_cookie_count() if hasattr(self, "db") else 0
         b3_count = len(self.db.get_b3_cookies()) if hasattr(self, "db") else 0
 
+        cycle_elapsed = asyncio.get_event_loop().time() - cycle_start_time
         summary = (
-            f"✅ <b>Cycle {self.cycle_count} Complete</b>\n"
-            f"Dorks: {len(dorks)} | URLs: {cycle_urls_found} | Hits: {len(cycle_findings)}\n"
+            f"✅ <b>Cycle {self.cycle_count} Complete</b> ({cycle_elapsed / 60:.1f}m)\n"
+            f"Dorks: {len(cycle_dorks)}/{len(dorks)} | URLs processed: {cycle_urls_processed} | Hits: {len(cycle_findings)}\n"
             f"Total scanned: {self.urls_scanned} | Gateways: {len(self.found_gateways)} | "
             f"SQLi: {len(self.vulnerable_urls)} | Cards: {len(self.found_cards)}\n"
             f"🍪 Cookies: {cookie_count} | 🔵 B3: {b3_count}"
         )
         await self._send_progress(summary)
         logger.info(
-            f"=== CYCLE {self.cycle_count} COMPLETE — "
-            f"{self.urls_scanned} URLs scanned, "
+            f"=== CYCLE {self.cycle_count} COMPLETE ({cycle_elapsed / 60:.1f}m) — "
+            f"{cycle_urls_processed} URLs processed, "
             f"{len(self.found_gateways)} gateways, "
             f"{len(self.vulnerable_urls)} SQLi vulns ==="
         )
@@ -3211,7 +3302,7 @@ class MadyDorkerPipeline:
                 )
             )
         )
-        per_cycle = self.config.max_dorks
+        per_cycle = getattr(self.config, "dorks_per_cycle", 500)
 
         # Send startup notification
         proxy_status = "Disabled"
@@ -3221,10 +3312,14 @@ class MadyDorkerPipeline:
             )
 
         engines = self.config.engines
+        _cycle_max_time = getattr(self.config, "cycle_max_time", 3600)
+        _cycle_max_urls = getattr(self.config, "cycle_max_urls", 300)
         await self.reporter.report_startup(
             {
                 "Total Dork Pool": f"{total_pool:,}",
-                "Per Cycle": f"{per_cycle:,}",
+                "Dorks Per Cycle": f"{per_cycle:,}",
+                "Cycle Time Limit": f"{_cycle_max_time}s",
+                "Cycle URL Cap": f"{_cycle_max_urls}",
                 "Concurrent URLs": self.config.concurrent_url_limit,
                 "Engines": f"{len(engines)} ({', '.join(engines)})",
                 "Search Delay": f"{self.config.search_delay_min}-{self.config.search_delay_max}s",
@@ -3243,7 +3338,8 @@ class MadyDorkerPipeline:
 
         await self._send_progress(
             f"🚀 <b>Pipeline Started!</b>\n"
-            f"Dork Pool: {total_pool:,} | Per Cycle: {per_cycle:,}\n"
+            f"Dork Pool: {total_pool:,} | Per Cycle: {per_cycle:,} dorks\n"
+            f"⏱ Cycle limit: {_cycle_max_time}s | 🔗 URL cap: {_cycle_max_urls}\n"
             f"Engines: {len(engines)} | Concurrent: {self.config.concurrent_url_limit} URLs\n"
             f"Generating dorks and starting cycle..."
         )

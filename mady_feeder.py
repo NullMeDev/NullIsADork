@@ -261,10 +261,17 @@ class MadyFeeder:
     
     def __init__(self, config: Optional[MadyFeederConfig] = None):
         self.config = config or MadyFeederConfig()
-        self.scraped_keys_path = os.path.join(
-            self.config.mady_path, 
-            self.config.scraped_keys_file
-        )
+        # Resolve scraped_keys path — fall back to local mady_data/ if
+        # the configured mady_path directory doesn't exist (e.g. on server)
+        _primary = os.path.join(self.config.mady_path, self.config.scraped_keys_file)
+        _dir = os.path.dirname(_primary)
+        if os.path.isdir(_dir):
+            self.scraped_keys_path = _primary
+        else:
+            _fallback_dir = os.path.join(os.path.dirname(__file__), "mady_data")
+            os.makedirs(_fallback_dir, exist_ok=True)
+            self.scraped_keys_path = os.path.join(_fallback_dir, self.config.scraped_keys_file)
+            logger.info(f"Mady path {_dir} not found — using fallback: {self.scraped_keys_path}")
         self._fed_keys: set = set()  # Track what we've already fed
         self._telegram_sent: int = 0  # Count of telegram messages sent
         self._disk_saved: int = 0     # Count of disk saves
@@ -572,22 +579,31 @@ class MadyFeeder:
             timeout = aiohttp.ClientTimeout(total=15)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 for chat_id in targets:
-                    try:
-                        data = {
-                            "chat_id": chat_id,
-                            "text": text[:4096],  # Telegram limit
-                            "parse_mode": "HTML",
-                            "disable_web_page_preview": True,
-                        }
-                        async with session.post(api_url, json=data) as resp:
-                            if resp.status == 200:
-                                sent += 1
-                                logger.debug(f"Mady feed sent to {chat_id}")
-                            else:
-                                err = await resp.text()
-                                logger.warning(f"Mady feed failed for {chat_id}: {resp.status} - {err[:100]}")
-                    except Exception as e:
-                        logger.warning(f"Mady feed error for {chat_id}: {e}")
+                    data = {
+                        "chat_id": chat_id,
+                        "text": text[:4096],  # Telegram limit
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True,
+                    }
+                    for attempt in range(3):
+                        try:
+                            async with session.post(api_url, json=data) as resp:
+                                if resp.status == 200:
+                                    sent += 1
+                                    logger.debug(f"Mady feed sent to {chat_id}")
+                                    break
+                                elif resp.status == 429:
+                                    body = await resp.json(content_type=None)
+                                    retry_after = body.get("parameters", {}).get("retry_after", 30)
+                                    logger.debug(f"Mady feed 429 — sleeping {retry_after}s (attempt {attempt+1}/3)")
+                                    await asyncio.sleep(retry_after)
+                                else:
+                                    err = await resp.text()
+                                    logger.warning(f"Mady feed failed for {chat_id}: {resp.status} - {err[:100]}")
+                                    break
+                        except Exception as e:
+                            logger.warning(f"Mady feed error for {chat_id}: {e}")
+                            break
         except Exception as e:
             logger.error(f"Mady feed Telegram session error: {e}")
         

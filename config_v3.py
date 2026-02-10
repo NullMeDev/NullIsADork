@@ -277,6 +277,10 @@ class DorkerConfig:
     auto_start_pipeline: bool = (
         True  # Auto-start dorking on bot startup (no /dorkon needed)
     )
+    dorks_per_cycle: int = 500  # Dorks to process per cycle (rotates through full pool)
+    cycle_max_time: int = 3600  # Max seconds per cycle (3600 = 1 hour)
+    cycle_max_urls: int = 300  # Max URLs to process per cycle (0 = unlimited)
+    url_process_timeout: int = 120  # Per-URL processing timeout (seconds)
 
     # =============== STORAGE ===============
     found_sites_file: str = os.path.join(os.path.dirname(__file__), "found_sites.json")
@@ -363,6 +367,28 @@ class DorkerConfig:
     # =============== SKIP DOMAINS ===============
     skip_domains: List[str] = field(
         default_factory=lambda: [
+            # Search engine redirect/tracking URLs (waste time, not real targets)
+            "search.aol.com",
+            "search.yahoo.com",
+            "r.search.yahoo.com",
+            "cc.bingj.com",
+            "duckduckgo.com",
+            "search.brave.com",
+            "www.startpage.com",
+            "search.qwant.com",
+            "www.ecosia.org",
+            "search.naver.com",
+            "yandex.com",
+            "yandex.ru",
+            "search.dogpile.com",
+            "www.ask.com",
+            "www.mojeek.com",
+            "you.com",
+            "searx.org",
+            "searxng.org",
+            "www.google.com",
+            "www.bing.com",
+            # Code hosting / documentation
             "github.com",
             "github.io",
             "githubusercontent.com",
