@@ -332,10 +332,14 @@ class ProxyLoader:
                     port = int(parts[1])
                 except ValueError:
                     continue
+                username = parts[2] if len(parts) >= 4 else ""
+                password = ":".join(parts[3:]) if len(parts) >= 4 else ""
                 proxy = ProxyInfo(
                     host=parts[0],
                     port=port,
                     protocol=protocol,
+                    username=username,
+                    password=password,
                     source_file="inline",
                     alive=True,
                 )
