@@ -348,8 +348,10 @@ class SecretExtractor:
         if len(set(value)) < 4:
             return True
 
-        # ── Prefix-based identifier detection (sk_, pk_, acct_, pi_, rzp_) ──
-        _prefixes = ('sk_', 'pk_', 'acct_', 'pi_', 'pmc_', 'rzp_')
+        # ── Prefix-based identifier detection (sk_, pk_, rzp_) ──
+        # NOTE: pi_ (payment intents) and acct_ (connect accounts) are PUBLIC IDs,
+        # not secrets — they are suppressed at config level, but also skip FP bypass here.
+        _prefixes = ('sk_', 'pk_', 'pmc_', 'rzp_')
         if value_lower.startswith(_prefixes):
             # Known-real prefixes that DO contain mixed case (Stripe live/test keys)
             _real_prefixes = (

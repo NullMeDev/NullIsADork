@@ -156,6 +156,9 @@ class DorkerConfig:
             "wc_checkout_nonce", # WooCommerce nonces, ephemeral like WP nonces
             "braintree_token_nonce",  # Nonce, not an actual token
             "stripe_pmc",       # PaymentMethodConfiguration IDs, not secrets
+            "stripe_pi",        # Payment Intent IDs — public-facing order refs, NOT secrets
+            "stripe_acct",      # Connect Account IDs — public identifiers, NOT secrets
+            "stripe_client_secret",  # Client-side secrets from documentation, usually FP
         ]
     )
 
@@ -496,6 +499,75 @@ class DorkerConfig:
             "support.google.com",
             "help.yahoo.com",
             "fintechwrapup.com",
+            # Payment gateway documentation sites (huge FP source)
+            "api-reference.checkout.com",
+            "docs.checkout.com",
+            "checkout.com",
+            "docs.stripe.com",
+            "dashboard.stripe.com",
+            "api.stripe.com",
+            "developer.paypal.com",
+            "docs.adyen.com",
+            "adyen.com",
+            "developer.squareup.com",
+            "docs.square.com",
+            "squareup.com",
+            "braintree.com",
+            "braintreepayments.com",
+            "developer.authorize.net",
+            "authorize.net",
+            "docs.razorpay.com",
+            "razorpay.com",
+            "flutterwave.com",
+            "developer.flutterwave.com",
+            "paystack.com",
+            "developers.paystack.co",
+            "docs.mollie.com",
+            "mollie.com",
+            "recurly.com",
+            "docs.recurly.com",
+            "developer.worldpay.com",
+            "worldpay.com",
+            "developer.2checkout.com",
+            "2checkout.com",
+            "docs.klarna.com",
+            "klarna.com",
+            "developer.afterpay.com",
+            "afterpay.com",
+            # SDK / API reference sites (always contain example keys)
+            "platform.openai.com",
+            "docs.anthropic.com",
+            "console.anthropic.com",
+            "docs.aws.amazon.com",
+            "console.aws.amazon.com",
+            "cloud.google.com",
+            "console.cloud.google.com",
+            "docs.github.com",
+            "api.github.com",
+            "docs.gitlab.com",
+            "api.twilio.com",
+            "twilio.com",
+            "sendgrid.com",
+            "docs.sendgrid.com",
+            "mailgun.com",
+            "documentation.mailgun.com",
+            "slack.com",
+            "api.slack.com",
+            "discord.com",
+            "docs.shopify.com",
+            "shopify.dev",
+            # Fintech blogs / comparison sites
+            "fintechwrapup.com",
+            "fintechfutures.com",
+            "hackernoon.com",
+            "dev.to",
+            "freecodecamp.org",
+            "css-tricks.com",
+            "smashingmagazine.com",
+            "tutorialspoint.com",
+            "geeksforgeeks.org",
+            "baeldung.com",
+            "digitalocean.com",
         ]
     )
 
