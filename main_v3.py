@@ -7062,23 +7062,41 @@ async def cmd_checkkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # If 2 args: first is type, second is key
     # If 1 arg: auto-detect type from key value
-    if len(args) >= 2 and args[0] in p.key_validator._validators:
-        key_type = args[0]
-        key_value = args[1].strip()
+    # Filter out stray /commands from args
+    clean_args = [a for a in args if not a.startswith('/')]
+    if not clean_args:
+        await update.message.reply_text(
+            "❌ No key provided. Usage: <code>/checkkey &lt;key&gt;</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    if len(clean_args) >= 2 and clean_args[0] in p.key_validator._validators:
+        key_type = clean_args[0]
+        key_value = clean_args[1].strip()
     else:
-        key_value = args[0].strip()
-        # Auto-detect type
-        detected = p.key_validator.detect_keys(key_value)
-        if detected:
-            key_type = detected[0]["type"]
-        else:
-            # Try matching just by prefix patterns
-            from key_validator import KEY_PATTERNS
-            key_type = None
+        # Find the first arg that looks like a key (try all args)
+        key_value = None
+        key_type = None
+        from key_validator import KEY_PATTERNS
+        for candidate in clean_args:
+            candidate = candidate.strip()
+            detected = p.key_validator.detect_keys(candidate)
+            if detected:
+                key_value = candidate
+                key_type = detected[0]["type"]
+                break
             for ktype, pattern in KEY_PATTERNS.items():
-                if pattern.search(key_value):
+                if pattern.search(candidate):
+                    key_value = candidate
                     key_type = ktype
                     break
+            if key_type:
+                break
+
+        if not key_value:
+            # Last resort: just use the longest arg
+            key_value = max(clean_args, key=len).strip()
 
         if not key_type:
             await update.message.reply_text(

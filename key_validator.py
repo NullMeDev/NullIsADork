@@ -101,8 +101,11 @@ class ValidationBatch:
 
 KEY_PATTERNS: Dict[str, re.Pattern] = {
     "stripe_sk":        re.compile(r'sk_live_[A-Za-z0-9]{20,}'),
+    "stripe_sk_test":   re.compile(r'sk_test_[A-Za-z0-9]{20,}'),
     "stripe_pk":        re.compile(r'pk_live_[A-Za-z0-9]{20,}'),
+    "stripe_pk_test":   re.compile(r'pk_test_[A-Za-z0-9]{20,}'),
     "stripe_rk":        re.compile(r'rk_live_[A-Za-z0-9]{20,}'),
+    "stripe_rk_test":   re.compile(r'rk_test_[A-Za-z0-9]{20,}'),
     "aws_access":       re.compile(r'AKIA[0-9A-Z]{16}'),
     "paypal_client":    re.compile(r'A[A-Za-z0-9_-]{20,}'),  # Broader — needs context
     "square_access":    re.compile(r'sq0atp-[A-Za-z0-9_-]{22,}'),
@@ -187,8 +190,11 @@ class KeyValidator:
         # Validator dispatch
         self._validators: Dict[str, Callable] = {
             "stripe_sk":     self._validate_stripe_secret,
+            "stripe_sk_test": self._validate_stripe_secret,
             "stripe_pk":     self._validate_stripe_publishable,
+            "stripe_pk_test": self._validate_stripe_publishable,
             "stripe_rk":     self._validate_stripe_restricted,
+            "stripe_rk_test": self._validate_stripe_restricted,
             "aws_access":    self._validate_aws,
             "square_access": self._validate_square,
             "twilio_sid":    self._validate_twilio,
