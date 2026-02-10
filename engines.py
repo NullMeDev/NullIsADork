@@ -1976,6 +1976,1138 @@ class AlexandriaNLSearch(SearchEngine):
             return []
 
 
+# ────────────────────────── INDEPENDENT COUNTRY ENGINES (WAVE 2) ──────────────────────────
+
+
+class MailRuSearch(SearchEngine):
+    """Mail.ru — Russia's major portal with independent search (go.mail.ru)."""
+    name = "mailru"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://go.mail.ru/search?q={quote(query)}&sf={page * 10}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "ru,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for a in soup.find_all("a", class_=re.compile(r"result__title|ResultTitle")):
+                        href = a.get("href", "")
+                        if href and href.startswith("http") and "mail.ru" not in href:
+                            results.append(href)
+                            if len(results) >= num_results:
+                                break
+                    if not results:
+                        for li in soup.find_all("li", class_=re.compile(r"result")):
+                            a = li.find("a", href=True)
+                            if a:
+                                href = a["href"]
+                                if href.startswith("http") and "mail.ru" not in href:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[MailRu] Search error: {e}")
+            return []
+
+
+class RamblerSearch(SearchEngine):
+    """Rambler — one of Russia's oldest web portals with search."""
+    name = "rambler"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://nova.rambler.ru/search?query={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "ru,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for a in soup.find_all("a", class_=re.compile(r"serp-item__title|link")):
+                        href = a.get("href", "")
+                        if href and href.startswith("http") and "rambler.ru" not in href:
+                            results.append(href)
+                            if len(results) >= num_results:
+                                break
+                    if not results:
+                        for div in soup.find_all("div", class_=re.compile(r"serp-item|result")):
+                            a = div.find("a", href=True)
+                            if a:
+                                href = a["href"]
+                                if href.startswith("http") and "rambler.ru" not in href:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Rambler] Search error: {e}")
+            return []
+
+
+class HaosouSearch(SearchEngine):
+    """360 Search (Haosou/so.com) — China's #3 search engine by Qihoo 360."""
+    name = "haosou"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.so.com/s?q={quote(query)}&pn={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "zh-CN,zh;q=0.9,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for li in soup.find_all("li", class_=re.compile(r"res-list")):
+                        a = li.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "so.com" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    if not results:
+                        for a in soup.find_all("a", href=True):
+                            href = a["href"]
+                            if href.startswith("http") and "so.com" not in href and "360.cn" not in href:
+                                text = a.get_text(strip=True)
+                                if text and len(text) > 8:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Haosou] Search error: {e}")
+            return []
+
+
+class ShenmaSearch(SearchEngine):
+    """Shenma (sm.cn) — Alibaba/UCWeb mobile-first Chinese search engine."""
+    name = "shenma"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://m.sm.cn/s?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "zh-CN,zh;q=0.9,en;q=0.5"
+                headers["User-Agent"] = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for a in soup.find_all("a", href=True):
+                        href = a["href"]
+                        if href.startswith("http") and "sm.cn" not in href and "ucweb" not in href:
+                            text = a.get_text(strip=True)
+                            if text and len(text) > 5:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Shenma] Search error: {e}")
+            return []
+
+
+class PetalSearch(SearchEngine):
+    """Petal Search — Huawei's own search engine, large mobile index."""
+    name = "petal"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://petalsearch.com/search?query={quote(query)}&pn={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "en,zh;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "petalsearch" not in href and "huawei" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Petal] Search error: {e}")
+            return []
+
+
+class ZumSearch(SearchEngine):
+    """Zum — South Korea's #3 search portal."""
+    name = "zum"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://search.zum.com/search.zum?query={quote(query)}&p={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "ko,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"item|result")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "zum.com" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Zum] Search error: {e}")
+            return []
+
+
+class NateSearch(SearchEngine):
+    """Nate — South Korean portal by SK Communications."""
+    name = "nate"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://search.daum.net/nate?q={quote(query)}&p={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "ko,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for a in soup.find_all("a", class_=re.compile(r"f_link|tit|link_url")):
+                        href = a.get("href", "")
+                        if href and href.startswith("http") and "nate.com" not in href and "daum.net" not in href:
+                            results.append(href)
+                            if len(results) >= num_results:
+                                break
+                    if not results:
+                        for div in soup.find_all("div", class_=re.compile(r"wrap_tit|result")):
+                            a = div.find("a", href=True)
+                            if a:
+                                href = a["href"]
+                                if href.startswith("http") and "nate.com" not in href:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Nate] Search error: {e}")
+            return []
+
+
+class ParsijooSearch(SearchEngine):
+    """Parsijoo — Iran's native Persian-language search engine."""
+    name = "parsijoo"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://parsijoo.ir/web?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "fa,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "parsijoo" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Parsijoo] Search error: {e}")
+            return []
+
+
+class NajdiSearch(SearchEngine):
+    """Najdi.si — Slovenia's main search engine with independent tech."""
+    name = "najdi"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.najdi.si/search?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "sl,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "najdi.si" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Najdi] Search error: {e}")
+            return []
+
+
+class SearchChSearch(SearchEngine):
+    """Search.ch — Switzerland's local search engine."""
+    name = "search_ch"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://search.ch/web/?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "de,fr;q=0.8,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|SearchResult")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "search.ch" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[SearchCH] Search error: {e}")
+            return []
+
+
+class SapoSearch(SearchEngine):
+    """Sapo — Portugal's oldest and largest native web portal with search."""
+    name = "sapo"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.sapo.pt/pesquisa/web/results?q={quote(query)}&bk={page * 10}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "pt,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"searchResult|result")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "sapo.pt" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Sapo] Search error: {e}")
+            return []
+
+
+class VirgilioSearch(SearchEngine):
+    """Virgilio — Italy's first web portal (1996), native Italian search."""
+    name = "virgilio"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://ricerca.virgilio.it/ricerca?qs={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "it,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|atom")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "virgilio.it" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Virgilio] Search error: {e}")
+            return []
+
+
+class FireballSearch(SearchEngine):
+    """Fireball — Germany's native search engine (since 1996)."""
+    name = "fireball"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.fireball.de/search?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "de,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "fireball.de" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Fireball] Search error: {e}")
+            return []
+
+
+class WallaSearch(SearchEngine):
+    """Walla — Israel's leading Hebrew-language web portal and search."""
+    name = "walla"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://search.walla.co.il/?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "he,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "walla.co.il" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Walla] Search error: {e}")
+            return []
+
+
+class KvasirSearch(SearchEngine):
+    """Kvasir — Norway's native search portal."""
+    name = "kvasir"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.kvasir.no/alle?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "no,nb;q=0.9,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "kvasir.no" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Kvasir] Search error: {e}")
+            return []
+
+
+class LeitSearch(SearchEngine):
+    """Leit.is — Iceland's native search engine for Icelandic content."""
+    name = "leit"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.leit.is/leit?q={quote(query)}&start={page * 10}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "is,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "leit.is" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Leit] Search error: {e}")
+            return []
+
+
+class OnetSearch(SearchEngine):
+    """Onet — Poland's most popular web portal with native search."""
+    name = "onet"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://szukaj.onet.pl/wyniki?q={quote(query)}&pg={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "pl,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|webResult")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "onet.pl" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Onet] Search error: {e}")
+            return []
+
+
+class InteriaSearch(SearchEngine):
+    """Interia — major Polish web portal with search."""
+    name = "interia"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.interia.pl/szukaj?q={quote(query)}&p={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "pl,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|search-item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "interia.pl" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Interia] Search error: {e}")
+            return []
+
+
+class CentrumSearch(SearchEngine):
+    """Centrum.cz — Czech web portal with search."""
+    name = "centrum"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://search.centrum.cz/?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "cs,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "centrum.cz" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Centrum] Search error: {e}")
+            return []
+
+
+class MetaUaSearch(SearchEngine):
+    """Meta.ua — Ukrainian search engine with Ukrainian/Russian morphology."""
+    name = "meta_ua"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://meta.ua/search/?q={quote(query)}&pg={page}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "uk,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "meta.ua" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[MetaUA] Search error: {e}")
+            return []
+
+
+class SanookSearch(SearchEngine):
+    """Sanook — Thailand's major web portal and search engine."""
+    name = "sanook"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://search.sanook.com/web/?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "th,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "sanook.com" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Sanook] Search error: {e}")
+            return []
+
+
+class CariSearch(SearchEngine):
+    """Cari — Malaysia's first search engine (1996), local content portal."""
+    name = "cari"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.cari.com.my/search/?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "ms,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|contentRow")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "cari.com" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Cari] Search error: {e}")
+            return []
+
+
+class RediffSearch(SearchEngine):
+    """Rediff — India's major native web portal with search."""
+    name = "rediff"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://search.rediff.com/search?query={quote(query)}&start={page * 10}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "en-IN,en;q=0.9,hi;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|listing")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "rediff.com" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Rediff] Search error: {e}")
+            return []
+
+
+class UolBuscaSearch(SearchEngine):
+    """UOL Busca — Brazil's largest content company/portal search."""
+    name = "uol"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://busca.uol.com.br/web/?q={quote(query)}&start={page * 10}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "pt-BR,pt;q=0.9,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|web-result")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "uol.com.br" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[UOL] Search error: {e}")
+            return []
+
+
+class AnanziSearch(SearchEngine):
+    """Ananzi — South Africa's first native search engine (1996)."""
+    name = "ananzi"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.ananzi.co.za/web/?q={quote(query)}&start={page * 10}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "en-ZA,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|listing")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "ananzi.co.za" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Ananzi] Search error: {e}")
+            return []
+
+
+class MarginaliaSearch(SearchEngine):
+    """Marginalia — Swedish independent search engine, DIY crawler/index."""
+    name = "marginalia"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://search.marginalia.nu/search?query={quote(query)}&profile=default&js=default&adtech=default"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                async with session.get(url, headers=self.headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"search-result|result")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "marginalia" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Marginalia] Search error: {e}")
+            return []
+
+
+class WibySearch(SearchEngine):
+    """Wiby — Canadian search engine for the classic/non-commercial web."""
+    name = "wiby"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://wiby.me/?q={quote(query)}&p={page}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                async with session.get(url, headers=self.headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for a in soup.find_all("a", href=True):
+                        href = a["href"]
+                        if href.startswith("http") and "wiby.me" not in href:
+                            text = a.get_text(strip=True)
+                            if text and len(text) > 3:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Wiby] Search error: {e}")
+            return []
+
+
+class EgerinSearch(SearchEngine):
+    """Egerin — Kurdish-language search engine (Sweden-based)."""
+    name = "egerin"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.egerin.com/search?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "ku,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "egerin.com" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Egerin] Search error: {e}")
+            return []
+
+
+class YongzinSearch(SearchEngine):
+    """Yongzin — Tibetan-language search engine (China)."""
+    name = "yongzin"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.yongzin.com/search?q={quote(query)}&page={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "bo,zh;q=0.5,en;q=0.3"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "yongzin" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Yongzin] Search error: {e}")
+            return []
+
+
 # ────────────────────────── ENGINE REGISTRY ──────────────────────────
 
 ENGINE_REGISTRY = {
@@ -1996,7 +3128,7 @@ ENGINE_REGISTRY = {
     "you": YouSearch,
     "mojeek": MojeekSearch,
     "naver": NaverSearch,
-    # ── Independent international engines ──
+    # ── Independent international engines (Wave 1) ──
     "baidu": BaiduSearch,           # China #1
     "sogou": SogouSearch,           # China #2
     "yahoo_jp": YahooJPSearch,      # Japan
@@ -2014,6 +3146,36 @@ ENGINE_REGISTRY = {
     "presearch": PresearchSearch,   # Decentralized
     "yep": YepSearch,               # Ahrefs (own index)
     "alexandria": AlexandriaNLSearch,  # Netherlands/EU
+    # ── Independent country engines (Wave 2) ──
+    "mailru": MailRuSearch,         # Russia — go.mail.ru
+    "rambler": RamblerSearch,       # Russia — oldest portal
+    "haosou": HaosouSearch,         # China #3 — 360/so.com
+    "shenma": ShenmaSearch,         # China — Alibaba mobile
+    "petal": PetalSearch,           # China — Huawei
+    "zum": ZumSearch,               # South Korea #3
+    "nate": NateSearch,             # South Korea — SK Communications
+    "parsijoo": ParsijooSearch,     # Iran — Persian search
+    "najdi": NajdiSearch,           # Slovenia — najdi.si
+    "search_ch": SearchChSearch,    # Switzerland — search.ch
+    "sapo": SapoSearch,             # Portugal — oldest portal
+    "virgilio": VirgilioSearch,     # Italy — first portal (1996)
+    "fireball": FireballSearch,     # Germany — native (1996)
+    "walla": WallaSearch,           # Israel — Hebrew search
+    "kvasir": KvasirSearch,         # Norway — native portal
+    "leit": LeitSearch,             # Iceland — leit.is
+    "onet": OnetSearch,             # Poland #1 — portal
+    "interia": InteriaSearch,       # Poland #2 — portal
+    "centrum": CentrumSearch,       # Czech Republic #2
+    "meta_ua": MetaUaSearch,        # Ukraine — morphology
+    "sanook": SanookSearch,         # Thailand — major portal
+    "cari": CariSearch,             # Malaysia — first engine (1996)
+    "rediff": RediffSearch,         # India — native portal
+    "uol": UolBuscaSearch,          # Brazil — largest portal
+    "ananzi": AnanziSearch,         # South Africa — first engine
+    "marginalia": MarginaliaSearch, # Sweden — indie DIY
+    "wiby": WibySearch,             # Canada — classic web
+    "egerin": EgerinSearch,         # Kurdistan — Kurdish language
+    "yongzin": YongzinSearch,       # Tibet — Tibetan language
     # ── Bing regional variants (48 countries) ──
     **_BING_REGIONAL_CLASSES,
 }

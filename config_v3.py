@@ -53,7 +53,7 @@ class DorkerConfig:
             "you",
             "mojeek",
             "naver",
-            # ── Independent international engines ──
+            # ── Independent international engines (Wave 1) ──
             "baidu",            # China #1
             "sogou",            # China #2
             "yahoo_jp",         # Japan
@@ -71,6 +71,36 @@ class DorkerConfig:
             "alexandria",       # Netherlands/EU
             "gibiru",           # Uncensored
             "exalead",          # France (Dassault)
+            # ── Independent country engines (Wave 2) ──
+            "mailru",           # Russia — go.mail.ru
+            "rambler",          # Russia — oldest portal
+            "haosou",           # China #3 — 360/so.com
+            "shenma",           # China — Alibaba mobile
+            "petal",            # China — Huawei search
+            "zum",              # South Korea #3
+            "nate",             # South Korea — SK Comms
+            "parsijoo",         # Iran — Persian search
+            "najdi",            # Slovenia — najdi.si
+            "search_ch",        # Switzerland — search.ch
+            "sapo",             # Portugal — oldest portal
+            "virgilio",         # Italy — first portal (1996)
+            "fireball",         # Germany — native (1996)
+            "walla",            # Israel — Hebrew search
+            "kvasir",           # Norway — native portal
+            "leit",             # Iceland — leit.is
+            "onet",             # Poland #1 portal
+            "interia",          # Poland #2 portal
+            "centrum",          # Czech Republic #2
+            "meta_ua",          # Ukraine — morphology
+            "sanook",           # Thailand — major portal
+            "cari",             # Malaysia — first engine
+            "rediff",           # India — native portal
+            "uol",              # Brazil — largest portal
+            "ananzi",           # South Africa — first engine
+            "marginalia",       # Sweden — indie DIY
+            "wiby",             # Canada — classic web
+            "egerin",           # Kurdistan — Kurdish language
+            "yongzin",          # Tibet — Tibetan language
             # ── Bing regional (48 country variants) ──
             "bing_ar",          # Argentina
             "bing_au",          # Australia
