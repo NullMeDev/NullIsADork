@@ -32,8 +32,8 @@ class DorkerConfig:
     dork_shuffle: bool = True
 
     # =============== SEARCH ENGINE ===============
-    search_delay_min: int = 3
-    search_delay_max: int = 8
+    search_delay_min: float = 0.5  # Premium proxy — minimal delay needed
+    search_delay_max: float = 2.0  # Was 8s with free proxies
     results_per_dork: int = 50
     engines: List[str] = field(
         default_factory=lambda: [
@@ -382,15 +382,15 @@ class DorkerConfig:
 
     # =============== DAEMON MODE ===============
     continuous: bool = True
-    cycle_delay: int = 15  # Seconds between dork cycles
+    cycle_delay: int = 5  # Seconds between dork cycles (was 15)
     max_cycles: int = 0  # 0 = infinite
     auto_start_pipeline: bool = (
         True  # Auto-start dorking on bot startup (no /dorkon needed)
     )
-    dorks_per_cycle: int = 50  # Dorks to process per cycle (rotates through full pool)
+    dorks_per_cycle: int = 150  # Dorks per cycle (was 50, premium proxy handles more)
     cycle_max_time: int = 3600  # Max seconds per cycle (3600 = 1 hour)
-    cycle_max_urls: int = 300  # Max URLs to process per cycle (0 = unlimited)
-    url_process_timeout: int = 120  # Per-URL processing timeout (seconds)
+    cycle_max_urls: int = 1000  # Max URLs per cycle (was 300)
+    url_process_timeout: int = 45  # Per-URL timeout (was 120s — kills hanging URLs faster)
 
     # =============== STORAGE ===============
     found_sites_file: str = os.path.join(os.path.dirname(__file__), "found_sites.json")
@@ -674,7 +674,7 @@ class DorkerConfig:
     )
 
     # =============== VALIDATION ===============
-    validation_timeout: int = 15
+    validation_timeout: int = 8  # Initial HTTP check (was 15s)
     max_concurrent_validations: int = 120
     min_content_length: int = 500  # Skip pages with less content
 

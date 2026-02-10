@@ -2220,7 +2220,7 @@ class MadyDorkerPipeline:
                                             waf_name=waf_name,
                                             protection_info=waf_info,
                                         ),
-                                        timeout=45,
+                                        timeout=20,  # Was 45s — premium proxy is faster
                                     )
                                     if extra_sqli:
                                         for sqli in extra_sqli:
@@ -3084,106 +3084,128 @@ class MadyDorkerPipeline:
         cycle_results = []
         cycle_cookies = 0
 
-        for i, dork in enumerate(cycle_dorks):
+        # --- Parallel dork search: batch N dork searches concurrently ---
+        _dork_batch_size = 5  # Search 5 dorks in parallel
+
+        for batch_start in range(0, len(cycle_dorks), _dork_batch_size):
             if not self.running:
                 logger.info("Pipeline stopped, breaking cycle")
                 break
             if self.skip_cycle:
                 logger.info(
-                    f"Cycle skipped at dork {i}/{len(cycle_dorks)} — moving to next cycle"
+                    f"Cycle skipped at dork {batch_start}/{len(cycle_dorks)} — moving to next cycle"
                 )
                 break
 
-            # --- Per-cycle time limit check ---
+            batch_end = min(batch_start + _dork_batch_size, len(cycle_dorks))
+            dork_batch = cycle_dorks[batch_start:batch_end]
+
+            # --- Pre-batch checks (time/URL cap) ---
             elapsed = asyncio.get_event_loop().time() - cycle_start_time
             if _cycle_max_time > 0 and elapsed >= _cycle_max_time:
                 logger.info(
                     f"Cycle time limit reached ({_cycle_max_time}s) at dork "
-                    f"{i}/{len(cycle_dorks)} — advancing to next cycle"
+                    f"{batch_start}/{len(cycle_dorks)} — advancing to next cycle"
                 )
                 await self._send_progress(
                     f"⏱ <b>Time limit</b> ({_cycle_max_time}s) reached at dork "
-                    f"{i}/{len(cycle_dorks)} — moving to next cycle"
+                    f"{batch_start}/{len(cycle_dorks)} — moving to next cycle"
                 )
                 break
 
-            # --- Per-cycle URL cap check ---
             if _cycle_max_urls > 0 and cycle_urls_processed >= _cycle_max_urls:
                 logger.info(
                     f"Cycle URL cap reached ({_cycle_max_urls}) at dork "
-                    f"{i}/{len(cycle_dorks)} — advancing to next cycle"
+                    f"{batch_start}/{len(cycle_dorks)} — advancing to next cycle"
                 )
                 await self._send_progress(
                     f"🔗 <b>URL cap</b> ({_cycle_max_urls}) reached at dork "
-                    f"{i}/{len(cycle_dorks)} — moving to next cycle"
+                    f"{batch_start}/{len(cycle_dorks)} — moving to next cycle"
                 )
                 break
 
             # Skip dorks before checkpoint resume point
-            if i < resume_index:
+            effective_batch = []
+            for bi, dork in enumerate(dork_batch):
+                global_idx = batch_start + bi
+                if global_idx < resume_index:
+                    continue
+                effective_batch.append((global_idx, dork))
+
+            if not effective_batch:
                 continue
 
-            self.reporter.stats.dorks_processed += 1
-
-            # Save checkpoint every 10 dorks for crash recovery
-            if i % 10 == 0:
+            # Checkpoint + stats for first dork in batch
+            first_idx = effective_batch[0][0]
+            self.reporter.stats.dorks_processed += len(effective_batch)
+            if first_idx % 10 == 0:
                 try:
-                    self.db.save_dork_checkpoint(self.cycle_count, i, dork_hash)
+                    self.db.save_dork_checkpoint(self.cycle_count, first_idx, dork_hash)
                 except Exception:
                     pass
 
-            # Progress update every 50 dorks (reduced from 10 to cut spam)
-            if (i + 1) % 50 == 0:
+            # Progress update every 50 dorks
+            if (first_idx + 1) % 50 == 0 or (batch_start == 0):
                 _elapsed_min = (asyncio.get_event_loop().time() - cycle_start_time) / 60
                 await self._send_progress(
-                    f"⏳ Dork <b>{i + 1}/{len(cycle_dorks)}</b> | "
+                    f"⏳ Dork <b>{first_idx + 1}/{len(cycle_dorks)}</b> | "
                     f"URLs: {cycle_urls_processed}/{_cycle_max_urls or '∞'} | "
                     f"Hits: {len(cycle_findings)} | ⏱ {_elapsed_min:.0f}m"
                 )
-                await asyncio.sleep(0)  # Yield to event loop
-            # Warn if no results after first 50
-            if (i + 1) == 50 and cycle_urls_found == 0:
+                await asyncio.sleep(0)
+
+            if first_idx + 1 == 50 and cycle_urls_found == 0:
                 await self._send_progress(
                     "⚠️ First 50 dorks returned 0 URLs. "
                     "Search engines may be rate-limiting or proxies may be dead."
                 )
 
-            try:
-                # Search for URLs
-                urls = await self.searcher.search(dork, self.config.results_per_dork)
+            # === PARALLEL DORK SEARCH ===
+            # Search all dorks in this batch concurrently
+            async def _search_one_dork(dork_text):
+                try:
+                    return await self.searcher.search(dork_text, self.config.results_per_dork)
+                except Exception as e:
+                    logger.debug(f"Search error for dork: {e}")
+                    return []
 
-                # Update dork scorer with results
+            search_tasks = [_search_one_dork(d) for _, d in effective_batch]
+            search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+            # Collect all URLs from the batch, deduplicate/filter
+            all_batch_urls = []
+            for (global_idx, dork), raw_urls in zip(effective_batch, search_results):
+                if isinstance(raw_urls, Exception):
+                    logger.error(f"Dork search error: {raw_urls}")
+                    continue
+
+                urls = raw_urls or []
+
+                # Update dork scorer
                 if hasattr(self.searcher, "dork_scorer") and self.searcher.dork_scorer:
-                    self.searcher.dork_scorer.record(dork, len(urls) if urls else 0)
+                    self.searcher.dork_scorer.record(dork, len(urls))
 
                 if not urls:
                     continue
 
-                # Filter URLs — domain TTL cooldown + URL-level dedup + retry limits
-                filtered_urls = []
+                # Filter URLs
                 _revisit_hours = getattr(self.config, "domain_revisit_hours", 24)
                 _url_dedup = getattr(self.config, "url_dedup_enabled", True)
                 _max_retries = getattr(self.config, "max_url_retries", 3)
-                _skip_reasons = {
-                    "dedup": 0,
-                    "cooldown": 0,
-                    "blacklist": 0,
-                    "max_retries": 0,
-                }
+                _skip_reasons = {"dedup": 0, "cooldown": 0, "blacklist": 0, "max_retries": 0}
+
+                filtered_urls = []
                 for url in urls:
                     if self._should_skip_url(url):
                         _skip_reasons["blacklist"] += 1
                         continue
                     domain = urlparse(url).netloc
-                    # URL-level dedup: never reprocess exact same URL
                     if _url_dedup and self.db.is_url_processed(url):
                         _skip_reasons["dedup"] += 1
                         continue
-                    # Domain cooldown: skip if scanned within revisit window
                     if self.db.is_domain_on_cooldown(domain, _revisit_hours):
                         _skip_reasons["cooldown"] += 1
                         continue
-                    # Retry limit: skip URLs that have failed too many times
                     if (
                         hasattr(self.db, "get_url_fail_count")
                         and self.db.get_url_fail_count(url) >= _max_retries
@@ -3192,76 +3214,71 @@ class MadyDorkerPipeline:
                         continue
                     filtered_urls.append(url)
 
-                # Log skip reasons for transparency
                 skipped_total = sum(_skip_reasons.values())
                 if skipped_total > 0:
-                    reasons = ", ".join(
-                        f"{k}={v}" for k, v in _skip_reasons.items() if v > 0
-                    )
+                    reasons = ", ".join(f"{k}={v}" for k, v in _skip_reasons.items() if v > 0)
+                    logger.info(f"Filtered {skipped_total}/{len(urls)} URLs — {reasons}")
+
+                if filtered_urls:
                     logger.info(
-                        f"Filtered {skipped_total}/{len(urls)} URLs — {reasons}"
+                        f"[{global_idx + 1}/{len(cycle_dorks)}] Dork: {dork[:60]}... → {len(filtered_urls)} new URLs"
                     )
+                    all_batch_urls.extend(filtered_urls)
 
-                if not filtered_urls:
-                    continue
-
-                # Sort by priority score (high-value params first)
-                filtered_urls.sort(
-                    key=lambda u: self._score_url_priority(u), reverse=True
-                )
-
-                cycle_urls_found += len(filtered_urls)
-                logger.info(
-                    f"[{i + 1}/{len(cycle_dorks)}] Dork: {dork[:60]}... → {len(filtered_urls)} new URLs"
-                )
-
-                # Notify when URLs found (only for big batches to reduce noise)
-                if len(filtered_urls) >= 5:
-                    await self._send_progress(
-                        f"🔗 Dork {i + 1}: <b>{len(filtered_urls)} new URLs</b>\n"
-                        f"<code>{dork[:80]}</code>"
-                    )
-
-                # Enforce per-cycle URL cap on how many we actually process
-                urls_remaining = len(filtered_urls)
-                if _cycle_max_urls > 0:
-                    urls_remaining = min(
-                        urls_remaining,
-                        _cycle_max_urls - cycle_urls_processed,
-                    )
-                    if urls_remaining <= 0:
-                        break
-                    filtered_urls = filtered_urls[:urls_remaining]
-
-                # Process URLs concurrently (bounded by semaphore)
-                batch_results = []
-                batch_findings = []
-
-                tasks = []
-                for url in filtered_urls:
-                    if not self.running:
-                        break
-                    tasks.append(
-                        self._process_url_safe(url, batch_results, batch_findings)
-                    )
-
-                if tasks:
-                    # Run all URL tasks concurrently (semaphore inside process_url limits actual parallelism)
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                    cycle_results.extend(batch_results)
-                    cycle_findings.extend(batch_findings)
-                    cycle_urls_processed += len(tasks)
-
-                # Delay between dorks
-                delay = random.uniform(
-                    self.config.search_delay_min,
-                    self.config.search_delay_max,
-                )
-                await asyncio.sleep(delay)
-
-            except Exception as e:
-                logger.error(f"Dork cycle error: {e}")
+            if not all_batch_urls:
+                # Brief yield between batches even if no URLs
+                await asyncio.sleep(0.2)
                 continue
+
+            # Sort by priority score (high-value params first)
+            all_batch_urls.sort(
+                key=lambda u: self._score_url_priority(u), reverse=True
+            )
+
+            cycle_urls_found += len(all_batch_urls)
+
+            # Notify when URLs found
+            if len(all_batch_urls) >= 5:
+                await self._send_progress(
+                    f"🔗 Batch {batch_start//(_dork_batch_size)+1}: <b>{len(all_batch_urls)} new URLs</b> "
+                    f"from {len(effective_batch)} dorks"
+                )
+
+            # Enforce per-cycle URL cap
+            urls_remaining = len(all_batch_urls)
+            if _cycle_max_urls > 0:
+                urls_remaining = min(
+                    urls_remaining,
+                    _cycle_max_urls - cycle_urls_processed,
+                )
+                if urls_remaining <= 0:
+                    break
+                all_batch_urls = all_batch_urls[:urls_remaining]
+
+            # Process URLs concurrently (bounded by semaphore)
+            batch_results = []
+            batch_findings = []
+
+            tasks = []
+            for url in all_batch_urls:
+                if not self.running:
+                    break
+                tasks.append(
+                    self._process_url_safe(url, batch_results, batch_findings)
+                )
+
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+                cycle_results.extend(batch_results)
+                cycle_findings.extend(batch_findings)
+                cycle_urls_processed += len(tasks)
+
+            # Brief delay between dork batches (much shorter than per-dork delay)
+            delay = random.uniform(
+                self.config.search_delay_min,
+                self.config.search_delay_max,
+            )
+            await asyncio.sleep(delay)
 
         # Save state after cycle
         self._save_state()
