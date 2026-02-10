@@ -3179,7 +3179,7 @@ class MadyDorkerPipeline:
                     reasons = ", ".join(
                         f"{k}={v}" for k, v in _skip_reasons.items() if v > 0
                     )
-                    logger.debug(
+                    logger.info(
                         f"Filtered {skipped_total}/{len(urls)} URLs — {reasons}"
                     )
 

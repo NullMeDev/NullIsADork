@@ -27,7 +27,7 @@ class DorkerConfig:
     custom_dork_file: str = os.path.join(
         os.path.dirname(__file__), "params", "custom_dorks.txt"
     )
-    max_dorks: int = 1500000
+    max_dorks: int = 3300000
     max_per_pattern: int = 800
     dork_shuffle: bool = True
 
@@ -247,7 +247,7 @@ class DorkerConfig:
 
     # =============== DOMAIN REVISIT & URL DEDUP ===============
     domain_revisit_hours: int = (
-        4  # Hours before revisiting a domain (0 = never revisit)
+        1  # Hours before revisiting a domain (0 = never revisit)
     )
     url_dedup_enabled: bool = True  # Skip exact-same URLs permanently
 
@@ -277,7 +277,7 @@ class DorkerConfig:
     auto_start_pipeline: bool = (
         True  # Auto-start dorking on bot startup (no /dorkon needed)
     )
-    dorks_per_cycle: int = 500  # Dorks to process per cycle (rotates through full pool)
+    dorks_per_cycle: int = 1000  # Dorks to process per cycle (rotates through full pool)
     cycle_max_time: int = 3600  # Max seconds per cycle (3600 = 1 hour)
     cycle_max_urls: int = 300  # Max URLs to process per cycle (0 = unlimited)
     url_process_timeout: int = 120  # Per-URL processing timeout (seconds)
