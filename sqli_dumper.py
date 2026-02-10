@@ -944,14 +944,20 @@ class SQLiDumper:
         # Save all data as CSV
         if dump.data:
             filepath = os.path.join(self.output_dir, f"{base_name}_full.csv")
+            # Collect all unique column names across all tables first
+            all_fields = ["_table"]
+            for table, rows in dump.data.items():
+                for row in rows:
+                    for key in row:
+                        if key not in all_fields:
+                            all_fields.append(key)
             with open(filepath, "w", newline="") as f:
-                writer = None
+                writer = csv.DictWriter(f, fieldnames=all_fields,
+                                         restval="", extrasaction="ignore")
+                writer.writeheader()
                 for table, rows in dump.data.items():
                     for row in rows:
                         row_with_table = {"_table": table, **row}
-                        if writer is None:
-                            writer = csv.DictWriter(f, fieldnames=row_with_table.keys())
-                            writer.writeheader()
                         writer.writerow(row_with_table)
             saved["full_csv"] = filepath
         
