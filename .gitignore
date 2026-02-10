@@ -55,3 +55,4 @@ Thumbs.db
 # ==================== TEST FILES ====================
 test_*.py
 !test_example.py
+*.bak.*
