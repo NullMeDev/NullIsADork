@@ -139,9 +139,9 @@ JS_SECRET_PATTERNS = [
     # Stripe restricted/webhook keys
     (re.compile(r'''["'`](rk_live_[a-zA-Z0-9_-]{24,})["'`]'''), "stripe_restricted"),
     (re.compile(r'''["'`](whsec_[a-zA-Z0-9_-]{24,})["'`]'''), "stripe_webhook_secret"),
-    # Checkout.com keys
-    (re.compile(r'''["'`](sk_(?:sbox_|test_|live_)?[a-zA-Z0-9_-]{20,})["'`]'''), "checkout_secret"),
-    (re.compile(r'''["'`](pk_(?:sbox_|test_|live_)?[a-zA-Z0-9_-]{20,})["'`]'''), "checkout_publishable"),
+    # Checkout.com keys — require environment prefix (sbox_/test_/live_)
+    (re.compile(r'''["'`](sk_(?:sbox_|test_|live_)[a-zA-Z0-9_-]{20,})["'`]'''), "checkout_secret"),
+    (re.compile(r'''["'`](pk_(?:sbox_|test_|live_)[a-zA-Z0-9_-]{20,})["'`]'''), "checkout_publishable"),
     # Square keys
     (re.compile(r'''["'`](sq0atp-[a-zA-Z0-9_-]{22,})["'`]'''), "square_access_token"),
     (re.compile(r'''["'`](sq0csp-[a-zA-Z0-9_-]{40,})["'`]'''), "square_oauth_secret"),
@@ -729,14 +729,29 @@ class JSBundleAnalyzer:
         return True
 
     def _is_placeholder(self, value: str) -> bool:
-        """Check if a secret value is a placeholder/example."""
+        """Check if a secret value is a placeholder/example or UI identifier."""
         lower = value.lower()
         placeholders = [
             "your_", "xxxx", "example", "test_", "demo", "placeholder",
             "change_me", "replace", "insert_", "todo", "fixme", "dummy",
             "sample", "0000000", "aaaaaaa", "123456",
+            # OWASP / security doc headers
+            "broken_", "authorization", "authentication",
+            "injection", "exposure", "misconfiguration",
         ]
-        return any(p in lower for p in placeholders)
+        if any(p in lower for p in placeholders):
+            return True
+        # CamelCase identifiers (UI components, not real keys)
+        # Real payment keys are lowercase+digits; CamelCase = code symbol
+        _prefixes = ('sk_', 'pk_', 'acct_', 'pi_')
+        if lower.startswith(_prefixes):
+            prefix_len = value.index('_') + 1
+            suffix = value[prefix_len:]
+            if any(c.isupper() for c in suffix):
+                return True
+            if '-' in value:
+                return True
+        return False
 
     # ── Deduplication ─────────────────────────────────────────────────────
 

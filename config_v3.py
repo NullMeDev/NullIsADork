@@ -151,6 +151,11 @@ class DorkerConfig:
             "env_var",          # ENV var references, not actual values
             "db_host",          # Database hostnames from config, not creds
             "discord_bot",      # Discord bot tokens from public docs/examples
+            "generic_pk",       # Too broad — matches any "public_key=..." context
+            "generic_sk",       # Too broad — matches any "secret_key=..." context
+            "wc_checkout_nonce", # WooCommerce nonces, ephemeral like WP nonces
+            "braintree_token_nonce",  # Nonce, not an actual token
+            "stripe_pmc",       # PaymentMethodConfiguration IDs, not secrets
         ]
     )
 
@@ -277,7 +282,7 @@ class DorkerConfig:
     auto_start_pipeline: bool = (
         True  # Auto-start dorking on bot startup (no /dorkon needed)
     )
-    dorks_per_cycle: int = 1000  # Dorks to process per cycle (rotates through full pool)
+    dorks_per_cycle: int = 50  # Dorks to process per cycle (rotates through full pool)
     cycle_max_time: int = 3600  # Max seconds per cycle (3600 = 1 hour)
     cycle_max_urls: int = 300  # Max URLs to process per cycle (0 = unlimited)
     url_process_timeout: int = 120  # Per-URL processing timeout (seconds)
@@ -442,6 +447,54 @@ class DorkerConfig:
             "sourceforge.net",
             "example.com",
             "localhost",
+            # Government / education / major corps (never vuln targets, waste time)
+            "sec.gov",
+            "irs.gov",
+            "fbi.gov",
+            "cia.gov",
+            "nasa.gov",
+            ".gov.uk",
+            ".edu",
+            "cam.ac.uk",
+            "ox.ac.uk",
+            "mit.edu",
+            "harvard.edu",
+            "stanford.edu",
+            "icann.org",
+            "ietf.org",
+            "w3.org",
+            "owasp.org",
+            # Big platforms that waste scan time with no vuln exposure
+            "upwork.com",
+            "fiverr.com",
+            "indeed.com",
+            "glassdoor.com",
+            "navercorp.com",
+            "naver.com",
+            "baidu.com",
+            "alibabacloud.com",
+            "alibaba.com",
+            "tencent.com",
+            "oracle.com",
+            "salesforce.com",
+            "ibm.com",
+            "cisco.com",
+            "adobe.com",
+            "atlassian.com",
+            "zendesk.com",
+            "hubspot.com",
+            # Documentation / reference sites
+            "docs.python.org",
+            "docs.djangoproject.com",
+            "reactjs.org",
+            "vuejs.org",
+            "angular.io",
+            "developer.android.com",
+            "developer.apple.com",
+            "learn.microsoft.com",
+            "support.google.com",
+            "help.yahoo.com",
+            "fintechwrapup.com",
         ]
     )
 

@@ -53,9 +53,9 @@ class SecretExtractor:
         ("Stripe Test SK", "gateway", "stripe_sk_test",
          re.compile(r'(?:sk_test_[A-Za-z0-9_-]{20,120})', re.I), 0.85),
         ("Stripe Connect Account", "gateway", "stripe_acct",
-         re.compile(r'(?:acct_[A-Za-z0-9_-]{12,40})', re.I), 0.85),
+         re.compile(r'(?:acct_[a-z0-9]{12,40})', re.I), 0.85),
         ("Stripe Payment Intent", "gateway", "stripe_pi",
-         re.compile(r'(?:pi_[A-Za-z0-9_-]{20,60})', re.I), 0.80),
+         re.compile(r'(?:pi_[a-z0-9]{20,60})', re.I), 0.80),
         ("Stripe Client Secret", "gateway", "stripe_client_secret",
          re.compile(r'(?:pi_[A-Za-z0-9_-]+_secret_[A-Za-z0-9_-]+)', re.I), 0.90),
         
@@ -118,8 +118,8 @@ class SecretExtractor:
          re.compile(r'wc_stripe_(?:upe_)?params\s*=\s*\{[^}]*?"key"\s*:\s*"(pk_(?:live|test)_[A-Za-z0-9]{20,99})"', re.I), 0.99),
         ("WC Stripe PMC", "gateway", "stripe_pmc",
          re.compile(r'paymentMethodConfigurationParentId"\s*:\s*"(pmc_[A-Za-z0-9]{20,40})"', re.I), 0.90),
-        ("WC Stripe Account", "gateway", "stripe_acct",
-         re.compile(r'accountDescriptor"\s*:\s*"([^"]{2,60})"', re.I), 0.70),
+        # WC Stripe Account — removed: accountDescriptor pattern was too broad,
+        # matched arbitrary text from any WooCommerce JSON config block.
         
         # WooCommerce Braintree PayPal
         ("WC Braintree PayPal Gateway", "gateway", "braintree_paypal",
@@ -265,7 +265,7 @@ class SecretExtractor:
         "example", "sample", "test", "demo", "placeholder", "your_",
         "xxx", "TODO", "FIXME", "INSERT", "CHANGE_ME", "your-",
         "12345", "abcdef", "000000", "aaaa", "bbbb",
-        # HTML/CSS/form field false positives
+        # HTML/CSS/form field false positives (underscore variants)
         "_form", "_input", "_field", "_button", "_container", "_wrapper",
         "_modal", "_dialog", "_menu", "_nav", "_header", "_footer",
         "_sidebar", "_panel", "_tab", "_table", "_row", "_col",
@@ -273,6 +273,24 @@ class SecretExtractor:
         "_list", "_item", "_card", "_section", "_page", "_view",
         "_add", "_edit", "_delete", "_submit", "_search", "_filter",
         "_librarian", "_library", "_admin", "_user", "_login",
+        # Hyphen variants of the same (CSS class names)
+        "-form", "-input", "-field", "-button", "-container", "-wrapper",
+        "-modal", "-dialog", "-menu", "-nav", "-header", "-footer",
+        "-sidebar", "-panel", "-tab", "-table", "-row", "-col",
+        "-label", "-text", "-link", "-icon", "-image", "-img",
+        "-list", "-item", "-card", "-section", "-page", "-view",
+        "-overlay", "-toggle", "-dropdown", "-tooltip", "-popover",
+        "-banner", "-widget", "-slider", "-carousel", "-spinner",
+        "-alert", "-badge", "-breadcrumb", "-close", "-collapse",
+        "-mini-cart", "-checkout", "-cart", "-product",
+        # Common FP word fragments in identifiers
+        "authorization", "authentication", "configuration",
+        "integration", "description", "notification",
+        "presentation", "implementation",
+        "continue", "button", "widget", "component",
+        "handler", "callback", "listener", "wrapper",
+        "container", "overlay", "spinner", "loader",
+        "Broken_", "Object_", "Level_",
     ]
     
     def __init__(self, timeout: int = 10, max_concurrent: int = 20):
@@ -284,22 +302,56 @@ class SecretExtractor:
     def _is_false_positive(self, value: str) -> bool:
         """Check if extracted value looks like a false positive."""
         value_lower = value.lower()
-        for indicator in self.FALSE_POSITIVE_INDICATORS:
-            if indicator in value_lower:
-                return True
+
         # Too short or all same chars
         if len(value) < 8:
             return True
         if len(set(value)) < 4:
             return True
-        # sk_/pk_ keys with too many underscores are likely CSS/HTML identifiers
-        if value_lower.startswith(('sk_', 'pk_')) and value.count('_') > 4:
-            return True
-        # Reject sk_/pk_ values that are all lowercase words (CSS class pattern)
-        if value_lower.startswith(('sk_', 'pk_')):
-            parts = value.split('_')[1:]  # skip sk/pk prefix
-            if all(p.isalpha() and len(p) <= 12 for p in parts if p):
+
+        # ── Prefix-based identifier detection (sk_, pk_, acct_, pi_) ──
+        _prefixes = ('sk_', 'pk_', 'acct_', 'pi_', 'pmc_')
+        if value_lower.startswith(_prefixes):
+            # Known-real prefixes that DO contain mixed case (Stripe live/test keys)
+            _real_prefixes = (
+                'sk_live_', 'sk_test_', 'pk_live_', 'pk_test_',
+                'sk_sbox_', 'pk_sbox_',  # Checkout.com
+                'rk_live_', 'rk_test_',  # Stripe restricted keys
+            )
+            if value.startswith(_real_prefixes):
+                # This is a real key format — only reject if very obviously fake
+                if len(value) < 20:
+                    return True
+                return False  # Trust the prefix, skip general FP checks
+
+            # Too many underscores => CSS/HTML id, not a real key
+            if value.count('_') > 4:
                 return True
+            # Contains hyphens => CSS class name pattern (real keys never have hyphens)
+            if '-' in value:
+                return True
+            # CamelCase detection: real Stripe acct_/pi_ keys are lowercase+digits only
+            # If any part after prefix has uppercase -> likely a code identifier
+            prefix_len = value.index('_') + 1
+            suffix = value[prefix_len:]
+            if any(c.isupper() for c in suffix):
+                return True
+            # All-alpha word segments (no digits) => likely code identifier
+            parts = value.split('_')[1:]  # skip prefix
+            if len(parts) >= 2 and all(p.isalpha() and len(p) <= 15 for p in parts if p):
+                return True
+
+        # General FP indicator check (runs for non-prefix values)
+        for indicator in self.FALSE_POSITIVE_INDICATORS:
+            if indicator.lower() in value_lower:
+                return True
+
+        # Generic: CSS class pattern with hyphens (e.g., wc-mini-cart-overlay)
+        if '-' in value and not value.startswith(('http', 'ftp')):
+            hyphen_parts = value.split('-')
+            if len(hyphen_parts) >= 3 and all(p.isalpha() and len(p) <= 12 for p in hyphen_parts if p):
+                return True
+
         return False
 
     def extract_from_text(self, text: str, url: str = "") -> List[ExtractedSecret]:
