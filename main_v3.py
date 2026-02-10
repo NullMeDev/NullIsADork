@@ -172,18 +172,25 @@ class MadyDorkerPipeline:
         # Proxy manager (Phase 2)
         self.proxy_manager = None
         if self.config.use_proxies:
-            proxy_files = getattr(self.config, "proxy_files", [])
-            # Legacy fallback: if no proxy_files list, use single proxy_file
-            if not proxy_files and self.config.proxy_file:
-                proxy_files = [self.config.proxy_file]
+            # Premium single proxy from env var takes priority
+            proxy_url = getattr(self.config, "proxy_url", "")
+            if proxy_url:
+                # Single premium proxy — skip file loading, no health check needed
+                proxy_files = []  # Will inject inline after construction
+            else:
+                proxy_files = getattr(self.config, "proxy_files", [])
+                # Legacy fallback: if no proxy_files list, use single proxy_file
+                if not proxy_files and self.config.proxy_file:
+                    proxy_files = [self.config.proxy_file]
+
             self.proxy_manager = ProxyManager(
                 proxy_files=proxy_files,
-                strategy=getattr(self.config, "proxy_rotation_strategy", "weighted"),
+                strategy="round_robin" if proxy_url else getattr(self.config, "proxy_rotation_strategy", "weighted"),
                 ban_threshold=getattr(self.config, "proxy_ban_threshold", 5),
                 ban_duration=getattr(self.config, "proxy_ban_duration", 600),
                 country_filter=getattr(self.config, "proxy_country_filter", []),
                 sticky_per_domain=getattr(self.config, "proxy_sticky_per_domain", 3),
-                health_check=getattr(self.config, "proxy_health_check", True),
+                health_check=False if proxy_url else getattr(self.config, "proxy_health_check", True),
                 health_check_interval=getattr(
                     self.config, "proxy_health_interval", 300
                 ),
@@ -191,6 +198,18 @@ class MadyDorkerPipeline:
                 protocol=getattr(self.config, "proxy_protocol", "http"),
                 enabled=True,
             )
+
+            # Inject premium proxy inline (credentials stay in env, never in code/logs)
+            if proxy_url:
+                from proxy_manager import ProxyLoader, ProxyProtocol
+                inline_proxies = ProxyLoader.from_list(
+                    [proxy_url],
+                    ProxyProtocol(getattr(self.config, "proxy_protocol", "http")),
+                )
+                if inline_proxies:
+                    self.proxy_manager.pool.add_proxies(inline_proxies)
+                    logger.info(f"💎 Premium proxy loaded: {inline_proxies[0].address}")
+
             self.searcher.proxy_manager = self.proxy_manager
 
         # Configure Firecrawl in search engine
@@ -508,7 +527,7 @@ class MadyDorkerPipeline:
         self._last_export_time: Optional[datetime] = None
         self._export_counter = 0
         self._hits_since_export = 0
-        self._auto_export_threshold = 10  # Auto-export every N hits
+        self._auto_export_threshold = 50  # Auto-export every N hits
 
         # Load previous state
         self._load_state()
