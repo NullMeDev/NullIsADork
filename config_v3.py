@@ -37,6 +37,7 @@ class DorkerConfig:
     results_per_dork: int = 50
     engines: List[str] = field(
         default_factory=lambda: [
+            # ── Core global engines ──
             "duckduckgo",
             "bing",
             "startpage",
@@ -52,6 +53,75 @@ class DorkerConfig:
             "you",
             "mojeek",
             "naver",
+            # ── Independent international engines ──
+            "baidu",            # China #1
+            "sogou",            # China #2
+            "yahoo_jp",         # Japan
+            "goo_jp",           # Japan (NTT)
+            "daum",             # South Korea #2
+            "seznam",           # Czech Republic
+            "coccoc",           # Vietnam
+            "yandex_ru",        # Russia domestic
+            "yandex_tr",        # Turkey
+            "qwant_lite",       # France HTML
+            "swisscows",        # Switzerland
+            "metager",          # Germany
+            "presearch",        # Decentralized
+            "yep",              # Ahrefs index
+            "alexandria",       # Netherlands/EU
+            "gibiru",           # Uncensored
+            "exalead",          # France (Dassault)
+            # ── Bing regional (48 country variants) ──
+            "bing_ar",          # Argentina
+            "bing_au",          # Australia
+            "bing_at",          # Austria
+            "bing_be",          # Belgium
+            "bing_br",          # Brazil
+            "bing_ca",          # Canada
+            "bing_cl",          # Chile
+            "bing_dk",          # Denmark
+            "bing_fi",          # Finland
+            "bing_fr",          # France
+            "bing_de",          # Germany
+            "bing_in",          # India
+            "bing_id",          # Indonesia
+            "bing_it",          # Italy
+            "bing_jp",          # Japan
+            "bing_kr",          # South Korea
+            "bing_my",          # Malaysia
+            "bing_mx",          # Mexico
+            "bing_nl",          # Netherlands
+            "bing_nz",          # New Zealand
+            "bing_no",          # Norway
+            "bing_pl",          # Poland
+            "bing_pt",          # Portugal
+            "bing_ru",          # Russia
+            "bing_sa",          # Saudi Arabia
+            "bing_za",          # South Africa
+            "bing_es",          # Spain
+            "bing_se",          # Sweden
+            "bing_ch",          # Switzerland
+            "bing_tw",          # Taiwan
+            "bing_th",          # Thailand
+            "bing_tr",          # Turkey
+            "bing_gb",          # United Kingdom
+            "bing_ph",          # Philippines
+            "bing_vn",          # Vietnam
+            "bing_eg",          # Egypt
+            "bing_ng",          # Nigeria
+            "bing_ke",          # Kenya
+            "bing_co",          # Colombia
+            "bing_pe",          # Peru
+            "bing_ua",          # Ukraine
+            "bing_ro",          # Romania
+            "bing_cz",          # Czech Republic
+            "bing_hu",          # Hungary
+            "bing_il",          # Israel
+            "bing_ae",          # UAE
+            "bing_sg",          # Singapore
+            "bing_hk",          # Hong Kong
+            "bing_pk",          # Pakistan
+            "bing_bd",          # Bangladesh
         ]
     )
     engine_shuffle: bool = True
