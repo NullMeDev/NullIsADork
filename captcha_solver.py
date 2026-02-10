@@ -496,7 +496,7 @@ class NopeCHAProvider(CaptchaProvider):
             logger.error(f"[NopeCHA] Method {method_name} not found on client")
             return None
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 None, lambda: method(*args, **kwargs)
             )
             if result and isinstance(result, dict):
@@ -542,7 +542,7 @@ class NopeCHAProvider(CaptchaProvider):
         if not client:
             return 0.0
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 None, lambda: client.status()
             )
             if isinstance(result, dict):
@@ -577,7 +577,7 @@ class AntiCaptchaProvider(CaptchaProvider):
             solver.set_key(self.api_key)
             setup_fn(solver)
 
-            result = await asyncio.get_event_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 None, solver.solve_and_return_solution
             )
             if result and result != 0:
@@ -660,7 +660,7 @@ class AntiCaptchaProvider(CaptchaProvider):
             from anticaptchaofficial.antinetworking import antiNetworking
             client = antiNetworking()
             client.client_key = self.api_key
-            result = await asyncio.get_event_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 None, client.get_balance
             )
             return float(result) if result else 0.0

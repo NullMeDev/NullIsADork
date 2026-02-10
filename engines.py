@@ -204,8 +204,16 @@ class SearchEngine:
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session and not self._session.closed:
             return self._session
-        return aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30),
-                                     connector=aiohttp.TCPConnector(ssl=False, limit=10))
+        self._session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30),
+            connector=aiohttp.TCPConnector(ssl=False, limit=10),
+        )
+        return self._session
+
+    async def close(self):
+        """Close the underlying HTTP session to prevent resource leaks."""
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
         raise NotImplementedError
@@ -1076,7 +1084,7 @@ class FirecrawlSearch(SearchEngine):
 
         try:
             limit = min(num_results, self.search_limit)
-            result = await asyncio.get_event_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: fc.search(query=query, limit=limit)
             )
@@ -1115,7 +1123,7 @@ class FirecrawlSearch(SearchEngine):
             return None
 
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: fc.scrape(url, formats=formats or ["markdown", "html", "links"])
             )
@@ -1147,7 +1155,7 @@ class FirecrawlSearch(SearchEngine):
             return []
 
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: fc.crawl(url=url, limit=limit)
             )
@@ -1185,7 +1193,7 @@ class FirecrawlSearch(SearchEngine):
             return []
 
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
+            result = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: fc.map(url=url, limit=limit)
             )

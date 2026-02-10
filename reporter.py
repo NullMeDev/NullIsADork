@@ -93,7 +93,7 @@ class TelegramReporter:
         for attempt in range(3):
             try:
                 # Rate limiting
-                now = asyncio.get_event_loop().time()
+                now = asyncio.get_running_loop().time()
                 elapsed = now - self._last_send
                 if elapsed < self.rate_limit:
                     await asyncio.sleep(self.rate_limit - elapsed)
@@ -129,7 +129,7 @@ class TelegramReporter:
                                 logger.error(f"Telegram API error: {error}")
                                 return None
                 
-                self._last_send = asyncio.get_event_loop().time()
+                self._last_send = asyncio.get_running_loop().time()
                 self.stats.messages_sent += 1
                 return msg
             
@@ -200,7 +200,7 @@ class TelegramReporter:
 
         for attempt in range(3):
             try:
-                now = asyncio.get_event_loop().time()
+                now = asyncio.get_running_loop().time()
                 elapsed = now - self._last_send
                 if elapsed < self.rate_limit:
                     await asyncio.sleep(self.rate_limit - elapsed)
@@ -240,7 +240,7 @@ class TelegramReporter:
                                 logger.error(f"Telegram sendDocument error: {error}")
                                 return None
 
-                self._last_send = asyncio.get_event_loop().time()
+                self._last_send = asyncio.get_running_loop().time()
                 self.stats.messages_sent += 1
                 return msg
 

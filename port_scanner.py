@@ -261,7 +261,7 @@ class PortScanner:
 
         # Resolve IP
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             infos = await loop.getaddrinfo(domain, None, family=socket.AF_INET)
             if infos:
                 result.ip = infos[0][4][0]

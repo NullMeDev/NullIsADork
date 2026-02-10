@@ -153,7 +153,7 @@ class SubdomainEnumerator:
             subdomain = f"{prefix}.{domain}"
             async with self._sem:
                 try:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     await asyncio.wait_for(
                         loop.run_in_executor(None, socket.gethostbyname, subdomain),
                         timeout=self.timeout,

