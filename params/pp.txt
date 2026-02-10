@@ -1,3 +1,4 @@
+# === COMMON INJECTABLE URL PARAMS ===
 id
 cat
 category
@@ -133,6 +134,7 @@ block
 tab
 menu
 nav
+
 # === PAYMENT / ORDER PARAMS ===
 order_id
 orderid
@@ -143,6 +145,7 @@ txn_id
 payment_id
 receipt_id
 cart_id
+cartid
 session_id
 token
 payment_method
@@ -159,6 +162,17 @@ barcode
 shipping
 tax_rate
 subtotal
+checkout_id
+billing_id
+merchant_id
+plan_id
+subscription_id
+coupon
+promo
+discount_id
+charge_id
+refund_id
+
 # === AUTH / SESSION ===
 username
 email
@@ -176,31 +190,10 @@ apikey
 access_token
 refresh_token
 client_id
-client_secret
-# === DATABASE / ADMIN ===
-db
-dbname
-database
-host
-port
-server
-schema
-tbl
-column
-select
-where
-insert
-update
-delete
-exec
-cmd
-command
-run
-execute
+
 # === FILE / PATH ===
 filename
 filepath
-dir
 directory
 folder
 root
@@ -214,6 +207,7 @@ open
 save
 attach
 attachment
+
 # === SEARCH / FILTER ===
 q
 s
@@ -230,6 +224,7 @@ make
 series
 collection_id
 department
+
 # === CMS / FRAMEWORK ===
 route
 controller
@@ -240,10 +235,9 @@ callback
 hook
 event
 trigger
-cron
 task
 job
-queue
+
 # === LOCATION ===
 lat
 lng
@@ -259,12 +253,14 @@ store_id
 branch
 branch_id
 location_id
+
 # === USER / PROFILE ===
 user_id
 userid
 member_id
 customer_id
 account_id
+account
 profile_id
 subscriber_id
 donor_id
@@ -272,6 +268,7 @@ patient_id
 student_id
 employee_id
 staff_id
+
 # === DATE / TIME ===
 timestamp
 datetime
@@ -283,7 +280,40 @@ deadline
 due_date
 start_date
 end_date
-# === MISC INJECTABLE ===
+
+# === REDIRECT / CALLBACK ===
+callback_url
+return_url
+success_url
+cancel_url
+webhook
+notify_url
+redirect_url
+
+# === PRODUCT / CATALOG IDS ===
+prodID
+prodid
+product_id
+proid
+CatalogID
+catid
+idProduct
+idCategory
+bookid
+itemid
+intProdID
+Press_Release_ID
+Product_ID
+Service_ID
+item_ID
+PartID
+search_id
+eid
+
+# === CONTEXT / VIEW ===
+Viewtype
+prodtype
+shopcd
 debug
 verbose
 test
@@ -292,124 +322,12 @@ preview
 draft
 version
 revision
-edition
-release
 build
-hash
-checksum
-signature
-nonce
-csrf
-captcha
-callback_url
-return_url
-success_url
-cancel_url
-webhook
-notify_url
-ipn
 
-# === PAYMENT / CHECKOUT PARAMS ===
-cartid
-CartId
-cart_id
-UserID
-order_id
-prodID
-prodid
-ProdID
-product_id
-proid
-CatalogID
-catid
-idProduct
-idCategory
-bookid
-BookID
-itemid
-intProdID
-fid
-Press_Release_ID
-Product_ID
-Service_ID
-cartId
-rangeID
-card_id
-transaction_id
-payment_id
-invoice_id
-billing_id
-checkout_id
-merchant_id
-amount
-price
-total
-plan_id
-subscription_id
-coupon
-promo
-discount_id
-token
-charge_id
-receipt_id
-refund_id
-apiLoginID
-clientKey
-merchantId
-merchantSiteId
-sessionToken
-pfToken
-merchantSessionKey
-accessToken
-publishableKey
-sourceKey
-agentCode
-integrationKey
-publicKey
-merchantKey
-vendorName
-apiToken
-storeId
-appId
-appKey
-accessCode
-workingKey
-integrationId
-UserID
-BookID
-Product_ID
-Service_ID
-itemid
-eid
-model
-prodtype
-shopcd
-item_ID
-Cart
-PartID
-Viewtype
-search_id
-Cat
-Action
-command
+# === GAMING / MISC IDS ===
+game_id
 game_type
 GameID
 group_id
-groupCode
-GameKey
-GameName
-gameNo
-gamerblogid
-gamereferral
-gamesearch
-gameType
-game_id
-GAME_ID
-game_link
 game_name
-GP
-gpu
-gr_name
-gr
-grade
-title
+game_link

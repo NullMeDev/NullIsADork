@@ -61,7 +61,7 @@ It is inspired by tools like XDumpGO but rebuilt from scratch with a modern Pyth
 | `blind_dumper.py` | 530 | Blind SQLi data extraction (boolean + time-based, binary search, multi-DBMS) |
 | `oob_sqli.py` | ~450 | OOB SQLi injector (DNS/HTTP exfiltration, interact.sh, 4 DBMS) |
 | `sqli_dumper.py` | 830 | Database exploitation, DIOS extraction, card/cred/key dumping + blind delegation |
-| `dork_generator.py` | 566 | 35 pattern templates + 214 static dorks = 12,866+ unique dorks |
+| `dork_generator.py` | 566 | 35 pattern templates + 214 static dorks + 1.5M custom dorks |
 | `persistence.py` | ~700 | SQLite database (16 tables), circuit breaker, content dedup |
 | `reporter.py` | 455 | Telegram message formatting + delivery |
 | `port_scanner.py` | ~400 | Port scanner (80+ ports, banner grabbing, service fingerprinting) |
@@ -72,7 +72,7 @@ It is inspired by tools like XDumpGO but rebuilt from scratch with a modern Pyth
 | File | Purpose |
 |------|---------|
 | `params/kw.txt` | 303 keyword values for dork generation |
-| `params/pp.txt` | 135 payment provider strings |
+| `params/pp.txt` | 308 injectable URL parameter names |
 | `params/de.txt` | 88 database error strings |
 | `params/pf.txt` | 61 platform fingerprints |
 | `params/pt.txt` | 17 payment terminology strings |
@@ -116,7 +116,7 @@ It is inspired by tools like XDumpGO but rebuilt from scratch with a modern Pyth
 
 When started, the pipeline runs indefinitely in cycles:
 
-1. **Dork Generation** — generates 12,866+ unique dorks from 35 templates × 616 keyword combinations + 214 static dorks
+1. **Dork Generation** — generates 1,500,000+ unique dorks from 35 templates × 616 keyword combinations + 214 static dorks + 1.5M custom dorks
 2. **Dork Scoring** — sorts dorks by past effectiveness (productive dorks first, with exploration interleaving)
 3. **Search** — queries 9 search engines (Firecrawl, DuckDuckGo, Bing, Startpage, Yahoo, Ecosia, Qwant, Brave, AOL) with health tracking, pagination (up to 3 pages per engine), and adaptive rate limiting. Firecrawl can be primary or fallback engine. **Captcha auto-solving** intercepts search engine captchas (reCAPTCHA, hCaptcha, Turnstile) and solves them via 2captcha/NopeCHA/AntiCaptcha before retrying. **Smart proxy rotation** distributes requests across 1,150+ proxies with weighted selection, auto-ban on rate limits, per-domain stickiness, and background health checks.
 4. **URL Filtering** — skips seen domains, circuit-breaker blocked domains, and soft-404 pages
@@ -1236,7 +1236,7 @@ dorker/
 ├── requirements_v3.txt     ← Python dependencies (incl. playwright)
 ├── params/                 ← Dork generation parameter files
 │   ├── kw.txt (303)        ← Keywords
-│   ├── pp.txt (135)        ← Payment providers
+│   ├── pp.txt (308)        ← URL parameter names
 │   ├── de.txt (88)         ← Database errors
 │   ├── pf.txt (61)         ← Platform fingerprints
 │   ├── pt.txt (17)         ← Payment terms

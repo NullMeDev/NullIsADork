@@ -27,7 +27,7 @@ class DorkerConfig:
     custom_dork_file: str = os.path.join(
         os.path.dirname(__file__), "params", "custom_dorks.txt"
     )
-    max_dorks: int = 1000000
+    max_dorks: int = 1500000
     max_per_pattern: int = 800
     dork_shuffle: bool = True
 

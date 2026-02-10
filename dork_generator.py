@@ -1735,54 +1735,62 @@ class DorkGenerator:
         
         return dorks
 
-    def generate_all(self, max_total: int = 250000, max_per_pattern: int = 500) -> List[str]:
+    def generate_all(self, max_total: int = 1500000, max_per_pattern: int = 500) -> List[str]:
         """Generate all dorks from all patterns + static dorks.
+        
+        Custom dorks (1.5M) are loaded first as the primary pool.
+        Static and pattern-generated dorks serve as fallback.
         
         Args:
             max_total: Maximum total dorks to generate
             max_per_pattern: Maximum dorks per pattern
             
         Returns:
-            Deduplicated list of dork queries
+            Deduplicated list of dork queries, custom dorks first
         """
-        all_dorks: Set[str] = set()
+        seen: Set[str] = set()
+        ordered: list = []
         
-        # 1. Add static dorks first (highest priority — operator-rich, SK-focused)
-        for dork in self.STATIC_DORKS:
-            all_dorks.add(dork)
+        def _add(dork: str) -> bool:
+            if dork not in seen and len(seen) < max_total:
+                seen.add(dork)
+                ordered.append(dork)
+                return True
+            return False
         
-        static_count = len(all_dorks)
-        logger.info(f"Added {static_count} static dorks")
-        
-        # 2. Add custom dorks (high priority — user-supplied, converted to operators)
-        custom_added = 0
-        for dork in self.custom_dorks:
-            if len(all_dorks) >= max_total:
+        # 1. Custom dorks FIRST (primary pool — 1.5M user-supplied)
+        custom_pool = self.custom_dorks.copy()
+        random.shuffle(custom_pool)
+        for dork in custom_pool:
+            if len(seen) >= max_total:
                 break
-            all_dorks.add(dork)
-            custom_added += 1
+            _add(dork)
         
-        custom_count = len(all_dorks) - static_count
+        custom_count = len(ordered)
         logger.info(f"Added {custom_count:,} custom dorks (from {len(self.custom_dorks):,} loaded)")
         
-        # 3. Generate from patterns (fill remaining capacity)
+        # 2. Static dorks as supplement (operator-rich, hand-crafted)
+        for dork in self.STATIC_DORKS:
+            _add(dork)
+        
+        static_count = len(ordered) - custom_count
+        logger.info(f"Added {static_count} static dorks")
+        
+        # 3. Pattern-generated dorks as fallback (fill remaining capacity)
         for pattern in self.patterns:
-            if len(all_dorks) >= max_total:
+            if len(seen) >= max_total:
                 break
             generated = self.generate_from_pattern(pattern, max_per_pattern)
             for dork in generated:
-                if len(all_dorks) >= max_total:
+                if len(seen) >= max_total:
                     break
-                all_dorks.add(dork)
+                _add(dork)
         
-        result = list(all_dorks)
-        random.shuffle(result)
+        dynamic_count = len(ordered) - custom_count - static_count
+        logger.info(f"Generated {len(ordered):,} total unique dorks "
+                    f"({custom_count:,} custom + {static_count} static + {dynamic_count:,} dynamic fallback)")
         
-        dynamic_count = len(result) - static_count - custom_count
-        logger.info(f"Generated {len(result):,} total unique dorks "
-                    f"({static_count} static + {custom_count:,} custom + {dynamic_count:,} dynamic)")
-        
-        return result
+        return ordered
 
     def generate_targeted(self, category: str, max_count: int = 500) -> List[str]:
         """Generate dorks targeting a specific category.
