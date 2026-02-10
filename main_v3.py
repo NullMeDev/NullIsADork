@@ -7029,7 +7029,119 @@ async def cmd_skvalidate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(
             f"❌ Validation failed: {e}"
-        )  # ==================== ENTRY POINT ==
+        )
+
+
+async def cmd_checkkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /checkkey command — validate ANY API key (auto-detects type)."""
+    p = get_pipeline()
+    if not p.key_validator:
+        await update.message.reply_text("❌ Key validator is not enabled.")
+        return
+
+    args = context.args
+    if not args:
+        types_list = ", ".join(sorted(p.key_validator._validators.keys()))
+        await update.message.reply_text(
+            "🔑 <b>Manual Key Validator</b>\n\n"
+            "<b>Usage:</b>\n"
+            "<code>/checkkey &lt;key&gt;</code> — auto-detect type\n"
+            "<code>/checkkey &lt;type&gt; &lt;key&gt;</code> — force type\n\n"
+            f"<b>Supported types:</b>\n<code>{types_list}</code>\n\n"
+            "<b>Examples:</b>\n"
+            "<code>/checkkey sk_live_abc123...</code>\n"
+            "<code>/checkkey rzp_live_abc123...</code>\n"
+            "<code>/checkkey pk_live_abc123...</code>\n"
+            "<code>/checkkey sq0atp-abc123...</code>\n"
+            "<code>/checkkey sk-proj-abc123...</code>\n"
+            "<code>/checkkey AKIA1234567890ABCDEF</code>\n"
+            "<code>/checkkey stripe_sk sk_live_abc123...</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    # If 2 args: first is type, second is key
+    # If 1 arg: auto-detect type from key value
+    if len(args) >= 2 and args[0] in p.key_validator._validators:
+        key_type = args[0]
+        key_value = args[1].strip()
+    else:
+        key_value = args[0].strip()
+        # Auto-detect type
+        detected = p.key_validator.detect_keys(key_value)
+        if detected:
+            key_type = detected[0]["type"]
+        else:
+            # Try matching just by prefix patterns
+            from key_validator import KEY_PATTERNS
+            key_type = None
+            for ktype, pattern in KEY_PATTERNS.items():
+                if pattern.search(key_value):
+                    key_type = ktype
+                    break
+
+        if not key_type:
+            await update.message.reply_text(
+                "❌ Could not auto-detect key type.\n\n"
+                "Try: <code>/checkkey &lt;type&gt; &lt;key&gt;</code>\n"
+                "Run <code>/checkkey</code> with no args to see supported types.",
+                parse_mode="HTML",
+            )
+            return
+
+    # Check if we have a validator for this type
+    if key_type not in p.key_validator._validators:
+        await update.message.reply_text(
+            f"❌ No validator for type: <code>{key_type}</code>\n"
+            f"Key will be stored but cannot be live-checked.",
+            parse_mode="HTML",
+        )
+        return
+
+    display = key_value[:12] + "..." + key_value[-4:] if len(key_value) > 20 else key_value
+    await update.message.reply_text(
+        f"🔍 Checking <b>{key_type}</b>: <code>{display}</code>...",
+        parse_mode="HTML",
+    )
+
+    try:
+        result = await p.key_validator.validate_and_report(
+            key_type=key_type,
+            key_value=key_value,
+            source_url="manual /checkkey command",
+        )
+        if result.is_live:
+            acct_lines = "\n".join(
+                f"  <b>{k}:</b> <code>{v}</code>" for k, v in result.account_info.items()
+            ) if result.account_info else "  (none)"
+            perms = ", ".join(result.permissions) if result.permissions else "n/a"
+            risk_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
+                result.risk_level, "⚪"
+            )
+            text = (
+                f"✅ <b>KEY IS LIVE!</b> ✅\n\n"
+                f"<b>Type:</b> {key_type}\n"
+                f"<b>Risk:</b> {risk_emoji} {result.risk_level}\n"
+                f"<b>Key:</b> <code>{result.display_key}</code>\n"
+                f"<b>Confidence:</b> {result.confidence:.0%}\n\n"
+                f"<b>Account Info:</b>\n{acct_lines}\n\n"
+                f"<b>Permissions:</b> {perms}"
+            )
+            await update.message.reply_text(text, parse_mode="HTML")
+        else:
+            err = result.error or "Key is dead/invalid"
+            await update.message.reply_text(
+                f"❌ <b>DEAD KEY</b>\n\n"
+                f"<b>Type:</b> {key_type}\n"
+                f"<b>Key:</b> <code>{display}</code>\n"
+                f"<b>Reason:</b> {err}",
+                parse_mode="HTML",
+            )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Validation error: {e}")
+
+
+  # ==================== ENTRY POINT ==
 
 
 def main():
@@ -7110,6 +7222,7 @@ def main():
     app.add_handler(CommandHandler("stores", cmd_stores, filters=chat_filter))
     app.add_handler(CommandHandler("del", cmd_del, filters=chat_filter))
     app.add_handler(CommandHandler("skvalidate", cmd_skvalidate, filters=chat_filter))
+    app.add_handler(CommandHandler("checkkey", cmd_checkkey, filters=chat_filter))
 
     # Auto-start pipeline on boot if configured
     if config.auto_start_pipeline:
