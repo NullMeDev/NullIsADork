@@ -117,6 +117,14 @@ KEY_PATTERNS: Dict[str, re.Pattern] = {
     "google_api":       re.compile(r'AIza[A-Za-z0-9_-]{35}'),
     "telegram_bot":     re.compile(r'[0-9]{8,10}:[A-Za-z0-9_-]{35}'),
     "discord_bot":      re.compile(r'[MN][A-Za-z0-9]{23,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}'),
+    # Additional gateways
+    "razorpay_key":     re.compile(r'rzp_live_[A-Za-z0-9]{14,40}'),
+    "razorpay_secret":  re.compile(r'rzp_live_[A-Za-z0-9]{14,40}'),  # Secret has same prefix format
+    "flutterwave_sk":   re.compile(r'FLWSECK-[a-f0-9]{32}-X'),
+    "flutterwave_pk":   re.compile(r'FLWPUBK-[a-f0-9]{32}-X'),
+    "openai_key":       re.compile(r'sk-proj-[A-Za-z0-9_-]{40,}'),
+    "anthropic_key":    re.compile(r'sk-ant-[A-Za-z0-9_-]{40,}'),
+    "shopify_token":    re.compile(r'shpat_[a-fA-F0-9]{32}'),
 }
 
 
@@ -193,6 +201,12 @@ class KeyValidator:
             "google_api":    self._validate_google_api,
             "telegram_bot":  self._validate_telegram,
             "discord_bot":   self._validate_discord,
+            "paypal_client": self._validate_paypal,
+            "razorpay_key":  self._validate_razorpay,
+            "razorpay_secret": self._validate_razorpay,
+            "openai_key":    self._validate_openai,
+            "anthropic_key": self._validate_anthropic,
+            "shopify_token": self._validate_shopify,
         }
 
     # ─────────────────────────────────────────────
@@ -907,6 +921,154 @@ class KeyValidator:
                     result.account_info["username"] = data.get("username", "")
                     result.account_info["id"] = data.get("id", "")
                     result.account_info["bot"] = str(data.get("bot", False))
+                elif resp.status == 401:
+                    result.is_live = False
+                    result.confidence = 1.0
+                else:
+                    result.error = f"HTTP {resp.status}"
+
+    async def _validate_paypal(
+        self, result: KeyValidation, extra: Dict
+    ):
+        """Validate PayPal Client ID via OAuth2 token endpoint."""
+        # PayPal needs both client_id and secret — we can only check if client_id gets a response
+        async with aiohttp.ClientSession() as session:
+            # Try to get an OAuth2 token (will fail without secret, but 401 vs 400 tells us if ID is real)
+            auth = aiohttp.BasicAuth(result.key_full, "dummy_secret_for_probe")
+            async with session.post(
+                "https://api-m.paypal.com/v1/oauth2/token",
+                data={"grant_type": "client_credentials"},
+                auth=auth,
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+            ) as resp:
+                if resp.status == 200:
+                    # Somehow got a token — secret was valid too
+                    data = await resp.json()
+                    result.is_live = True
+                    result.confidence = 1.0
+                    result.account_info["scope"] = data.get("scope", "")[:200]
+                    result.account_info["app_id"] = data.get("app_id", "")
+                elif resp.status == 401:
+                    # 401 = client_id exists but wrong secret — still useful info
+                    result.is_live = True  # Client ID is valid
+                    result.confidence = 0.7
+                    result.account_info["note"] = "Client ID valid, secret needed"
+                else:
+                    result.is_live = False
+                    result.confidence = 0.8
+
+    async def _validate_razorpay(
+        self, result: KeyValidation, extra: Dict
+    ):
+        """Validate Razorpay key via payments endpoint."""
+        async with aiohttp.ClientSession() as session:
+            auth = aiohttp.BasicAuth(result.key_full, "")
+            async with session.get(
+                "https://api.razorpay.com/v1/payments?count=1",
+                auth=auth,
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    result.is_live = True
+                    result.confidence = 1.0
+                    items = data.get("items", [])
+                    result.account_info["payments_count"] = str(data.get("count", 0))
+                    if items:
+                        result.account_info["last_payment"] = str(items[0].get("amount", 0))
+                        result.account_info["currency"] = items[0].get("currency", "")
+                elif resp.status == 401:
+                    result.is_live = False
+                    result.confidence = 1.0
+                else:
+                    result.error = f"HTTP {resp.status}"
+
+    async def _validate_openai(
+        self, result: KeyValidation, extra: Dict
+    ):
+        """Validate OpenAI API key via models endpoint."""
+        async with aiohttp.ClientSession() as session:
+            headers = {"Authorization": f"Bearer {result.key_full}"}
+            async with session.get(
+                "https://api.openai.com/v1/models",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    result.is_live = True
+                    result.confidence = 1.0
+                    models = data.get("data", [])
+                    result.account_info["models_count"] = str(len(models))
+                    gpt4 = any("gpt-4" in m.get("id", "") for m in models)
+                    result.account_info["has_gpt4"] = str(gpt4)
+                elif resp.status == 401:
+                    result.is_live = False
+                    result.confidence = 1.0
+                elif resp.status == 429:
+                    result.is_live = True
+                    result.confidence = 0.9
+                    result.account_info["note"] = "Rate limited but key is valid"
+                else:
+                    result.error = f"HTTP {resp.status}"
+
+    async def _validate_anthropic(
+        self, result: KeyValidation, extra: Dict
+    ):
+        """Validate Anthropic API key via models endpoint."""
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "x-api-key": result.key_full,
+                "anthropic-version": "2023-06-01",
+            }
+            async with session.get(
+                "https://api.anthropic.com/v1/models",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+            ) as resp:
+                if resp.status == 200:
+                    result.is_live = True
+                    result.confidence = 1.0
+                    data = await resp.json()
+                    models = data.get("data", [])
+                    result.account_info["models_count"] = str(len(models))
+                elif resp.status == 401:
+                    result.is_live = False
+                    result.confidence = 1.0
+                elif resp.status == 429:
+                    result.is_live = True
+                    result.confidence = 0.9
+                    result.account_info["note"] = "Rate limited but key is valid"
+                else:
+                    result.error = f"HTTP {resp.status}"
+
+    async def _validate_shopify(
+        self, result: KeyValidation, extra: Dict
+    ):
+        """Validate Shopify access token — needs store domain context."""
+        # Shopify tokens need the store domain; we can try a generic check
+        # The token format is shpat_ — if we find it in context with a store URL, use that
+        store = extra.get("domain", extra.get("store", ""))
+        if not store:
+            result.error = "No store domain in context"
+            return
+        if not store.endswith(".myshopify.com"):
+            store = f"{store}.myshopify.com"
+        async with aiohttp.ClientSession() as session:
+            headers = {"X-Shopify-Access-Token": result.key_full}
+            async with session.get(
+                f"https://{store}/admin/api/2024-01/shop.json",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    shop = data.get("shop", {})
+                    result.is_live = True
+                    result.confidence = 1.0
+                    result.account_info["shop_name"] = shop.get("name", "")
+                    result.account_info["plan"] = shop.get("plan_name", "")
+                    result.account_info["domain"] = shop.get("domain", "")
                 elif resp.status == 401:
                     result.is_live = False
                     result.confidence = 1.0

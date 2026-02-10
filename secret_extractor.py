@@ -258,6 +258,45 @@ class SecretExtractor:
         
         ("ENV Variable", "config", "env_var",
          re.compile(r'^([A-Z][A-Z0-9_]{2,50})=([^\s]{3,200})$', re.M), 0.50),
+        
+        # =============== ADDITIONAL PAYMENT GATEWAYS ===============
+        
+        ("Razorpay Live Key", "gateway", "razorpay_live",
+         re.compile(r'rzp_live_[A-Za-z0-9]{14,40}'), 0.95),
+        ("Razorpay Test Key", "gateway", "razorpay_test",
+         re.compile(r'rzp_test_[A-Za-z0-9]{14,40}'), 0.80),
+        ("Flutterwave Secret Key", "gateway", "flutterwave_sk",
+         re.compile(r'FLWSECK-[a-f0-9]{32}-X'), 0.95),
+        ("Flutterwave Public Key", "gateway", "flutterwave_pk",
+         re.compile(r'FLWPUBK-[a-f0-9]{32}-X'), 0.90),
+        ("Paystack Secret Key", "gateway", "paystack_sk",
+         re.compile(r'sk_live_[a-f0-9]{40}'), 0.90),
+        ("Mollie API Key", "gateway", "mollie_key",
+         re.compile(r'(?:live|test)_[A-Za-z0-9]{30,50}'), 0.75),
+        ("Recurly API Key", "gateway", "recurly_key",
+         re.compile(r'(?:recurly)[._-]?(?:api[._-]?)?key["\s:=]+["\']?([A-Za-z0-9]{20,80})', re.I), 0.80),
+        
+        # =============== AI / ML API KEYS ===============
+        
+        ("OpenAI API Key", "api", "openai_key",
+         re.compile(r'sk-proj-[A-Za-z0-9_-]{40,200}'), 0.95),
+        ("OpenAI API Key (Legacy)", "api", "openai_key_legacy",
+         re.compile(r'sk-[A-Za-z0-9]{48}'), 0.85),
+        ("Anthropic API Key", "api", "anthropic_key",
+         re.compile(r'sk-ant-[A-Za-z0-9_-]{40,200}'), 0.95),
+        
+        # =============== COMMUNICATION / SaaS ===============
+        
+        ("Twilio API Key", "api", "twilio_api_key",
+         re.compile(r'SK[a-f0-9]{32}'), 0.90),
+        ("Supabase Service Key", "api", "supabase_key",
+         re.compile(r'sbp_[a-f0-9]{40}'), 0.90),
+        ("Clerk Secret Key", "api", "clerk_key",
+         re.compile(r'sk_live_[A-Za-z0-9]{24,}\..*'), 0.85),
+        ("Vercel Token", "api", "vercel_token",
+         re.compile(r'(?:vercel)[._-]?(?:token|api[._-]?token)["\s:=]+["\']?([A-Za-z0-9]{24,100})', re.I), 0.80),
+        ("Netlify Token", "api", "netlify_token",
+         re.compile(r'(?:netlify)[._-]?(?:token|auth[._-]?token)["\s:=]+["\']?([A-Za-z0-9_-]{40,100})', re.I), 0.80),
     ]
     
     # False positive filters (skip matches containing these)
@@ -309,14 +348,15 @@ class SecretExtractor:
         if len(set(value)) < 4:
             return True
 
-        # ── Prefix-based identifier detection (sk_, pk_, acct_, pi_) ──
-        _prefixes = ('sk_', 'pk_', 'acct_', 'pi_', 'pmc_')
+        # ── Prefix-based identifier detection (sk_, pk_, acct_, pi_, rzp_) ──
+        _prefixes = ('sk_', 'pk_', 'acct_', 'pi_', 'pmc_', 'rzp_')
         if value_lower.startswith(_prefixes):
             # Known-real prefixes that DO contain mixed case (Stripe live/test keys)
             _real_prefixes = (
                 'sk_live_', 'sk_test_', 'pk_live_', 'pk_test_',
                 'sk_sbox_', 'pk_sbox_',  # Checkout.com
                 'rk_live_', 'rk_test_',  # Stripe restricted keys
+                'rzp_live_', 'rzp_test_',  # Razorpay
             )
             if value.startswith(_real_prefixes):
                 # This is a real key format — only reject if very obviously fake

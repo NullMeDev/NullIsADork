@@ -153,8 +153,8 @@ JS_SECRET_PATTERNS = [
     (re.compile(r'''(?:secret|password|passwd|token|private[_-]?key)\s*[:=]\s*["'`]([^"'`]{8,})["'`]''', re.IGNORECASE), "generic_secret"),
     # Telegram bot tokens
     (re.compile(r'''["'`](\d{8,10}:[A-Za-z0-9_-]{35})["'`]'''), "telegram_bot_token"),
-    # GitHub tokens
-    (re.compile(r'''["'`](gh[ps]_[A-Za-z0-9_]{36,})["'`]'''), "github_token"),
+    # GitHub tokens (all 5 prefixes)
+    (re.compile(r'''["'`](gh[posur]_[A-Za-z0-9_]{36,})["'`]'''), "github_token"),
     # Google API keys
     (re.compile(r'''["'`](AIzaSy[a-zA-Z0-9_\-]{33})["'`]'''), "google_api_key"),
     # SendGrid
@@ -167,6 +167,19 @@ JS_SECRET_PATTERNS = [
     (re.compile(r'''["'`]([MN][A-Za-z\d]{23,28}\.[A-Za-z\d\-_]{6}\.[A-Za-z\d\-_]{27,})["'`]'''), "discord_token"),
     # Supabase
     (re.compile(r'''["'`](eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+)["'`]'''), "supabase_anon_key"),
+    # Razorpay
+    (re.compile(r'''["'`](rzp_(?:live|test)_[A-Za-z0-9]{14,40})["'`]'''), "razorpay_key"),
+    # Flutterwave
+    (re.compile(r'''["'`](FLWSECK-[a-f0-9]{32}-X)["'`]'''), "flutterwave_secret_key"),
+    (re.compile(r'''["'`](FLWPUBK-[a-f0-9]{32}-X)["'`]'''), "flutterwave_public_key"),
+    # OpenAI
+    (re.compile(r'''["'`](sk-proj-[A-Za-z0-9_\-]{40,200})["'`]'''), "openai_api_key"),
+    (re.compile(r'''["'`](sk-[A-Za-z0-9]{48})["'`]'''), "openai_api_key_legacy"),
+    # Anthropic
+    (re.compile(r'''["'`](sk-ant-[A-Za-z0-9_\-]{40,200})["'`]'''), "anthropic_api_key"),
+    # Shopify
+    (re.compile(r'''["'`](shpat_[a-fA-F0-9]{32})["'`]'''), "shopify_access_token"),
+    (re.compile(r'''["'`](shpka_[a-fA-F0-9]{32})["'`]'''), "shopify_api_key"),
     # Private keys (partial)
     (re.compile(r'''-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----'''), "private_key_header"),
 ]

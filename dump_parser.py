@@ -93,9 +93,26 @@ class ParseReport:
 CARD_COLUMNS = {
     'card', 'card_number', 'cardnumber', 'cc', 'cc_number', 'pan',
     'credit_card', 'creditcard', 'card_num', 'ccnum', 'account_number',
+    'card_no', 'cardno', 'cc_no', 'debit_card', 'debitcard', 'payment_card',
 }
-CVV_COLUMNS = {'cvv', 'cvc', 'cvv2', 'csc', 'security_code', 'card_code'}
-EXPIRY_COLUMNS = {'expiry', 'exp', 'expiration', 'exp_date', 'card_exp', 'exp_month', 'exp_year'}
+CVV_COLUMNS = {'cvv', 'cvc', 'cvv2', 'csc', 'security_code', 'card_code', 'card_cvv', 'card_cvc'}
+EXPIRY_COLUMNS = {'expiry', 'exp', 'expiration', 'exp_date', 'card_exp', 'exp_month', 'exp_year', 'card_expiry', 'card_exp_date'}
+
+
+def luhn_check(number: str) -> bool:
+    """Validate a card number using the Luhn algorithm."""
+    digits = number.replace(' ', '').replace('-', '')
+    if not digits.isdigit() or len(digits) < 13 or len(digits) > 19:
+        return False
+    total = 0
+    for i, d in enumerate(reversed(digits)):
+        n = int(d)
+        if i % 2 == 1:
+            n *= 2
+            if n > 9:
+                n -= 9
+        total += n
+    return total % 10 == 0
 
 
 class DumpParser:
@@ -249,7 +266,7 @@ class DumpParser:
                 # ── Card data ──
                 if col_lower in CARD_COLUMNS:
                     clean = val_str.replace(' ', '').replace('-', '')
-                    if re.match(r'^[3-6]\d{12,18}$', clean):
+                    if re.match(r'^[3-6]\d{12,18}$', clean) and luhn_check(clean):
                         card_entry['number'] = val_str
                 elif col_lower in CVV_COLUMNS:
                     if re.match(r'^\d{3,4}$', val_str):

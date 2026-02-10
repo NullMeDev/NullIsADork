@@ -135,11 +135,40 @@ DRIVERS_LICENSE_PATTERN = re.compile(r'\b[A-Z]\d{7,14}\b')
 EIN_PATTERN = re.compile(r'\b\d{2}-\d{7}\b')
 # Passport number (generic)
 PASSPORT_PATTERN = re.compile(r'\b[A-Z]{1,2}\d{6,9}\b')
-# Credit card patterns (Luhn-validated separately)
+# Credit card patterns (Luhn-validated in _deep_parse_rows)
 CC_VISA_PATTERN = re.compile(r'\b4\d{3}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b')
-CC_MC_PATTERN = re.compile(r'\b5[1-5]\d{2}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b')
+CC_MC_PATTERN = re.compile(r'\b(?:5[1-5]\d{2}|2(?:2[2-9]\d|2[3-9]\d|[3-6]\d{2}|7[01]\d|720))[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b')
 CC_AMEX_PATTERN = re.compile(r'\b3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5}\b')
-CC_DISCOVER_PATTERN = re.compile(r'\b6011[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b')
+CC_DISCOVER_PATTERN = re.compile(r'\b(?:6011|64[4-9]\d|65\d{2})[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b')
+CC_JCB_PATTERN = re.compile(r'\b35(?:2[89]|[3-8]\d)[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b')
+CC_UNIONPAY_PATTERN = re.compile(r'\b62\d{2}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4,7}\b')
+CC_DINERS_PATTERN = re.compile(r'\b3(?:0[0-5]|[68]\d)\d[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{2,4}\b')
+
+ALL_CC_PATTERNS = [
+    (CC_VISA_PATTERN, 'Visa'),
+    (CC_MC_PATTERN, 'MasterCard'),
+    (CC_AMEX_PATTERN, 'Amex'),
+    (CC_DISCOVER_PATTERN, 'Discover'),
+    (CC_JCB_PATTERN, 'JCB'),
+    (CC_UNIONPAY_PATTERN, 'UnionPay'),
+    (CC_DINERS_PATTERN, 'Diners'),
+]
+
+
+def _luhn_check(number: str) -> bool:
+    """Validate card number with Luhn algorithm."""
+    digits = number.replace(' ', '').replace('-', '')
+    if not digits.isdigit() or len(digits) < 13 or len(digits) > 19:
+        return False
+    total = 0
+    for i, d in enumerate(reversed(digits)):
+        n = int(d)
+        if i % 2 == 1:
+            n *= 2
+            if n > 9:
+                n -= 9
+        total += n
+    return total % 10 == 0
 # IBAN
 IBAN_PATTERN = re.compile(r'\b[A-Z]{2}\d{2}\s?[A-Z0-9]{4}\s?\d{4}\s?\d{4}\s?\d{0,4}\s?\d{0,4}\b')
 # IP Address
@@ -180,15 +209,9 @@ DEEP_VALUE_PATTERNS = [
     # Discord
     (re.compile(r'[MN][A-Za-z\d]{23,}\.[\w-]{6}\.[\w-]{27}'), "discord_bot_token"),
     (re.compile(r'mfa\.[a-z0-9_-]{20,}', re.I), "discord_mfa_token"),
-    # Azure
-    (re.compile(r'[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}', re.I), "azure_client_id_possible"),
-    # Heroku
-    (re.compile(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'), "heroku_api_key"),
     # DigitalOcean
     (re.compile(r'dop_v1_[a-f0-9]{64}'), "digitalocean_pat"),
     (re.compile(r'doo_v1_[a-f0-9]{64}'), "digitalocean_oauth"),
-    # Twitch
-    (re.compile(r'[a-z0-9]{30}', re.I), "twitch_oauth_possible"),
     # Firebase
     (re.compile(r'AAAA[A-Za-z0-9_-]{7}:[A-Za-z0-9_-]{140}'), "firebase_cloud_messaging"),
     # Mailchimp
@@ -197,9 +220,29 @@ DEEP_VALUE_PATTERNS = [
     (re.compile(r'npm_[A-Za-z0-9]{36}'), "npm_access_token"),
     # PyPI
     (re.compile(r'pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}'), "pypi_api_token"),
-    # Cloudflare
-    (re.compile(r'[A-Za-z0-9_-]{40}'), "cloudflare_api_key_possible"),  # Low confidence, validated later
-    # Generic API key patterns
+    # Razorpay
+    (re.compile(r'rzp_live_[A-Za-z0-9]{14,}'), "razorpay_live_key"),
+    (re.compile(r'rzp_test_[A-Za-z0-9]{14,}'), "razorpay_test_key"),
+    # Mollie
+    (re.compile(r'live_[A-Za-z0-9]{30,}'), "mollie_live_key"),
+    # Flutterwave
+    (re.compile(r'FLWSECK-[a-f0-9]{32}-X'), "flutterwave_secret_key"),
+    (re.compile(r'FLWPUBK-[a-f0-9]{32}-X'), "flutterwave_public_key"),
+    # Paystack
+    (re.compile(r'sk_live_[a-f0-9]{40}'), "paystack_secret_key"),
+    (re.compile(r'pk_live_[a-f0-9]{40}'), "paystack_public_key"),
+    # OpenAI
+    (re.compile(r'sk-proj-[A-Za-z0-9_-]{40,}'), "openai_api_key"),
+    (re.compile(r'sk-[A-Za-z0-9]{48}'), "openai_api_key_legacy"),
+    # Anthropic
+    (re.compile(r'sk-ant-[A-Za-z0-9_-]{40,}'), "anthropic_api_key"),
+    # Twilio Auth Token
+    (re.compile(r'SK[a-f0-9]{32}'), "twilio_api_key"),
+    # Supabase
+    (re.compile(r'sbp_[a-f0-9]{40}'), "supabase_service_key"),
+    # Clerk
+    (re.compile(r'sk_live_[A-Za-z0-9]{24,}\..*'), "clerk_secret_key"),
+    # Generic API key patterns (keyword-anchored — not UUID/hash noise)
     (re.compile(r'(?:api[_-]?key|apikey|api[_-]?secret|secret[_-]?key)\s*[=:]\s*["\']?([A-Za-z0-9_-]{20,})', re.I), "generic_api_key"),
     # Database connection strings
     (re.compile(r'(?:server|host)\s*=\s*[^;\s]+;\s*(?:database|catalog)\s*=\s*[^;\s]+;\s*(?:user|uid)\s*=\s*[^;\s]+;\s*(?:password|pwd)\s*=\s*[^;\s]+', re.I), "connection_string"),
@@ -490,6 +533,19 @@ class AutoDumper:
                         digits = re.sub(r'\D', '', ssn)
                         if len(digits) == 9 and not digits.startswith('000') and digits[3:5] != '00':
                             parsed.ssns.add(ssn)
+
+                    # Credit card scan — check every cell value against card patterns
+                    for cc_pattern, cc_network in ALL_CC_PATTERNS:
+                        for cc_match in cc_pattern.finditer(val_str):
+                            cc_raw = cc_match.group()
+                            if _luhn_check(cc_raw):
+                                parsed.cards.append({
+                                    'number': cc_raw,
+                                    'network': cc_network,
+                                    'table': table_name,
+                                    'column': col,
+                                    'source': 'deep_parse',
+                                })
 
     def _identify_hash(self, value: str) -> Optional[Tuple[str, str]]:
         """Identify hash type from value."""
