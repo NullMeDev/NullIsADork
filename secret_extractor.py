@@ -95,11 +95,11 @@ class SecretExtractor:
         ("Authorize.net Transaction Key", "gateway", "authnet_key",
          re.compile(r'(?:x_tran_key|transaction_key|transactionKey)["\s:=]+["\']?([A-Za-z0-9]{12,20})["\']?', re.I), 0.85),
         
-        # Checkout.com
+        # Checkout.com — require sbox_/test_/live_ env prefix (real keys always have one)
         ("Checkout.com PK", "gateway", "checkout_pk",
-         re.compile(r'pk_(?:sbox_|test_|live_)?[a-zA-Z0-9_-]{20,80}', re.I), 0.80),
+         re.compile(r'pk_(?:sbox_|test_|live_)[a-zA-Z0-9]{20,80}', re.I), 0.80),
         ("Checkout.com SK", "gateway", "checkout_sk",
-         re.compile(r'sk_(?:sbox_|test_|live_)?[a-zA-Z0-9_-]{20,80}', re.I), 0.85),
+         re.compile(r'sk_(?:sbox_|test_|live_)[a-zA-Z0-9]{20,80}', re.I), 0.85),
         
         # Worldpay
         ("Worldpay Service Key", "gateway", "worldpay_key",
@@ -265,6 +265,14 @@ class SecretExtractor:
         "example", "sample", "test", "demo", "placeholder", "your_",
         "xxx", "TODO", "FIXME", "INSERT", "CHANGE_ME", "your-",
         "12345", "abcdef", "000000", "aaaa", "bbbb",
+        # HTML/CSS/form field false positives
+        "_form", "_input", "_field", "_button", "_container", "_wrapper",
+        "_modal", "_dialog", "_menu", "_nav", "_header", "_footer",
+        "_sidebar", "_panel", "_tab", "_table", "_row", "_col",
+        "_label", "_text", "_link", "_icon", "_image", "_img",
+        "_list", "_item", "_card", "_section", "_page", "_view",
+        "_add", "_edit", "_delete", "_submit", "_search", "_filter",
+        "_librarian", "_library", "_admin", "_user", "_login",
     ]
     
     def __init__(self, timeout: int = 10, max_concurrent: int = 20):
@@ -284,6 +292,14 @@ class SecretExtractor:
             return True
         if len(set(value)) < 4:
             return True
+        # sk_/pk_ keys with too many underscores are likely CSS/HTML identifiers
+        if value_lower.startswith(('sk_', 'pk_')) and value.count('_') > 4:
+            return True
+        # Reject sk_/pk_ values that are all lowercase words (CSS class pattern)
+        if value_lower.startswith(('sk_', 'pk_')):
+            parts = value.split('_')[1:]  # skip sk/pk prefix
+            if all(p.isalpha() and len(p) <= 12 for p in parts if p):
+                return True
         return False
 
     def extract_from_text(self, text: str, url: str = "") -> List[ExtractedSecret]:
