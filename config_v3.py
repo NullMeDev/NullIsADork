@@ -15,7 +15,7 @@ class DorkerConfig:
 
     # =============== TELEGRAM ===============
     telegram_bot_token: str = os.getenv(
-        "DORKER_BOT_TOKEN", "8187477232:AAEh3X22b1ddY9ZaVxc0x-j9MZQyTK9Wbp4"
+        "DORKER_BOT_TOKEN", "8187477232:AAFKPHOiLduYeYr5sqLf-0C5grtPI9OzXzE"
     )
     telegram_chat_id: str = os.getenv("DORKER_CHAT_ID", "-1003720958643")
     telegram_group_id: str = os.getenv(

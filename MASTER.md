@@ -1258,7 +1258,7 @@ dorker/
 
 ## Bot Token & Runtime
 
-- **Bot Token:** `8187477232:AAEh3X22b1ddY9ZaVxc0x-j9MZQyTK9Wbp4`
+- **Bot Token:** `8187477232:AAFKPHOiLduYeYr5sqLf-0C5grtPI9OzXzE`
 - **Bot Username:** MadyDorker
 - **Current PID:** Running as background process
 - **Database:** `dorker.db` (SQLite, WAL mode)
