@@ -343,6 +343,7 @@ class DorkerConfig:
     cookie_hunt_probe_checkout: bool = True  # Probe /checkout, /cart, /payment paths
     cookie_hunt_max_probes: int = 50  # Max checkout pages to probe per domain
     cookie_hunt_report_commerce: bool = True  # Also report generic commerce cookies
+    cookie_hunt_report_b3: bool = False  # B3 tracing headers are noise — suppress Telegram reports
     cookie_hunt_report_html_gateways: bool = (
         True  # Report gateway SDK detections in HTML
     )

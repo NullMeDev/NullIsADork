@@ -1104,8 +1104,8 @@ class MadyDorkerPipeline:
                                     self.db.add_b3_cookie(url, name, value)
 
                                 if jar.b3_cookies:
-                                    logger.info(
-                                        f"🔵 B3 cookies found at {url}: {list(jar.b3_cookies.keys())}"
+                                    logger.debug(
+                                        f"B3 cookies found at {url}: {list(jar.b3_cookies.keys())}"
                                     )
                         except Exception as e:
                             logger.debug(f"Cookie extraction failed: {e}")

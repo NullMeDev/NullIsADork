@@ -652,10 +652,11 @@ class CookieHunter:
         if not self.reporter:
             return
         
-        # B3 finds — individual report for each
-        for find in result.b3_finds:
-            await self._rate_limit()
-            await self._report_b3_find(find)
+        # B3 finds — individual report for each (if enabled)
+        if getattr(self.config, 'cookie_hunt_report_b3', False):
+            for find in result.b3_finds:
+                await self._rate_limit()
+                await self._report_b3_find(find)
         
         # Gateway finds — individual report for each
         for find in result.gateway_finds:
