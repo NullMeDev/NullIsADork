@@ -289,6 +289,26 @@ class DorkerDB:
                 activated_at REAL,
                 activated_by INTEGER
             );
+
+            CREATE TABLE IF NOT EXISTS payment_sites (
+                domain TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                gateway TEXT NOT NULL,
+                method TEXT NOT NULL,
+                confidence REAL DEFAULT 0.5,
+                has_params INTEGER DEFAULT 0,
+                html_matches TEXT,
+                discovered_at REAL NOT NULL,
+                last_scanned REAL,
+                scan_count INTEGER DEFAULT 0,
+                sqli_found INTEGER DEFAULT 0,
+                cards_found INTEGER DEFAULT 0,
+                active INTEGER DEFAULT 1
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_payment_gateway ON payment_sites(gateway);
+            CREATE INDEX IF NOT EXISTS idx_payment_active ON payment_sites(active);
+            CREATE INDEX IF NOT EXISTS idx_payment_confidence ON payment_sites(confidence);
         """)
         conn.commit()
         logger.info(f"Database initialized at {self.db_path}")
@@ -390,6 +410,121 @@ class DorkerDB:
                 (owner_id, now, now),
             )
             conn.commit()
+
+    # ═══════════════ PAYMENT SITE DISCOVERY ═══════════════
+
+    def save_payment_site(self, domain: str, url: str, gateway: str, method: str,
+                          confidence: float, has_params: bool, html_matches: list = None):
+        """Save or update a discovered payment site."""
+        now = time.time()
+        matches_json = json.dumps(html_matches or [])
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute("""
+                INSERT INTO payment_sites
+                    (domain, url, gateway, method, confidence, has_params, html_matches, discovered_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(domain) DO UPDATE SET
+                    confidence = MAX(confidence, excluded.confidence),
+                    has_params = MAX(has_params, excluded.has_params),
+                    url = CASE WHEN excluded.confidence > confidence THEN excluded.url ELSE url END,
+                    gateway = CASE WHEN excluded.confidence > confidence THEN excluded.gateway ELSE gateway END
+            """, (domain, url, gateway, method, confidence, int(has_params), matches_json, now))
+            conn.commit()
+
+    def get_payment_sites(self, active_only: bool = True, min_confidence: float = 0.0,
+                          gateway: str = None, limit: int = 5000) -> list:
+        """Get discovered payment sites. Returns list of dicts."""
+        with self._lock:
+            conn = self._get_conn()
+            sql = "SELECT * FROM payment_sites WHERE 1=1"
+            params = []
+            if active_only:
+                sql += " AND active = 1"
+            if min_confidence > 0:
+                sql += " AND confidence >= ?"
+                params.append(min_confidence)
+            if gateway:
+                sql += " AND gateway = ?"
+                params.append(gateway)
+            sql += " ORDER BY confidence DESC, has_params DESC LIMIT ?"
+            params.append(limit)
+            cur = conn.execute(sql, params)
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    def get_payment_site_domains(self) -> set:
+        """Get set of all known payment site domains (for fast lookup)."""
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute("SELECT domain FROM payment_sites WHERE active = 1").fetchall()
+            return {r[0] for r in rows}
+
+    def get_unscanned_payment_sites(self, max_age_hours: int = 48, limit: int = 200) -> list:
+        """Get payment sites that haven't been scanned recently."""
+        cutoff = time.time() - (max_age_hours * 3600)
+        with self._lock:
+            conn = self._get_conn()
+            cur = conn.execute("""
+                SELECT * FROM payment_sites
+                WHERE active = 1 AND (last_scanned IS NULL OR last_scanned < ?)
+                ORDER BY confidence DESC, has_params DESC
+                LIMIT ?
+            """, (cutoff, limit))
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    def mark_payment_site_scanned(self, domain: str, sqli_found: bool = False,
+                                   cards_found: bool = False):
+        """Update scan timestamp and findings for a payment site."""
+        now = time.time()
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute("""
+                UPDATE payment_sites SET
+                    last_scanned = ?,
+                    scan_count = scan_count + 1,
+                    sqli_found = sqli_found + ?,
+                    cards_found = cards_found + ?
+                WHERE domain = ?
+            """, (now, int(sqli_found), int(cards_found), domain))
+            conn.commit()
+
+    def get_payment_stats(self) -> dict:
+        """Get aggregate stats about payment sites."""
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) as active,
+                    SUM(CASE WHEN has_params = 1 THEN 1 ELSE 0 END) as injectable,
+                    SUM(sqli_found) as total_sqli,
+                    SUM(cards_found) as total_cards,
+                    SUM(scan_count) as total_scans,
+                    AVG(confidence) as avg_confidence
+                FROM payment_sites
+            """).fetchone()
+            gw_rows = conn.execute("""
+                SELECT gateway, COUNT(*) as cnt FROM payment_sites
+                WHERE active = 1
+                GROUP BY gateway ORDER BY cnt DESC
+            """).fetchall()
+            return {
+                "total": row[0] or 0,
+                "active": row[1] or 0,
+                "injectable": row[2] or 0,
+                "total_sqli": row[3] or 0,
+                "total_cards": row[4] or 0,
+                "total_scans": row[5] or 0,
+                "avg_confidence": round(row[6] or 0, 2),
+                "gateways": {r[0]: r[1] for r in gw_rows},
+            }
+
+    def payment_site_count(self) -> int:
+        with self._lock:
+            conn = self._get_conn()
+            return conn.execute("SELECT COUNT(*) FROM payment_sites WHERE active = 1").fetchone()[0]
 
     # ═══════════════ DOMAIN TRACKING ═══════════════
 
