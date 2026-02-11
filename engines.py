@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 import aiohttp
 from loguru import logger
 from collections import defaultdict
+from enum import Enum
 
 # Captcha solver integration (Phase 1)
 try:
@@ -36,28 +37,84 @@ except ImportError:
     _HAS_BROWSER = False
 
 
+# ────────────────────────── ENGINE STATUS ENUM ──────────────────────────
+
+class EngineStatus(Enum):
+    """Per-engine operational status (from DVParser EngineManager pattern)."""
+    ACTIVE = "active"          # Normal operation
+    COOLDOWN = "cooldown"      # Temporary backoff after failures
+    BLOCKED = "blocked"        # Detected IP/engine ban (403/captcha)
+    THROTTLED = "throttled"    # Returning fewer results than expected
+
+
 # ────────────────────────── ENGINE HEALTH TRACKER ──────────────────────────
 
 class EngineHealth:
-    """Tracks success/failure rate per engine with cooldown."""
+    """Tracks success/failure rate per engine with cooldown, per-engine
+    adaptive delays, and fine-grained status tracking.
 
-    def __init__(self, cooldown: float = 300):
+    Enhanced with DVParser EngineManager pattern:
+    - EngineStatus enum (ACTIVE / COOLDOWN / BLOCKED / THROTTLED)
+    - Per-engine adaptive delay based on individual failure rate
+    - Blocked status on captcha / 403 detection
+    - Throttled status when result count drops below threshold
+    """
+
+    def __init__(self, cooldown: float = 300, blocked_cooldown: float = 900):
         self.cooldown = cooldown
+        self.blocked_cooldown = blocked_cooldown
         self._success: Dict[str, int] = defaultdict(int)
         self._failure: Dict[str, int] = defaultdict(int)
         self._consecutive_fail: Dict[str, int] = defaultdict(int)
         self._cooldown_until: Dict[str, float] = {}
+        self._status: Dict[str, EngineStatus] = {}
+        self._requests: Dict[str, int] = defaultdict(int)
+        # Per-engine delay params (adaptive)
+        self._base_delay_min: float = 1.0
+        self._base_delay_max: float = 3.0
 
     def record_success(self, engine: str, count: int = 1):
         self._success[engine] += 1
+        self._requests[engine] += 1
         self._consecutive_fail[engine] = 0
+        # If engine was throttled and now returning well, restore ACTIVE
+        if self._status.get(engine) == EngineStatus.THROTTLED and count >= 3:
+            self._status[engine] = EngineStatus.ACTIVE
+        elif self._status.get(engine) != EngineStatus.BLOCKED:
+            self._status[engine] = EngineStatus.ACTIVE
 
     def record_failure(self, engine: str):
         self._failure[engine] += 1
+        self._requests[engine] += 1
         self._consecutive_fail[engine] += 1
-        if self._consecutive_fail[engine] >= 3:
+        if self._consecutive_fail[engine] >= 5:
+            # Extended cooldown after 5 consecutive failures
+            self._cooldown_until[engine] = time.time() + self.cooldown * 2
+            self._status[engine] = EngineStatus.BLOCKED
+            logger.warning(f"Engine {engine} BLOCKED — {self.cooldown * 2:.0f}s cooldown")
+        elif self._consecutive_fail[engine] >= 3:
             self._cooldown_until[engine] = time.time() + self.cooldown
+            self._status[engine] = EngineStatus.COOLDOWN
             logger.warning(f"Engine {engine} cooled down for {self.cooldown}s")
+
+    def record_blocked(self, engine: str):
+        """Mark engine as blocked (captcha / 403 / hard ban)."""
+        self._failure[engine] += 1
+        self._requests[engine] += 1
+        self._consecutive_fail[engine] += 1
+        self._cooldown_until[engine] = time.time() + self.blocked_cooldown
+        self._status[engine] = EngineStatus.BLOCKED
+        logger.warning(f"Engine {engine} BLOCKED (captcha/ban) — {self.blocked_cooldown:.0f}s cooldown")
+
+    def record_throttled(self, engine: str):
+        """Mark engine as throttled (returning fewer results than expected)."""
+        self._status[engine] = EngineStatus.THROTTLED
+
+    def get_status(self, engine: str) -> EngineStatus:
+        """Get current status of an engine."""
+        if not self.is_available(engine):
+            return self._status.get(engine, EngineStatus.COOLDOWN)
+        return self._status.get(engine, EngineStatus.ACTIVE)
 
     def is_available(self, engine: str) -> bool:
         return time.time() >= self._cooldown_until.get(engine, 0)
@@ -66,10 +123,33 @@ class EngineHealth:
         total = self._success[engine] + self._failure[engine]
         return self._success[engine] / total if total else 1.0
 
+    def get_delay_for_engine(self, engine: str) -> float:
+        """Per-engine adaptive delay based on individual failure rate.
+        Higher failure rate → longer delay. Blocked engines get max delay.
+        From DVParser EngineManager pattern."""
+        status = self.get_status(engine)
+        if status == EngineStatus.BLOCKED:
+            return random.uniform(30, 60)  # Long delay for blocked engines
+        if status == EngineStatus.THROTTLED:
+            return random.uniform(5, 10)   # Medium delay for throttled
+
+        fail_rate = 1.0 - self.success_rate(engine)
+        # Scale delay: 0% fail = base, 50% fail = 3x base, 100% fail = 6x base
+        multiplier = 1.0 + (fail_rate * 5.0)
+        delay_min = self._base_delay_min * multiplier
+        delay_max = self._base_delay_max * multiplier
+        return random.uniform(delay_min, min(delay_max, 30.0))
+
     def sorted_engines(self, names: List[str]) -> List[str]:
         available = [n for n in names if self.is_available(n)]
         cooled = [n for n in names if not self.is_available(n)]
-        available.sort(key=lambda n: self.success_rate(n), reverse=True)
+        # Sort available by: ACTIVE first, then THROTTLED, then by success rate
+        def _sort_key(n):
+            status = self.get_status(n)
+            status_priority = {EngineStatus.ACTIVE: 0, EngineStatus.THROTTLED: 1,
+                               EngineStatus.COOLDOWN: 2, EngineStatus.BLOCKED: 3}
+            return (status_priority.get(status, 9), -self.success_rate(n))
+        available.sort(key=_sort_key)
         return available + cooled
 
     def get_stats(self) -> Dict:
@@ -78,8 +158,11 @@ class EngineHealth:
             name: {
                 "success": self._success[name],
                 "fail": self._failure[name],
+                "requests": self._requests[name],
                 "rate": f"{self.success_rate(name):.0%}",
+                "status": self.get_status(name).value,
                 "available": self.is_available(name),
+                "delay": f"{self.get_delay_for_engine(name):.1f}s",
             }
             for name in engines
         }
@@ -3108,6 +3191,448 @@ class YongzinSearch(SearchEngine):
             return []
 
 
+# ────────────────────────── YAHOO REGIONAL VARIANTS ──────────────────────────
+
+class YahooRegionalSearch(SearchEngine):
+    """Yahoo with a country subdomain for regional results.
+    Uses {cc}.search.yahoo.com pattern (from DVParser engine list)."""
+    name = "yahoo_regional"  # Overridden by subclasses
+    cc = "us"                # Country code subdomain
+    domain = "search.yahoo.com"  # Override for special domains
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        offset = page * 10
+        url = f"https://{self.domain}/search?p={quote(query)}&n={num_results}&b={offset + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "en-US,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_="compTitle"):
+                        link = div.find("a")
+                        if link:
+                            href = link.get("href", "")
+                            if "RU=" in href:
+                                m = re.search(r'RU=([^/]+)', href)
+                                if m:
+                                    from urllib.parse import unquote
+                                    href = unquote(m.group(1))
+                            if href and href.startswith("http"):
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    # Fallback: dd algo results
+                    if not results:
+                        for div in soup.find_all("div", class_="dd"):
+                            a = div.find("a", href=True)
+                            if a:
+                                href = a["href"]
+                                if "RU=" in href:
+                                    m = re.search(r'RU=([^/]+)', href)
+                                    if m:
+                                        from urllib.parse import unquote
+                                        href = unquote(m.group(1))
+                                if href.startswith("http") and "yahoo.com" not in href:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[{self.name}] Search error: {e}")
+            return []
+
+
+# Factory: create Yahoo regional subclasses for 20 countries (from DVParser)
+_YAHOO_REGIONS = {
+    "uk": ("uk.search.yahoo.com", "United Kingdom"),
+    "ca": ("ca.search.yahoo.com", "Canada"),
+    "au": ("au.search.yahoo.com", "Australia"),
+    "in": ("in.search.yahoo.com", "India"),
+    "de": ("de.search.yahoo.com", "Germany"),
+    "fr": ("fr.search.yahoo.com", "France"),
+    "es": ("es.search.yahoo.com", "Spain"),
+    "it": ("it.search.yahoo.com", "Italy"),
+    "br": ("br.search.yahoo.com", "Brazil"),
+    "mx": ("mx.search.yahoo.com", "Mexico"),
+    "ar": ("ar.search.yahoo.com", "Argentina"),
+    "tw": ("tw.search.yahoo.com", "Taiwan"),
+    "hk": ("hk.search.yahoo.com", "Hong Kong"),
+    "sg": ("sg.search.yahoo.com", "Singapore"),
+    "ph": ("ph.search.yahoo.com", "Philippines"),
+    "th": ("th.search.yahoo.com", "Thailand"),
+    "id": ("id.search.yahoo.com", "Indonesia"),
+    "my": ("malaysia.search.yahoo.com", "Malaysia"),
+    "vn": ("vn.search.yahoo.com", "Vietnam"),
+    "nz": ("nz.search.yahoo.com", "New Zealand"),
+}
+
+_YAHOO_REGIONAL_CLASSES = {}
+for _ycc, (_ydomain, _ycountry) in _YAHOO_REGIONS.items():
+    _ycls_name = f"Yahoo{_ycc.upper()}Search"
+    _yengine_name = f"yahoo_{_ycc}"
+    _ycls = type(_ycls_name, (YahooRegionalSearch,),
+                 {"name": _yengine_name, "cc": _ycc, "domain": _ydomain})
+    _ycls.__doc__ = f"Yahoo — {_ycountry} ({_ycc.upper()})"
+    _YAHOO_REGIONAL_CLASSES[_yengine_name] = _ycls
+    globals()[_ycls_name] = _ycls
+
+
+# ────────────────────────── YANDEX REGIONAL VARIANTS (DVParser) ──────────────────────────
+
+class YandexUASearch(SearchEngine):
+    """Yandex Ukraine — yandex.ua, Ukrainian domestic domain."""
+    name = "yandex_ua"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://yandex.ua/search/?text={quote(query)}&p={page}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "uk,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for li in soup.find_all("li", class_="serp-item"):
+                        a = li.find("a")
+                        if a:
+                            href = a.get("href", "")
+                            if href and href.startswith("http") and "yandex" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    if not results:
+                        for div in soup.find_all("div", attrs={"data-cid": True}):
+                            a = div.find("a")
+                            if a:
+                                href = a.get("href", "")
+                                if href and href.startswith("http") and "yandex" not in href:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[YandexUA] Search error: {e}")
+            return []
+
+
+class YandexKZSearch(SearchEngine):
+    """Yandex Kazakhstan — yandex.kz, popular in Central Asia."""
+    name = "yandex_kz"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://yandex.kz/search/?text={quote(query)}&p={page}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "kk,ru;q=0.8,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for li in soup.find_all("li", class_="serp-item"):
+                        a = li.find("a")
+                        if a:
+                            href = a.get("href", "")
+                            if href and href.startswith("http") and "yandex" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    if not results:
+                        for div in soup.find_all("div", attrs={"data-cid": True}):
+                            a = div.find("a")
+                            if a:
+                                href = a.get("href", "")
+                                if href and href.startswith("http") and "yandex" not in href:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[YandexKZ] Search error: {e}")
+            return []
+
+
+class YandexBYSearch(SearchEngine):
+    """Yandex Belarus — yandex.by, Belarusian domestic domain."""
+    name = "yandex_by"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://yandex.by/search/?text={quote(query)}&p={page}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "be,ru;q=0.8,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for li in soup.find_all("li", class_="serp-item"):
+                        a = li.find("a")
+                        if a:
+                            href = a.get("href", "")
+                            if href and href.startswith("http") and "yandex" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    if not results:
+                        for div in soup.find_all("div", attrs={"data-cid": True}):
+                            a = div.find("a")
+                            if a:
+                                href = a.get("href", "")
+                                if href and href.startswith("http") and "yandex" not in href:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[YandexBY] Search error: {e}")
+            return []
+
+
+# ────────────────────────── ADDITIONAL ENGINES (DVParser) ──────────────────────────
+
+class ExciteJPSearch(SearchEngine):
+    """Excite Japan — excite.co.jp, Japanese search portal."""
+    name = "excite_jp"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.excite.co.jp/search.gw?search={quote(query)}&start={page * 10}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                headers = self.headers.copy()
+                headers["Accept-Language"] = "ja,en;q=0.5"
+                async with session.get(url, headers=headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for a in soup.find_all("a", class_=re.compile(r"result|title", re.I)):
+                        href = a.get("href", "")
+                        if href and href.startswith("http") and "excite.co.jp" not in href:
+                            results.append(href)
+                            if len(results) >= num_results:
+                                break
+                    if not results:
+                        for div in soup.find_all("div", class_=re.compile(r"result|item")):
+                            a = div.find("a", href=True)
+                            if a:
+                                href = a["href"]
+                                if href.startswith("http") and "excite.co.jp" not in href:
+                                    results.append(href)
+                                    if len(results) >= num_results:
+                                        break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[ExciteJP] Search error: {e}")
+            return []
+
+
+class GigablastSearch(SearchEngine):
+    """Gigablast — independent US search engine with its own index."""
+    name = "gigablast"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.gigablast.com/search?q={quote(query)}&s={page * 10}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                async with session.get(url, headers=self.headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|gbres")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "gigablast.com" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    if not results:
+                        for a in soup.find_all("a", href=True):
+                            href = a["href"]
+                            text = a.get_text(strip=True)
+                            if (href.startswith("http") and "gigablast.com" not in href
+                                    and text and len(text) > 10):
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Gigablast] Search error: {e}")
+            return []
+
+
+class LukolSearch(SearchEngine):
+    """Lukol — anonymous search proxy, strips tracking."""
+    name = "lukol"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.lukol.com/s.php?q={quote(query)}&p={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                async with session.get(url, headers=self.headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|web-result")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "lukol.com" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Lukol] Search error: {e}")
+            return []
+
+
+class OscoboSearch(SearchEngine):
+    """Oscobo — UK-based privacy search engine."""
+    name = "oscobo"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://www.oscobo.com/search.php?q={quote(query)}&p={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                async with session.get(url, headers=self.headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|web-result|line")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "oscobo.com" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Oscobo] Search error: {e}")
+            return []
+
+
+class InfinitySearch(SearchEngine):
+    """Infinity Search — privacy-focused meta search engine."""
+    name = "infinity"
+
+    async def search(self, query: str, num_results: int = 10, page: int = 0) -> List[str]:
+        url = f"https://infinitysearch.co/search?q={quote(query)}&p={page + 1}"
+        try:
+            session = await self._get_session()
+            own = session is not self._session
+            try:
+                async with session.get(url, headers=self.headers, proxy=self.proxy, ssl=False) as resp:
+                    if resp.status != 200:
+                        return []
+                    html = await resp.text()
+                    self._detect_captcha_in_response(resp.status, html, url)
+                    soup = BeautifulSoup(html, "html.parser")
+                    results = []
+                    for div in soup.find_all("div", class_=re.compile(r"result|search-result")):
+                        a = div.find("a", href=True)
+                        if a:
+                            href = a["href"]
+                            if href.startswith("http") and "infinitysearch" not in href:
+                                results.append(href)
+                                if len(results) >= num_results:
+                                    break
+                    return results
+            finally:
+                if own:
+                    await session.close()
+        except RateLimitError:
+            raise
+        except Exception as e:
+            logger.error(f"[Infinity] Search error: {e}")
+            return []
+
+
 # ────────────────────────── ENGINE REGISTRY ──────────────────────────
 
 ENGINE_REGISTRY = {
@@ -3176,8 +3701,20 @@ ENGINE_REGISTRY = {
     "wiby": WibySearch,             # Canada — classic web
     "egerin": EgerinSearch,         # Kurdistan — Kurdish language
     "yongzin": YongzinSearch,       # Tibet — Tibetan language
+    # ── Yandex regional variants (DVParser) ──
+    "yandex_ua": YandexUASearch,    # Ukraine
+    "yandex_kz": YandexKZSearch,    # Kazakhstan
+    "yandex_by": YandexBYSearch,    # Belarus
+    # ── Additional engines (DVParser) ──
+    "excite_jp": ExciteJPSearch,    # Japan — Excite portal
+    "gigablast": GigablastSearch,   # US — independent index
+    "lukol": LukolSearch,           # Anonymous proxy search
+    "oscobo": OscoboSearch,         # UK — privacy search
+    "infinity": InfinitySearch,     # Privacy meta-search
     # ── Bing regional variants (48 countries) ──
     **_BING_REGIONAL_CLASSES,
+    # ── Yahoo regional variants (20 countries, from DVParser) ──
+    **_YAHOO_REGIONAL_CLASSES,
 }
 
 
@@ -3343,7 +3880,7 @@ class MultiSearch:
                         engine_results[name] = f"CAPTCHA_{ce.captcha_info.get('type', 'unknown').upper()}"
                         break
                     except RateLimitError:
-                        self.health.record_failure(name)
+                        self.health.record_blocked(name)  # Use blocked status for rate limits
                         self.rate_limiter.got_rate_limited()
                         engine_results[name] = "RATE_LIMITED"
                         # Report rate limit to proxy manager — ban this proxy
@@ -3365,7 +3902,9 @@ class MultiSearch:
 
                 if len(all_results) >= num_results:
                     break
-                await asyncio.sleep(random.uniform(0.5, 1.5))
+                # Per-engine adaptive delay (DVParser pattern)
+                engine_delay = self.health.get_delay_for_engine(name)
+                await asyncio.sleep(engine_delay)
 
             # Firecrawl fallback: if all engines returned 0 and FC is fallback-only
             if not all_results and self.firecrawl_as_fallback and self.firecrawl_api_key:
