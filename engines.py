@@ -72,11 +72,14 @@ class EngineHealth:
         # Per-engine delay params (adaptive)
         self._base_delay_min: float = 1.0
         self._base_delay_max: float = 3.0
+        # Exponential backoff for persistently blocked engines
+        self._block_count: Dict[str, int] = defaultdict(int)
 
     def record_success(self, engine: str, count: int = 1):
         self._success[engine] += 1
         self._requests[engine] += 1
         self._consecutive_fail[engine] = 0
+        self._block_count[engine] = 0  # Reset exponential backoff on success
         # If engine was throttled and now returning well, restore ACTIVE
         if self._status.get(engine) == EngineStatus.THROTTLED and count >= 3:
             self._status[engine] = EngineStatus.ACTIVE
@@ -98,13 +101,21 @@ class EngineHealth:
             logger.warning(f"Engine {engine} cooled down for {self.cooldown}s")
 
     def record_blocked(self, engine: str):
-        """Mark engine as blocked (captcha / 403 / hard ban)."""
+        """Mark engine as blocked (captcha / 403 / hard ban).
+        Uses exponential backoff — engines that keep getting blocked
+        stay blocked longer (up to 1 hour)."""
         self._failure[engine] += 1
         self._requests[engine] += 1
         self._consecutive_fail[engine] += 1
-        self._cooldown_until[engine] = time.time() + self.blocked_cooldown
+        self._block_count[engine] += 1
+        # Exponential backoff: 900s, 1800s, 3600s, 3600s, ...
+        backoff_multiplier = min(self._block_count[engine], 4)  # Cap at 4x
+        effective_cooldown = self.blocked_cooldown * backoff_multiplier
+        self._cooldown_until[engine] = time.time() + effective_cooldown
         self._status[engine] = EngineStatus.BLOCKED
-        logger.warning(f"Engine {engine} BLOCKED (captcha/ban) — {self.blocked_cooldown:.0f}s cooldown")
+        if self._block_count[engine] <= 2:
+            logger.warning(f"Engine {engine} BLOCKED (captcha/ban) — {effective_cooldown:.0f}s cooldown")
+        # After 2 blocks, stop spamming logs — it's clearly a persistent block
 
     def record_throttled(self, engine: str):
         """Mark engine as throttled (returning fewer results than expected)."""
@@ -3816,7 +3827,18 @@ class MultiSearch:
                 engine_cls = ENGINE_REGISTRY.get(name)
                 if not engine_cls:
                     continue
-                
+
+                # Rotate proxy per engine to avoid IP-based cross-engine bans
+                if self.proxy_manager and self.proxy_manager.has_proxies:
+                    _pi = await self.proxy_manager.get_proxy(name)
+                    if _pi:
+                        use_proxy = _pi.url
+                        proxy_info = _pi
+                    # else keep current use_proxy
+                elif self.proxies and len(self.proxies) > 1:
+                    self._rotate_proxy()
+                    use_proxy = self._get_proxy()
+
                 # Firecrawl needs API key; skip if fallback-only (handled below)
                 if name == "firecrawl":
                     if not self.firecrawl_api_key:

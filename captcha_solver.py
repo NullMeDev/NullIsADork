@@ -479,8 +479,8 @@ class NopeCHAProvider(CaptchaProvider):
     def _get_client(self):
         if self._client is None:
             try:
-                from nopecha.api.urllib import URLLibAPIClient
-                self._client = URLLibAPIClient(self.api_key)
+                from nopecha.api.urllib import UrllibAPIClient
+                self._client = UrllibAPIClient(self.api_key)
             except ImportError:
                 logger.warning("[NopeCHA] nopecha not installed. pip install nopecha")
                 return None

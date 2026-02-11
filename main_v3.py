@@ -52,6 +52,7 @@ import os
 import sys
 import json
 import re
+import html as html_module
 import random
 import asyncio
 import hashlib
@@ -874,6 +875,143 @@ class MadyDorkerPipeline:
             return False
         except Exception:
             return True
+
+    def _is_store_relevant(self, url: str) -> bool:
+        """Check if URL is likely a store/e-commerce site (for cards_only mode).
+        Returns True if the URL should be processed, False if it should be skipped."""
+        try:
+            parsed = urlparse(url)
+            domain = parsed.netloc.lower()
+            path_q = (parsed.path + '?' + (parsed.query or '')).lower()
+            full = domain + path_q
+
+            # ── REJECT: known non-store TLDs / institutional domains ──
+            _non_store_tlds = (
+                '.gov', '.edu', '.mil',
+            )
+            # Check domain parts (e.g. revenue.ky.gov → .gov)
+            for tld in _non_store_tlds:
+                if domain.endswith(tld) or (tld + '.') in domain:
+                    return False
+
+            _non_store_domains = (
+                'wikipedia.org', 'wikidata.org', 'wikimedia.org',
+                'stackoverflow.com', 'stackexchange.com', 'github.com',
+                'gitlab.com', 'bitbucket.org', 'reddit.com',
+                'quora.com', 'medium.com', 'linkedin.com',
+                'facebook.com', 'twitter.com', 'instagram.com',
+                'youtube.com', 'tiktok.com', 'pinterest.com',
+                'archive.org', 'arxiv.org', 'researchgate.net',
+                'slideshare.net', 'scribd.com', 'academia.edu',
+                'wipo.int', 'who.int', 'un.org', 'nasa.gov',
+                'w3.org', 'ietf.org', 'ieee.org',
+                'nytimes.com', 'bbc.com', 'cnn.com', 'reuters.com',
+                'theguardian.com', 'washingtonpost.com',
+                'weather.com', 'imdb.com', 'rottentomatoes.com',
+            )
+            for nd in _non_store_domains:
+                if nd in domain:
+                    return False
+
+            # ── ACCEPT: known e-commerce platforms (always store) ──
+            _ecommerce_platforms = (
+                'shopify', 'bigcommerce', 'woocommerce', 'magento',
+                'prestashop', 'opencart', 'oscommerce', 'zencart',
+                'cubecart', 'virtuemart', 'xcart', 'cscart',
+                'nopcommerce', 'shopware', 'abantecart', 'tomatocart',
+                'litecart', 'loadedcommerce', 'whmcs', 'ecwid',
+                'volusion', '3dcart', 'squarespace', 'weebly',
+                'storenvy', 'bigcartel', 'gumroad', 'selz',
+                'snipcart', 'foxycart', 'sendowl', 'paddle',
+                'lemonstand', 'miva', 'pinnacle',
+            )
+            for ep in _ecommerce_platforms:
+                if ep in domain:
+                    return True
+
+            # ── ACCEPT: store signals in URL path/params/domain ──
+            _store_signals = (
+                'shop', 'store', 'cart', 'checkout', 'product',
+                'catalog', 'buy', 'purchase', 'order', 'basket',
+                'payment', 'pay', 'merchant', 'ecommerce', 'e-commerce',
+                'item', 'goods', 'price', 'pricing', 'add-to-cart',
+                'addtocart', 'wishlist', 'shipping', 'delivery',
+                'invoice', 'billing', 'subscribe', 'subscription',
+                'account/order', 'my-orders', 'myorders',
+                'customer', 'buyer', 'vendor', 'marketplace',
+                'boutique', 'outlet', 'retail', 'wholesale',
+                'inventory', 'stock', 'sku', 'barcode',
+                'coupon', 'discount', 'promo', 'voucher', 'gift-card',
+                'giftcard', 'loyalty', 'rewards',
+                # CMS store paths
+                '/wp-content/plugins/woocommerce',
+                '/modules/ps_', '/classes/shop',
+                # ASP store patterns
+                'productdetails', 'itemdetail', 'shopdetail',
+                'prodlist', 'catlist', 'viewcart', 'viewbasket',
+                'shoppingcart', 'minicart',
+                # API store patterns
+                '/api/products', '/api/cart', '/api/orders',
+                '/api/checkout', '/api/catalog',
+            )
+            for sig in _store_signals:
+                if sig in full:
+                    return True
+
+            # ── ACCEPT: numeric product-style params (id=123, pid=5, product_id=42) ──
+            _product_params = (
+                'product_id', 'productid', 'prod_id', 'prodid',
+                'item_id', 'itemid', 'goods_id', 'goodsid',
+                'category_id', 'catid', 'cat_id', 'catalog_id',
+                'sku', 'barcode', 'upc',
+            )
+            if parsed.query:
+                for pp in _product_params:
+                    if pp in parsed.query.lower():
+                        return True
+
+            # ── ACCEPT: domain contains store-like words ──
+            _domain_store_words = (
+                'shop', 'store', 'mart', 'buy', 'deal', 'sale',
+                'market', 'trade', 'mall', 'bazaar', 'emporium',
+                'boutique', 'outlet', 'retail', 'wholesale',
+                'supply', 'supplies', 'parts', 'depot', 'warehouse',
+                'pharmacy', 'pharma', 'drug', 'beauty', 'cosmetic',
+                'jewel', 'fashion', 'cloth', 'shoe', 'wear',
+                'electronics', 'gadget', 'tech', 'computer',
+                'furniture', 'decor', 'home', 'garden', 'hardware',
+                'toys', 'games', 'sport', 'fitness', 'nutrition',
+                'supplement', 'organic', 'natural', 'pet', 'food',
+                'grocery', 'wine', 'liquor', 'beer', 'vape',
+                'flower', 'gift', 'craft', 'art', 'book',
+                'auto', 'motor', 'tire', 'bicycle',
+            )
+            # Check domain name segments (split on dots and hyphens)
+            domain_parts = re.split(r'[.\-]', domain)
+            for part in domain_parts:
+                for word in _domain_store_words:
+                    if word in part:
+                        return True
+
+            # ── ACCEPT: has injectable params with numeric values (might be product DB) ──
+            if parsed.query:
+                _injectable_id_params = ('id', 'pid', 'uid', 'cid', 'num', 'record', 'row', 'idx')
+                from urllib.parse import parse_qs
+                try:
+                    qs = parse_qs(parsed.query)
+                    for pname, pvals in qs.items():
+                        if pname.lower() in _injectable_id_params:
+                            if any(v.isdigit() for v in pvals):
+                                # Generic ID param with numeric value — could be store DB
+                                # Allow but with lower confidence (the scoring will handle priority)
+                                return True
+                except Exception:
+                    pass
+
+            # No store signals found → skip
+            return False
+        except Exception:
+            return True  # On error, allow through
 
     def _content_hash(self, content: str) -> str:
         """Generate hash for content deduplication."""
@@ -2525,6 +2663,15 @@ class MadyDorkerPipeline:
                             return True
 
                         extra_targets = [u for u in extra_targets if _safe_param_url(u)]
+
+                        # Skip static resources — they never yield SQLi and always timeout
+                        _static_sqli_exts = ('.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg',
+                                             '.ico', '.woff', '.woff2', '.ttf', '.map', '.webp', '.pdf')
+                        extra_targets = [
+                            u for u in extra_targets
+                            if not urlparse(u).path.lower().rsplit('?', 1)[0].endswith(_static_sqli_exts)
+                        ]
+
                         if extra_targets:
                             extra_targets = extra_targets[:crawl_sqli_limit]
                             for extra_url in extra_targets:
@@ -3631,6 +3778,9 @@ class MadyDorkerPipeline:
 
                 urls = raw_urls or []
 
+                # Decode HTML entities in URLs (search engines return &amp; instead of &)
+                urls = [html_module.unescape(u) for u in urls]
+
                 # Update dork scorer
                 if hasattr(self.searcher, "dork_scorer") and self.searcher.dork_scorer:
                     self.searcher.dork_scorer.record(dork, len(urls))
@@ -3642,7 +3792,7 @@ class MadyDorkerPipeline:
                 _revisit_hours = getattr(self.config, "domain_revisit_hours", 24)
                 _url_dedup = getattr(self.config, "url_dedup_enabled", True)
                 _max_retries = getattr(self.config, "max_url_retries", 3)
-                _skip_reasons = {"dedup": 0, "cooldown": 0, "blacklist": 0, "max_retries": 0}
+                _skip_reasons = {"dedup": 0, "cooldown": 0, "blacklist": 0, "max_retries": 0, "non_store": 0}
 
                 filtered_urls = []
                 for url in urls:
@@ -3662,6 +3812,11 @@ class MadyDorkerPipeline:
                     ):
                         _skip_reasons["max_retries"] += 1
                         continue
+                    # Store-relevance filter (cards_only mode)
+                    if getattr(self.config, 'cards_only_reporting', False):
+                        if not self._is_store_relevant(url):
+                            _skip_reasons["non_store"] += 1
+                            continue
                     filtered_urls.append(url)
 
                 skipped_total = sum(_skip_reasons.values())
