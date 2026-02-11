@@ -233,7 +233,7 @@ class DorkerConfig:
     waf_max_concurrent: int = 200
 
     # =============== SECRET EXTRACTION ===============
-    secret_extraction_enabled: bool = True
+    secret_extraction_enabled: bool = False
     secret_timeout: int = 10
     secret_max_concurrent: int = 200
     # Secret types to suppress from Telegram reporting (noise/non-actionable)

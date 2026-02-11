@@ -764,11 +764,51 @@ class MadyDorkerPipeline:
                     if pat in path_q:
                         return True
 
+            path_lower = parsed.path.lower()
+
+            # ── Skip static assets / CDN / never-injectable resources ──
+            _static_exts = (
+                '.css', '.js', '.jpg', '.jpeg', '.png', '.gif', '.svg',
+                '.ico', '.woff', '.woff2', '.ttf', '.eot', '.otf',
+                '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.webm',
+                '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt',
+                '.zip', '.rar', '.tar', '.gz', '.7z', '.bz2',
+                '.xml', '.rss', '.atom', '.json', '.txt', '.csv',
+                '.map', '.webp', '.avif', '.bmp', '.tiff',
+            )
+            if any(path_lower.endswith(ext) for ext in _static_exts):
+                return True
+
+            # ── Skip known hardened CMS / framework endpoints that never yield SQLi ──
+            _hardened_paths = (
+                '/wp-login.php', '/wp-cron.php', '/xmlrpc.php',
+                '/wp-admin/', '/wp-includes/', '/wp-json/wp/v2/posts',
+                '/administrator/', '/admin/login', '/user/login',
+                '/robots.txt', '/sitemap.xml', '/favicon.ico',
+                '/.well-known/', '/manifest.json', '/service-worker.js',
+                '/cdn-cgi/', '/captcha', '/recaptcha',
+                '/api/v1/health', '/api/health', '/healthcheck',
+                '/graphql',  # GraphQL has its own injection surface, not param-based
+            )
+            for hp in _hardened_paths:
+                if path_lower.startswith(hp) or hp in path_lower:
+                    return True
+
+            # ── Skip CDN / static-asset subdomains ──
+            _cdn_patterns = (
+                'cdn.', 'static.', 'assets.', 'img.', 'images.',
+                'media.', 'fonts.', 'js.', 'css.', 's3.amazonaws.com',
+                'cloudfront.net', 'akamaized.net', 'fastly.net',
+                'azureedge.net', 'googleusercontent.com', 'gstatic.com',
+                'cdnjs.cloudflare.com', 'unpkg.com', 'jsdelivr.net',
+            )
+            if any(domain.startswith(pat) or pat in domain for pat in _cdn_patterns):
+                return True
+
             # v10d: In cards-only mode, aggressively skip non-injectable URLs
             # URLs without params AND without dynamic extensions are junk
             if getattr(self.config, 'cards_only_reporting', False):
                 has_params = bool(parsed.query)
-                path_lower = parsed.path.lower()
                 _injectable_exts = (
                     '.php', '.asp', '.aspx', '.jsp', '.jspx', '.cfm',
                     '.cgi', '.pl', '.do', '.action', '.nsf', '.dll',
@@ -781,12 +821,23 @@ class MadyDorkerPipeline:
                 if not has_params and not has_injectable_ext:
                     return True
 
+            # ── Skip URLs where ALL param values look non-injectable ──
+            # (e.g. ?utm_source=google&utm_medium=cpc — pure tracking)
+            if parsed.query:
+                _tracking_only_params = {
+                    'utm_source', 'utm_medium', 'utm_campaign', 'utm_term',
+                    'utm_content', 'fbclid', 'gclid', 'msclkid', 'mc_cid',
+                    'mc_eid', '_ga', '_gid', 'ref', 'source', 'origin',
+                }
+                param_names = set(p.split('=')[0].lower() for p in parsed.query.split('&') if '=' in p)
+                if param_names and param_names.issubset(_tracking_only_params):
+                    return True
+
             # Skip search engine redirect/tracking URLs (common patterns)
             _redirect_patterns = (
                 "/click/", "/redirect", "/r/", "/url?", "/search?",
                 "/aclk?", "/pagead/", "/adurl=",
             )
-            path_lower = parsed.path.lower()
             for pat in _redirect_patterns:
                 if pat in path_lower or pat in (parsed.query or ""):
                     # Only skip if the domain itself is a search engine
@@ -875,22 +926,65 @@ class MadyDorkerPipeline:
             params = parsed.query.split("&")
             score += len(params) * 5
 
-            # Has high-value params
+            # Track param quality
+            _TRACKING_PARAMS = {
+                "utm_source", "utm_medium", "utm_campaign", "utm_term",
+                "utm_content", "fbclid", "gclid", "gclsrc", "msclkid",
+                "dclid", "mc_cid", "mc_eid", "ref", "referer",
+            }
+            has_real_param = False
+
             for p in params:
-                name = p.split("=")[0].lower()
+                parts = p.split("=", 1)
+                name = parts[0].lower()
+                value = parts[1] if len(parts) > 1 else ""
+
+                # High-value ID params (classic SQLi targets)
                 if name in (
-                    "id",
-                    "pid",
-                    "uid",
-                    "cid",
-                    "product_id",
-                    "item_id",
-                    "cat",
-                    "category",
+                    "id", "pid", "uid", "cid", "product_id",
+                    "item_id", "cat", "category", "article_id",
+                    "news_id", "page_id", "user_id", "order_id",
+                    "invoice_id", "record", "row", "num",
                 ):
                     score += 15
-                elif name in ("search", "q", "query", "keyword"):
+                    has_real_param = True
+                    # Numeric value = even more likely injectable
+                    if value.isdigit():
+                        score += 10
+                # Sort/order/limit params (ORDER BY / LIMIT injection)
+                elif name in (
+                    "sort", "order", "orderby", "sortby", "limit",
+                    "offset", "dir", "direction", "asc", "desc",
+                    "sortfield", "column", "col", "field", "group",
+                ):
+                    score += 12
+                    has_real_param = True
+                # Search/query params (LIKE injection, UNION)
+                elif name in ("search", "q", "query", "keyword", "s", "term"):
                     score += 10
+                    has_real_param = True
+                # Filter/where params (direct SQL influence)
+                elif name in (
+                    "filter", "where", "having", "status", "type",
+                    "action", "view", "table", "name", "email",
+                    "username", "login", "password", "pass",
+                ):
+                    score += 8
+                    has_real_param = True
+                # File/path params (possible LFI/SQLi crossover)
+                elif name in ("file", "path", "page", "include", "url", "src", "dest"):
+                    score += 6
+                    has_real_param = True
+                elif name not in _TRACKING_PARAMS:
+                    has_real_param = True
+
+            # If ALL params are tracking-only, heavy penalty
+            if not has_real_param:
+                score -= 30
+
+        else:
+            # No parameters at all → very low priority for SQLi
+            score -= 20
 
         # WAF risk affects priority
         if waf_info:
@@ -916,6 +1010,14 @@ class MadyDorkerPipeline:
             score += 8
         elif path.endswith(".jsp"):
             score += 8
+        elif path.endswith(".cfm"):
+            score += 7
+        # Dynamic path patterns (e.g., /product/123, /api/v1/users/5)
+        path_parts = path.rstrip("/").split("/")
+        for part in path_parts:
+            if part.isdigit():
+                score += 8  # Numeric path segment = likely DB-backed
+                break
 
         # ★ Payment-confirmed domain → massive priority boost
         if hasattr(self, '_payment_domains') and self._payment_domains:
