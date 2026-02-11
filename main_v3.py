@@ -234,7 +234,7 @@ class MadyDorkerPipeline:
 
             self.proxy_manager = ProxyManager(
                 proxy_files=proxy_files,
-                strategy="round_robin" if has_inline else getattr(self.config, "proxy_rotation_strategy", "weighted"),
+                strategy=getattr(self.config, "proxy_rotation_strategy", "weighted"),
                 ban_threshold=getattr(self.config, "proxy_ban_threshold", 5),
                 ban_duration=getattr(self.config, "proxy_ban_duration", 600),
                 country_filter=getattr(self.config, "proxy_country_filter", []),
@@ -1347,6 +1347,18 @@ class MadyDorkerPipeline:
 
         try:
             session = await self._get_shared_session()
+
+            # Get a rotating proxy for this URL's pipeline
+            # This ensures WAF/SQLi/cookie requests don't expose the server IP
+            _url_proxy = None
+            if self.proxy_manager and self.proxy_manager.has_proxies:
+                try:
+                    _pi = await self.proxy_manager.get_proxy(domain)
+                    if _pi:
+                        _url_proxy = _pi.url
+                except Exception:
+                    pass
+
             async with self._url_semaphore:
                     # Step 0: Soft-404 detection
                     if self.config.soft404_detection:
@@ -1360,7 +1372,8 @@ class MadyDorkerPipeline:
                     waf_name = None
                     if self.config.waf_detection_enabled:
                         try:
-                            waf_info = await self.waf_detector.detect(url, session)
+                            waf_info = await self.waf_detector.detect(url, session,
+                                                                      proxy=_url_proxy)
                             waf_name = waf_info.waf
                             result["waf"] = {
                                 "name": waf_info.waf,
@@ -2276,6 +2289,8 @@ class MadyDorkerPipeline:
                     # Also test param URLs discovered by the recursive crawler
                     if self.config.sqli_enabled:
                         try:
+                            # Set proxy for SQLi requests (avoids exposing server IP)
+                            self.sqli_scanner.proxy = _url_proxy
                             sqli_results = await self.sqli_scanner.scan(
                                 url,
                                 session,

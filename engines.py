@@ -3811,6 +3811,46 @@ class MultiSearch:
         url = self._get_proxy()
         return url, None
 
+    # Premium engines: most useful but strictest rate limiting — use residential/premium proxies
+    _PREMIUM_ENGINES = frozenset({
+        "google", "bing", "duckduckgo", "startpage", "brave", "ecosia",
+        "yahoo", "aol",
+    })
+
+    async def _get_engine_proxy(self, engine_name: str) -> Tuple[Optional[str], Optional['ProxyInfo']]:
+        """Get proxy tiered by engine value.
+        
+        Premium engines (Google/Bing/DDG/Startpage) get residential/hostname-based
+        proxies (harder to detect, less likely to be range-banned).
+        
+        Other engines (Naver/Daum/Presearch/Rambler) get regular datacenter proxies
+        from the pool (cheaper, these engines don't care about IP quality).
+        """
+        if not (self.proxy_manager and self.proxy_manager.has_proxies):
+            url = self._get_proxy()
+            return url, None
+        
+        pool = self.proxy_manager.pool
+        
+        if engine_name in self._PREMIUM_ENGINES:
+            # Try to get a premium (hostname-based or authenticated) proxy
+            async with pool._lock:
+                avail = pool._get_filtered()
+                premium = [p for p in avail if not p.host.replace('.', '').isdigit() or p.username]
+                if premium:
+                    proxy = pool._select_subnet_diverse(premium) if len(pool._subnet_index) > 1 else random.choice(premium)
+                    if proxy:
+                        proxy.last_used = time.time()
+                        return proxy.url, proxy
+            # Fall through to regular proxy if no premium available
+        
+        # Regular proxy for non-premium engines (subnet-diverse)
+        proxy_info = await self.proxy_manager.get_proxy(engine_name)
+        if proxy_info:
+            return proxy_info.url, proxy_info
+        url = self._get_proxy()
+        return url, None
+
     async def search(self, query: str, num_results: int = 10) -> List[str]:
         self.search_count += 1
         
@@ -3845,11 +3885,11 @@ class MultiSearch:
                 if not engine_cls:
                     continue
 
-                # Rotate proxy per engine to avoid IP-based cross-engine bans
+                # Rotate proxy per engine — tiered by engine value
                 if self.proxy_manager and self.proxy_manager.has_proxies:
-                    _pi = await self.proxy_manager.get_proxy(name)
-                    if _pi:
-                        use_proxy = _pi.url
+                    _proxy_url, _pi = await self._get_engine_proxy(name)
+                    if _proxy_url:
+                        use_proxy = _proxy_url
                         proxy_info = _pi
                     # else keep current use_proxy
                 elif self.proxies and len(self.proxies) > 1:

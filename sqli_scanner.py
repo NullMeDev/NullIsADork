@@ -768,7 +768,8 @@ class SQLiScanner:
                     cookie_jar=cookie_jar,
                     headers={"User-Agent": self.user_agent}
                 ) as cookie_session:
-                    async with cookie_session.get(url, allow_redirects=True, ssl=False) as resp:
+                    async with cookie_session.get(url, allow_redirects=True,
+                                                   ssl=False, proxy=self.proxy) as resp:
                         # Collect Set-Cookie headers
                         for header in resp.headers.getall("Set-Cookie", []):
                             jar.all_set_cookie_headers.append(header)

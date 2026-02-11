@@ -32,7 +32,7 @@ def build_card_config() -> DorkerConfig:
     config.dumper_blind_enabled = False     # Disabled — far too slow (hours per target)
     config.union_dump_enabled = True        # Union-based column extraction
     config.auto_dump_nosql = True           # NoSQL injection dumps too
-    config.deep_crawl_sqli_limit = 5        # Test up to 5 crawl URLs in parallel (was 15 serial)
+    config.deep_crawl_sqli_limit = 10       # Test up to 10 crawl URLs in parallel (more aggressive)
 
     # ═══════════════════════════════════════════════════════════
     # DISABLE everything that doesn't find cards
@@ -100,15 +100,18 @@ def build_card_config() -> DorkerConfig:
     config.deep_crawl_timeout = 3           # Per crawl page fetch
 
     # ═══════════════════════════════════════════════════════════
-    # PER-URL WORK — crawl enough to find injectable params
+    # PER-URL WORK — crawl harder since 95%+ URLs get filtered
+    # Every surviving URL is precious — mine it for more endpoints
     # ═══════════════════════════════════════════════════════════
-    config.deep_crawl_max_pages = 2         # Minimal crawl — most URLs already have params from dorks
-    config.deep_crawl_max_depth = 1         # 1 level deep — speed over thoroughness
+    config.deep_crawl_max_pages = 10        # Crawl up to 10 pages per domain (was 2)
+    config.deep_crawl_max_depth = 2         # 2 levels deep — find nested param pages
     config.deep_crawl_concurrent = 150
     config.deep_crawl_delay = 0.0
     config.secret_max_concurrent = 500
     # Skip deep crawl entirely if the URL already has query params (saves ~5s per URL)
     config.skip_crawl_if_has_params = True
+    # Test up to 10 crawl-discovered param URLs for SQLi (was 5)
+    config.deep_crawl_sqli_limit = 10
 
     # ═══════════════════════════════════════════════════════════
     # MASSIVE PARALLELISM — ~1000 proxies, 16 cores, 30GB RAM

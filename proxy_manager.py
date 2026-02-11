@@ -394,6 +394,11 @@ class ProxyPool:
         
         # Deduplication
         self._seen_addresses: Set[str] = set()
+        
+        # Subnet-aware rotation: group proxies by /24 subnet for diversity
+        self._subnet_index: Dict[str, List[ProxyInfo]] = {}  # subnet -> proxies
+        self._subnet_last_used: Dict[str, float] = {}  # subnet -> last use timestamp
+        self._last_subnet: str = ""  # Last subnet used (avoid consecutive reuse)
 
     @property
     def total(self) -> int:
@@ -423,10 +428,25 @@ class ProxyPool:
                 self._seen_addresses.add(p.address)
                 self._proxies.append(p)
                 added += 1
+                # Index by /24 subnet for diversity rotation
+                subnet = self._get_subnet(p.host)
+                if subnet not in self._subnet_index:
+                    self._subnet_index[subnet] = []
+                    self._subnet_last_used[subnet] = 0.0
+                self._subnet_index[subnet].append(p)
         if added:
             logger.info(f"Added {added} proxies to pool (total: {self.total}, "
-                        f"skipped {len(proxies) - added} duplicates)")
+                        f"skipped {len(proxies) - added} duplicates, "
+                        f"{len(self._subnet_index)} unique subnets)")
         return added
+
+    @staticmethod
+    def _get_subnet(host: str) -> str:
+        """Extract /24 subnet from IP address. For hostnames, use the hostname itself."""
+        parts = host.split('.')
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            return '.'.join(parts[:3])  # /24 subnet
+        return host  # hostname-based proxy (e.g. proxy.proxying.io)
 
     def load_files(self, filepaths: List[str],
                    protocol: ProxyProtocol = ProxyProtocol.HTTP) -> int:
@@ -485,10 +505,22 @@ class ProxyPool:
             return proxy
 
     def _select(self, pool: List[ProxyInfo]) -> Optional[ProxyInfo]:
-        """Select a proxy from the filtered pool based on strategy."""
+        """Select a proxy from the filtered pool based on strategy.
+        
+        All strategies now use subnet-diverse selection: pick from a different
+        /24 subnet than the last request to maximize IP diversity and avoid
+        search engines banning entire subnet ranges at once.
+        """
         if not pool:
             return None
 
+        # ── Subnet-diverse selection: pick from a different /24 than last time ──
+        if len(self._subnet_index) > 1:
+            proxy = self._select_subnet_diverse(pool)
+            if proxy:
+                return proxy
+
+        # Fallback: original strategies (for single-subnet pools)
         if self.strategy == RotationStrategy.ROUND_ROBIN:
             self._round_robin_index = self._round_robin_index % len(pool)
             proxy = pool[self._round_robin_index]
@@ -499,17 +531,59 @@ class ProxyPool:
             return random.choice(pool)
 
         elif self.strategy == RotationStrategy.LRU:
-            # Least recently used
             return min(pool, key=lambda p: p.last_used)
 
         elif self.strategy == RotationStrategy.WEIGHTED:
-            # Weighted random based on composite score
             scores = [max(0.01, p.score) for p in pool]
             total = sum(scores)
             weights = [s / total for s in scores]
             return random.choices(pool, weights=weights, k=1)[0]
 
         return random.choice(pool)
+
+    def _select_subnet_diverse(self, pool: List[ProxyInfo]) -> Optional[ProxyInfo]:
+        """Select a proxy from a DIFFERENT /24 subnet than the last request.
+        
+        Strategy:
+        1. Group available proxies by subnet
+        2. Pick the subnet with the oldest last-use time (excluding last subnet)
+        3. Within that subnet, pick by weighted score
+        
+        This prevents search engines from banning entire IP ranges since
+        consecutive requests always come from different /24 subnets.
+        """
+        pool_set = set(id(p) for p in pool)
+        
+        # Build available subnets (only subnets with available proxies in the filtered pool)
+        available_subnets = {}
+        for subnet, proxies in self._subnet_index.items():
+            subnet_pool = [p for p in proxies if id(p) in pool_set]
+            if subnet_pool:
+                available_subnets[subnet] = subnet_pool
+        
+        if not available_subnets:
+            return None
+        
+        # Exclude last subnet if we have alternatives
+        candidates = {s: p for s, p in available_subnets.items() if s != self._last_subnet}
+        if not candidates:
+            candidates = available_subnets  # Only 1 subnet available
+        
+        # Pick subnet with oldest last-use time (LRU across subnets)
+        chosen_subnet = min(candidates.keys(), key=lambda s: self._subnet_last_used.get(s, 0))
+        subnet_pool = candidates[chosen_subnet]
+        
+        # Within subnet: weighted selection by score
+        scores = [max(0.01, p.score) for p in subnet_pool]
+        total = sum(scores)
+        weights = [s / total for s in scores]
+        proxy = random.choices(subnet_pool, weights=weights, k=1)[0]
+        
+        # Record subnet usage
+        self._last_subnet = chosen_subnet
+        self._subnet_last_used[chosen_subnet] = time.time()
+        
+        return proxy
 
     def _unban_expired(self):
         """Unban proxies whose ban duration has expired."""

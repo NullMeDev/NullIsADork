@@ -482,12 +482,14 @@ class WAFDetector:
         self.max_concurrent = max_concurrent
         self.semaphore = asyncio.Semaphore(max_concurrent)
 
-    async def detect(self, url: str, session: aiohttp.ClientSession = None) -> ProtectionInfo:
+    async def detect(self, url: str, session: aiohttp.ClientSession = None,
+                     proxy: str = None) -> ProtectionInfo:
         """Detect WAF, CDN, bot protection, and CMS for a URL.
         
         Args:
             url: Target URL to check
             session: Optional aiohttp session to reuse
+            proxy: Optional proxy URL for the request
             
         Returns:
             ProtectionInfo with all detected protections
@@ -508,7 +510,8 @@ class WAFDetector:
                 own_session = True
             
             async with self.semaphore:
-                async with session.get(url, allow_redirects=True, ssl=False) as resp:
+                async with session.get(url, allow_redirects=True, ssl=False,
+                                       proxy=proxy) as resp:
                     headers = dict(resp.headers)
                     body = await resp.text(errors="ignore")
                     cookies_str = "; ".join(f"{k}={v.value}" for k, v in resp.cookies.items())
