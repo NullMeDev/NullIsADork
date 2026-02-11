@@ -773,3 +773,121 @@ inurl:"menu.php?id=" "order"
 inurl:"order.php?id=" "restaurant"
 inurl:"food.php?id=" "buy"
 inurl:".php?id=" "catering"
+
+# ══════════════════════════════════════════════════════════════
+# §12  CARD DB COLUMN INJECTION — Direct param targeting
+#      These target sites where card column names appear as
+#      actual URL parameters (highest-value SQLi targets)
+# ══════════════════════════════════════════════════════════════
+
+# --- Card number columns as URL params ---
+inurl:"card_number=" 
+inurl:"cc_number="
+inurl:"credit_card_number="
+inurl:"creditcard="
+inurl:"ccnum="
+inurl:"cc_num="
+inurl:"pan="
+inurl:"full_card_number="
+inurl:"card_no="
+inurl:"cardnum="
+inurl:"payment_card_number="
+inurl:"encrypted_card_number="
+inurl:"tokenized_card_number="
+
+# --- Last4 / truncated card ---
+inurl:"last4="
+inurl:"cc_last4="
+inurl:"card_last4="
+inurl:"last_four="
+
+# --- Card type / brand ---
+inurl:"cc_type="
+inurl:"card_type="
+inurl:"card_brand="
+inurl:"card_network="
+
+# --- Expiry columns as params ---
+inurl:"exp_date="
+inurl:"expiry_date="
+inurl:"expiration_date="
+inurl:"exp_month="
+inurl:"exp_year="
+inurl:"expiry_month="
+inurl:"expiry_year="
+inurl:"card_exp_month="
+inurl:"card_exp_year="
+inurl:"cc_exp="
+inurl:"cc_expiry="
+
+# --- Cardholder name ---
+inurl:"cardholder_name="
+inurl:"card_holder="
+inurl:"name_on_card="
+inurl:"cc_name="
+inurl:"card_name="
+inurl:"holder_name="
+
+# --- CVV / Security code ---
+inurl:"cvv="
+inurl:"cvc="
+inurl:"cvv2="
+inurl:"cvc2="
+inurl:"security_code="
+inurl:"card_cvv="
+inurl:"card_cvc="
+
+# --- Billing info ---
+inurl:"billing_address="
+inurl:"billing_address1="
+inurl:"billing_city="
+inurl:"billing_state="
+inurl:"billing_zip="
+inurl:"billing_postcode="
+inurl:"billing_country="
+inurl:"billing_phone="
+inurl:"billing_email="
+inurl:"billing_name="
+
+# --- Compound card column dorks (multi-param, high-signal) ---
+inurl:"card_number=" inurl:"exp_"
+inurl:"cc_number=" inurl:"cvv"
+inurl:"creditcard=" inurl:"expiry"
+inurl:"card_number=" inurl:"billing_"
+inurl:"pan=" inurl:"card_holder"
+inurl:"cc_num=" inurl:"cvc"
+inurl:"card_no=" inurl:"exp_month"
+
+# --- Card columns in PHP/ASP pages (injectable) ---
+inurl:"card_number=" ext:php
+inurl:"cc_number=" ext:php
+inurl:"card_number=" ext:asp
+inurl:"creditcard=" ext:php
+inurl:"pan=" ext:php
+inurl:"payment_card_number=" ext:php
+
+# --- Card columns with error indicators ---
+inurl:"card_number=" "sql syntax"
+inurl:"cc_number=" "mysql" "error"
+inurl:"card_number=" "warning" "mysql"
+inurl:"creditcard=" "unclosed quotation"
+inurl:"pan=" "ORA-" 
+inurl:"card_number=" "ODBC"
+
+# --- Card columns on shopping/store sites ---
+inurl:"card_number=" intext:"checkout"
+inurl:"cc_number=" intext:"payment"
+inurl:"card_number=" intext:"order"
+inurl:"creditcard=" intext:"shop"
+inurl:"card_number=" intext:"cart"
+inurl:"pan=" intext:"payment gateway"
+
+# --- Card columns in exposed files ---
+"card_number" "cc_number" "cvv" filetype:sql
+"card_number" "expiry_date" "cardholder_name" filetype:csv
+"credit_card_number" "billing_address" filetype:log
+"card_number" "exp_month" "exp_year" "cvc" filetype:sql
+"INSERT INTO" "card_number" "cvv" filetype:sql
+"SELECT" "card_number" "exp_date" "cardholder_name" filetype:sql
+"card_number" "pan" "security_code" filetype:xls
+"cc_number" "billing_zip" filetype:csv
