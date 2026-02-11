@@ -554,30 +554,48 @@ class KeyValidator:
     async def _validate_stripe_publishable(
         self, result: KeyValidation, extra: Dict
     ):
-        """Validate Stripe publishable key (pk_live_*)."""
+        """Validate Stripe publishable key (pk_live_*).
+        
+        Uses PaymentMethod creation with a known test token instead of raw
+        card numbers, avoiding Stripe's "Sending credit card numbers directly
+        to the Stripe API is generally unsafe" rejection.  An invalid/empty
+        token triggers a 400 (valid key) vs 401 (dead key) distinction.
+        """
         async with aiohttp.ClientSession() as session:
-            # pk_ keys can create tokens
-            url = "https://api.stripe.com/v1/tokens"
-            data = {
-                "card[number]": "4242424242424242",
-                "card[exp_month]": "12",
-                "card[exp_year]": "2030",
-                "card[cvc]": "123",
-            }
             auth = aiohttp.BasicAuth(result.key_full, "")
+
+            # Strategy: POST to /v1/payment_methods with type=card and a
+            # deliberately invalid token.  Stripe returns:
+            #   401 → key is invalid/revoked
+            #   400 → key is live (request rejected on bad params, not auth)
+            url = "https://api.stripe.com/v1/payment_methods"
+            data = {
+                "type": "card",
+                "card[token]": "tok_invalid_test",
+            }
             async with session.post(
                 url, data=data, auth=auth,
                 timeout=aiohttp.ClientTimeout(total=self.timeout),
             ) as resp:
-                if resp.status == 200:
-                    result.is_live = True
-                    result.confidence = 1.0
-                    result.permissions = ["token:create"]
-                    tok = await resp.json()
-                    result.account_info["token_id"] = tok.get("id", "")
-                elif resp.status == 401:
+                body = await resp.json()
+                if resp.status == 401:
+                    # Authentication failed → key is dead
                     result.is_live = False
                     result.confidence = 1.0
+                elif resp.status in (400, 402):
+                    # Key authenticated but request was (intentionally) invalid
+                    result.is_live = True
+                    result.confidence = 1.0
+                    result.permissions = ["payment_method:create"]
+                    # Extract merchant account id if returned
+                    err = body.get("error", {})
+                    result.account_info["stripe_error_type"] = err.get("type", "")
+                elif resp.status == 200:
+                    # Shouldn't happen with invalid token, but handle it
+                    result.is_live = True
+                    result.confidence = 1.0
+                    result.permissions = ["payment_method:create"]
+                    result.account_info["pm_id"] = body.get("id", "")
                 else:
                     result.error = f"HTTP {resp.status}"
 

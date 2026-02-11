@@ -1779,7 +1779,8 @@ class DorkGenerator:
     #     ]
     # ──── END ARCHIVED STATIC DORKS ────
 
-    def __init__(self, params_dir: str = None, custom_dork_file: str = None):
+    def __init__(self, params_dir: str = None, custom_dork_file: str = None,
+                 priority_dork_file: str = None):
         """Initialize the dork generator.
         
         Args:
@@ -1787,6 +1788,9 @@ class DorkGenerator:
                         Defaults to ./params/ relative to this file.
             custom_dork_file: Path to external custom dorks file (one dork per line).
                               Defaults to params/custom_dorks.txt if it exists.
+            priority_dork_file: Path to high-priority dorks that are ALWAYS served
+                                first in every cycle (e.g. SQLi-focused dorks).
+                                These are never diluted by the main custom pool.
         """
         if params_dir is None:
             params_dir = os.path.join(os.path.dirname(__file__), "params")
@@ -1795,9 +1799,14 @@ class DorkGenerator:
         self.params: Dict[str, List[str]] = {}
         self.patterns = self.DEFAULT_PATTERNS.copy()
         self.custom_dorks: List[str] = []
+        self.priority_dorks: List[str] = []
         
         # Load parameter files
         self._load_params()
+        
+        # Load priority dorks (always served first, never diluted)
+        if priority_dork_file:
+            self._load_priority_dorks(priority_dork_file)
         
         # Load custom dorks from external file
         if custom_dork_file is None:
@@ -1806,7 +1815,25 @@ class DorkGenerator:
         
         logger.info(f"DorkGenerator initialized: {len(self.patterns)} patterns, "
                     f"{sum(len(v) for v in self.params.values())} total keywords, "
-                    f"{len(self.custom_dorks)} custom dorks")
+                    f"{len(self.custom_dorks)} custom dorks, "
+                    f"{len(self.priority_dorks)} priority dorks")
+
+    def _load_priority_dorks(self, filepath: str):
+        """Load high-priority dorks that are always served first every cycle."""
+        path = Path(filepath)
+        if not path.exists():
+            logger.info(f"No priority dork file found at {filepath} — skipping")
+            return
+        
+        count = 0
+        with open(path, "r", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    self.priority_dorks.append(line)
+                    count += 1
+        
+        logger.info(f"Loaded {count:,} PRIORITY dorks from {path.name}")
 
     def _load_custom_dorks(self, filepath: str):
         """Load pre-built dorks from an external file (one dork per line)."""
@@ -1936,7 +1963,17 @@ class DorkGenerator:
                 return True
             return False
         
-        # 1. Custom dorks FIRST (primary pool — 1.5M user-supplied)
+        # 0. PRIORITY dorks ALWAYS first (SQLi-focused, never diluted)
+        priority_pool = self.priority_dorks.copy()
+        random.shuffle(priority_pool)
+        for dork in priority_pool:
+            _add(dork)
+        
+        priority_count = len(ordered)
+        if priority_count:
+            logger.info(f"Added {priority_count:,} PRIORITY dorks (always first)")
+        
+        # 1. Custom dorks (primary pool — user-supplied)
         custom_pool = self.custom_dorks.copy()
         random.shuffle(custom_pool)
         for dork in custom_pool:
@@ -1944,7 +1981,7 @@ class DorkGenerator:
                 break
             _add(dork)
         
-        custom_count = len(ordered)
+        custom_count = len(ordered) - priority_count
         logger.info(f"Added {custom_count:,} custom dorks (from {len(self.custom_dorks):,} loaded)")
         
         # 2. Static dorks as supplement (operator-rich, hand-crafted)

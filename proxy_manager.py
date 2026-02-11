@@ -81,7 +81,8 @@ class ProxyInfo:
     def url(self) -> str:
         """Full proxy URL for aiohttp (e.g. http://ip:port)."""
         if self.username and self.password:
-            return f"{self.protocol.value}://{self.username}:{self.password}@{self.host}:{self.port}"
+            from urllib.parse import quote
+            return f"{self.protocol.value}://{quote(self.username, safe='')}:{quote(self.password, safe='')}@{self.host}:{self.port}"
         return f"{self.protocol.value}://{self.host}:{self.port}"
 
     @property

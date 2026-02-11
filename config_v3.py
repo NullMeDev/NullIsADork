@@ -27,6 +27,7 @@ class DorkerConfig:
     custom_dork_file: str = os.path.join(
         os.path.dirname(__file__), "params", "custom_dorks.txt"
     )
+    priority_dork_file: str = ""  # High-priority dorks served first every cycle
     max_dorks: int = 3300000
     max_per_pattern: int = 800
     dork_shuffle: bool = True
@@ -285,7 +286,7 @@ class DorkerConfig:
     dumper_dios: bool = True  # Try DIOS technique
 
     # Blind dumper (boolean + time-based extraction)
-    dumper_blind_enabled: bool = True  # Enable blind char-by-char extraction
+    dumper_blind_enabled: bool = True
     dumper_blind_delay: float = 3.0  # Sleep delay for time-based (seconds)
     dumper_blind_max_rows: int = 50  # Max rows per table (blind is slow)
     dumper_blind_max_tables: int = 15  # Max tables to enumerate
@@ -301,9 +302,7 @@ class DorkerConfig:
     deep_crawl_concurrent: int = 100  # Max concurrent page fetches
     deep_crawl_delay: float = 0.01  # Delay between fetches (rate limit)
     deep_crawl_robots: bool = False  # Respect robots.txt Disallow rules
-    deep_crawl_sqli_limit: int = (
-        120  # Max crawler-discovered param URLs to SQLi-test in pipeline
-    )
+    deep_crawl_sqli_limit: int = 120
 
     # =============== PORT SCANNER (v3.10) ===============
     port_scan_enabled: bool = True
@@ -316,9 +315,7 @@ class DorkerConfig:
     )
 
     # =============== OOB SQLi (v3.11) ===============
-    oob_sqli_enabled: bool = (
-        True  # Uses interact.sh for DNS exfil (no callback host needed)
-    )
+    oob_sqli_enabled: bool = True
     oob_callback_host: str = ""  # Public IP/domain for HTTP callback server
     oob_callback_port: int = 0  # 0 = ephemeral random port
     oob_callback_timeout: float = 15.0  # Seconds to wait for callback
@@ -410,27 +407,29 @@ class DorkerConfig:
 
     # =============== CONCURRENT PROCESSING ===============
     concurrent_url_limit: int = 160  # Max URLs processed in parallel
+    dork_batch_size: int = 5  # Dorks searched in parallel per batch
+    flaresolverr_fallback: bool = True  # Use FlareSolverr when aiohttp gets few pages
 
     # =============== CIRCUIT BREAKER ===============
     circuit_breaker_threshold: int = 3  # Failures before blocking domain
     circuit_breaker_timeout: int = 1800  # 30 minutes block
 
     # =============== EXTENDED VULNERABILITY SCANNERS (v3.17) ===============
-    xss_enabled: bool = True  # XSS scanner (reflected/DOM/blind)
-    ssti_enabled: bool = True  # Server-Side Template Injection
-    nosql_enabled: bool = True  # NoSQL injection (MongoDB/CouchDB/Redis)
-    lfi_enabled: bool = True  # Local File Inclusion / Path Traversal
-    ssrf_enabled: bool = True  # Server-Side Request Forgery
-    cors_enabled: bool = True  # CORS misconfiguration
-    redirect_enabled: bool = True  # Open Redirect
-    crlf_enabled: bool = True  # CRLF Injection / HTTP Response Splitting
+    xss_enabled: bool = True
+    ssti_enabled: bool = True
+    nosql_enabled: bool = True
+    lfi_enabled: bool = True
+    ssrf_enabled: bool = True
+    cors_enabled: bool = True
+    redirect_enabled: bool = True
+    crlf_enabled: bool = True
 
     # =============== AUTO DUMPER (v3.18) ===============
     auto_dump_enabled: bool = True  # Unified dump orchestrator
     auto_dump_deeper_tables: bool = (
         True  # Re-dump when interesting tables found in schema
     )
-    auto_dump_nosql: bool = True  # NoSQL blind extraction after NoSQL injection
+    auto_dump_nosql: bool = True
     auto_dump_combo_gen: bool = True  # Generate user:pass / email:pass combos
     auto_dump_send_files: bool = True  # Upload dump files as Telegram documents
     auto_dump_validate_keys: bool = True  # Live-validate keys found in dumps
@@ -694,3 +693,28 @@ class DorkerConfig:
             "cloud",
         ]
     )
+
+    # =============== URL PATH FILTERING ===============
+    # Skip URLs whose path contains clearly non-card content patterns
+    skip_url_path_patterns: List[str] = field(default_factory=list)
+
+    # =============== FAST PRE-CHECK ===============
+    # When enabled, does a 2s HEAD request before entering the full pipeline.
+    # Sites that don't respond in 2s are skipped immediately.
+    fast_precheck: bool = False
+
+    # =============== SKIP CRAWL IF URL HAS PARAMS ===============
+    # When True, skip deep crawl for URLs that already have query parameters.
+    # These URLs can go straight to SQLi testing, saving 3-5s per URL.
+    skip_crawl_if_has_params: bool = False
+
+    # =============== CARDS-ONLY REPORTING ===============
+    # When True, only report findings with actual card-relevant data:
+    # gateway keys, B3 cookies, gateway cookies, ecommerce, dumps with cards.
+    # Bare crawl completions and generic cookies are NOT reported.
+    cards_only_reporting: bool = False
+
+    # =============== MULTI-PROXY ===============
+    # List of proxy strings (host:port:user:pass) to load in addition to proxy_url.
+    # When set, all proxies are loaded and rotated via round_robin.
+    proxy_urls: List[str] = field(default_factory=list)

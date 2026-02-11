@@ -1,0 +1,871 @@
+# === HIGH-YIELD SQLi DORKS — target sites likely to store card/payment data ===
+# These find actual injectable URLs at e-comm/payment/store sites, not "credit card articles"
+
+# ── Classic product/shop injectable params ──
+inurl:"product.php?id="
+inurl:"products.php?id="
+inurl:"product_detail.php?id="
+inurl:"product-detail.php?id="
+inurl:"productdetail.php?id="
+inurl:"item.php?id="
+inurl:"item_detail.php?id="
+inurl:"shop.php?id="
+inurl:"shop_detail.php?id="
+inurl:"store.php?id="
+inurl:"buy.php?id="
+inurl:"catalog.php?id="
+inurl:"category.php?id="
+inurl:"cat.php?id="
+
+# ── Order/cart/checkout pages ──
+inurl:"order.php?id="
+inurl:"orders.php?id="
+inurl:"order_detail.php?id="
+inurl:"cart.php?id="
+inurl:"checkout.php?id="
+inurl:"invoice.php?id="
+inurl:"receipt.php?id="
+inurl:"payment.php?id="
+inurl:"billing.php?id="
+inurl:"transaction.php?id="
+
+# ── Customer/account pages with params ──
+inurl:"customer.php?id="
+inurl:"account.php?id="
+inurl:"profile.php?id="
+inurl:"user.php?id="
+inurl:"member.php?id="
+inurl:"members.php?id="
+inurl:"myaccount.php?id="
+
+# ── Common vulnerable page types ──
+inurl:"view.php?id="
+inurl:"detail.php?id="
+inurl:"details.php?id="
+inurl:"page.php?id="
+inurl:"show.php?id="
+inurl:"read.php?id="
+inurl:"info.php?id="
+inurl:"index.php?id="
+inurl:"gallery.php?id="
+inurl:"news.php?id="
+inurl:"article.php?id="
+
+# ── ASP injectable params ──
+inurl:"product.asp?id="
+inurl:"products.asp?id="
+inurl:"item.asp?id="
+inurl:"store.asp?id="
+inurl:"order.asp?id="
+inurl:"shop.asp?id="
+inurl:"detail.asp?id="
+inurl:"details.asp?id="
+inurl:"view.asp?id="
+inurl:"category.asp?id="
+inurl:"catalog.asp?id="
+inurl:"customer.asp?id="
+inurl:"invoice.asp?id="
+
+# ── ASPX injectable ──
+inurl:"product.aspx?id="
+inurl:"products.aspx?id="
+inurl:"item.aspx?id="
+inurl:"order.aspx?id="
+inurl:"detail.aspx?id="
+inurl:"view.aspx?id="
+inurl:"category.aspx?id="
+inurl:"account.aspx?id="
+inurl:"invoice.aspx?id="
+
+# ── JSP injectable ──
+inurl:"product.jsp?id="
+inurl:"item.jsp?id="
+inurl:"order.jsp?id="
+inurl:"view.jsp?id="
+inurl:"detail.jsp?id="
+
+# ── CFM injectable ──
+inurl:"product.cfm?id="
+inurl:"item.cfm?id="
+inurl:"order.cfm?id="
+
+# ── Numeric ID patterns across extensions ──
+inurl:".php?pid="
+inurl:".php?prodid="
+inurl:".php?prod_id="
+inurl:".php?product_id="
+inurl:".php?item_id="
+inurl:".php?itemid="
+inurl:".php?cat_id="
+inurl:".php?catid="
+inurl:".php?category_id="
+inurl:".php?cid="
+inurl:".php?oid="
+inurl:".php?order_id="
+inurl:".php?nid="
+inurl:".php?sid="
+inurl:".php?uid="
+inurl:".php?tid="
+inurl:".php?page_id="
+inurl:".php?article_id="
+inurl:".php?news_id="
+inurl:".php?record_id="
+inurl:".php?report_id="
+
+# ── Store/shop domain + injectable URL combos ──
+inurl:".php?id=" intitle:"shop"
+inurl:".php?id=" intitle:"store"
+inurl:".php?id=" intitle:"buy"
+inurl:".php?id=" intitle:"cart"
+inurl:".php?id=" intitle:"order"
+inurl:".php?id=" intitle:"checkout"
+inurl:".php?id=" intitle:"payment"
+inurl:".php?id=" intitle:"invoice"
+inurl:".php?id=" intitle:"account"
+inurl:".php?id=" intitle:"registration"
+
+# ── E-commerce keywords + injectable URLs ──
+inurl:".php?id=" "add to cart"
+inurl:".php?id=" "shopping cart"
+inurl:".php?id=" "checkout"
+inurl:".php?id=" "credit card"
+inurl:".php?id=" "billing address"
+inurl:".php?id=" "shipping address"
+inurl:".php?id=" "payment method"
+inurl:".php?id=" "order total"
+inurl:".php?id=" "proceed to checkout"
+inurl:".php?id=" "my orders"
+inurl:".php?id=" "track order"
+inurl:".php?id=" "order history"
+inurl:".php?id=" "wish list"
+inurl:".php?id=" "my account"
+inurl:".php?id=" "customer login"
+inurl:".php?id=" "register"
+inurl:".php?id=" "sign up"
+
+# ── Specific vulnerable CMS/cart platforms ──
+inurl:"oscommerce" inurl:".php?products_id="
+inurl:"zencart" inurl:".php?products_id="
+inurl:"opencart" inurl:"product_id="
+inurl:"magento" inurl:".php?id="
+inurl:"prestashop" inurl:".php?id_product="
+inurl:"woocommerce" inurl:"?add-to-cart="
+inurl:"virtuemart" inurl:".php?virtuemart_product_id="
+inurl:"cubecart" inurl:".php?_a=product&product_id="
+inurl:"xcart" inurl:".php?productid="
+inurl:"cscart" inurl:".php?product_id="
+
+# ── Login/auth pages (often injectable, may have user tables with cards) ──
+inurl:"login.php" inurl:"?"
+inurl:"admin/login.php"
+inurl:"signin.php" inurl:"?"
+inurl:"authenticate.php" inurl:"?"
+inurl:"auth.php" inurl:"?"
+
+# ── Search pages (often injectable) at store sites ──
+inurl:".php?search=" "buy"
+inurl:".php?q=" "shop"
+inurl:".php?query=" "product"
+inurl:".php?keyword=" "store"
+inurl:".php?s=" "cart"
+
+# ── Numeric ID in URL path (REST-style but sometimes injectable) ──
+inurl:"/product/" inurl:".php"
+inurl:"/order/" inurl:".php"
+inurl:"/customer/" inurl:".php"
+
+# ── Country-specific e-comm (less protected, more likely vulnerable) ──
+site:.br inurl:".php?id=" "comprar"
+site:.br inurl:".php?id=" "carrinho"
+site:.br inurl:".php?id=" "produto"
+site:.mx inurl:".php?id=" "comprar"
+site:.co inurl:".php?id=" "tienda"
+site:.ar inurl:".php?id=" "producto"
+site:.pe inurl:".php?id=" "comprar"
+site:.cl inurl:".php?id=" "tienda"
+site:.in inurl:".php?id=" "buy"
+site:.pk inurl:".php?id=" "order"
+site:.bd inurl:".php?id=" "shop"
+site:.ng inurl:".php?id=" "store"
+site:.ke inurl:".php?id=" "shop"
+site:.za inurl:".php?id=" "buy"
+site:.ph inurl:".php?id=" "buy"
+site:.id inurl:".php?id=" "beli"
+site:.vn inurl:".php?id=" "mua"
+site:.th inurl:".php?id=" "buy"
+site:.my inurl:".php?id=" "beli"
+site:.lk inurl:".php?id=" "shop"
+site:.np inurl:".php?id=" "shop"
+site:.mm inurl:".php?id=" "shop"
+site:.gh inurl:".php?id=" "shop"
+site:.tz inurl:".php?id=" "buy"
+site:.ug inurl:".php?id=" "buy"
+site:.cm inurl:".php?id=" "buy"
+site:.dz inurl:".php?id=" "buy"
+site:.eg inurl:".php?id=" "shop"
+site:.ma inurl:".php?id=" "shop"
+site:.tn inurl:".php?id=" "shop"
+
+# ── Regional TLDs + injectable ──
+site:.com.br inurl:".php?id="
+site:.com.mx inurl:".php?id="
+site:.com.co inurl:".php?id="
+site:.com.ar inurl:".php?id="
+site:.com.pe inurl:".php?id="
+site:.co.in inurl:".php?id="
+site:.com.pk inurl:".php?id="
+site:.com.bd inurl:".php?id="
+site:.com.ng inurl:".php?id="
+site:.co.ke inurl:".php?id="
+site:.co.za inurl:".php?id="
+site:.com.ph inurl:".php?id="
+site:.co.id inurl:".php?id="
+site:.com.vn inurl:".php?id="
+site:.co.th inurl:".php?id="
+site:.com.my inurl:".php?id="
+site:.com.eg inurl:".php?id="
+site:.com.gh inurl:".php?id="
+site:.co.tz inurl:".php?id="
+site:.co.ug inurl:".php?id="
+
+# ── ASP stores (usually MSSQL backend, richer data) ──
+site:.com inurl:".asp?id=" "buy"
+site:.com inurl:".asp?id=" "order"
+site:.com inurl:".asp?id=" "product"
+site:.com inurl:".asp?id=" "store"
+site:.co.uk inurl:".asp?id=" "buy"
+site:.com.au inurl:".asp?id=" "buy"
+site:.in inurl:".asp?id=" "buy"
+
+# ── Direct SQL error dorks (already vulnerable) ──
+"You have an error in your SQL syntax" inurl:".php?id="
+"mysql_fetch_array()" inurl:".php?id="
+"mysql_num_rows()" inurl:".php?id="
+"Warning: mysql_" inurl:".php?"
+"Warning: pg_" inurl:".php?"
+"Warning: mssql_" inurl:".asp?"
+"ODBC SQL Server Driver" inurl:".asp?"
+"Unclosed quotation mark" inurl:".asp?"
+"Microsoft OLE DB Provider" inurl:".asp?"
+"JET Database Engine" inurl:".asp?"
+"[ODBC" inurl:".php?"
+"SQL syntax error" inurl:".php?id="
+"supplied argument is not a valid MySQL" inurl:".php?"
+"Oracle error" inurl:".jsp?"
+"PLS-" inurl:".jsp?"
+"ORA-" inurl:".jsp?"
+"PostgreSQL query failed" inurl:".php?"
+"unterminated quoted string" inurl:".php?"
+
+# ── phpMyAdmin / admin panels exposed (goldmines) ──
+intitle:"phpMyAdmin" "Welcome to phpMyAdmin"
+inurl:"phpmyadmin/index.php"
+inurl:"adminer.php"
+intitle:"Adminer" "Login"
+inurl:"server-status" "Apache Server Status"
+inurl:"mysql-admin"
+
+# ── Database credentials exposed ──
+inurl:"config.php.bak"
+inurl:"config.inc.php"
+inurl:"db.php.bak"
+inurl:".sql" "INSERT INTO" "credit_card"
+inurl:".sql" "INSERT INTO" "payment"
+inurl:".sql" "INSERT INTO" "orders"
+inurl:".sql" "INSERT INTO" "customers"
+inurl:".sql" "INSERT INTO" "users" "password"
+ext:sql "CREATE TABLE" "card_number"
+ext:sql "CREATE TABLE" "cc_number"
+ext:sql "CREATE TABLE" "cvv"
+ext:sql inurl:"dump" "INSERT INTO"
+ext:sql inurl:"backup" "INSERT INTO"
+
+# ── Backup files with credentials ──
+inurl:"backup.sql"
+inurl:"database.sql"
+inurl:"db_backup.sql"
+inurl:"dump.sql"
+inurl:"site.sql"
+inurl:".sql.gz"
+inurl:".sql.bak"
+ext:env "DB_PASSWORD"
+ext:env "MYSQL_PASSWORD"
+ext:env "DATABASE_URL"
+inurl:".env" "DB_PASSWORD"
+inurl:".env" "STRIPE_SECRET"
+inurl:"wp-config.php.bak"
+inurl:"configuration.php.bak"
+inurl:"settings.php.bak"
+
+# ── Card data in file directories ──
+intitle:"index of" "cards.csv"
+intitle:"index of" "payments.csv"
+intitle:"index of" "orders.csv"
+intitle:"index of" "customers.csv"
+intitle:"index of" ".sql"
+intitle:"index of" "dump.sql"
+intitle:"index of" "backup.sql"
+intitle:"index of" "database.sql"
+
+# ── Pastebin/paste sites with card data ──
+site:pastebin.com "4" "cvv" "exp"
+site:paste.ee "card" "number"
+site:ghostbin.com "cc" "cvv"
+site:rentry.co "cc" "exp"
+
+# ══════════════════════════════════════════════════════════════
+# EXPANDED — More injectable endpoints (v2)
+# ══════════════════════════════════════════════════════════════
+
+# ── More PHP pages with id params ──
+inurl:"news.php?id="
+inurl:"article.php?id="
+inurl:"event.php?id="
+inurl:"listing.php?id="
+inurl:"review.php?id="
+inurl:"brand.php?id="
+inurl:"vendor.php?id="
+inurl:"supplier.php?id="
+inurl:"offer.php?id="
+inurl:"deal.php?id="
+inurl:"promo.php?id="
+inurl:"coupon.php?id="
+inurl:"download.php?id="
+inurl:"file.php?id="
+inurl:"document.php?id="
+inurl:"report.php?id="
+inurl:"faq.php?id="
+inurl:"content.php?id="
+inurl:"module.php?id="
+inurl:"action.php?id="
+inurl:"service.php?id="
+inurl:"booking.php?id="
+inurl:"reserve.php?id="
+inurl:"ticket.php?id="
+inurl:"appointment.php?id="
+inurl:"schedule.php?id="
+inurl:"gallery.php?pid="
+inurl:"photo.php?id="
+inurl:"image.php?id="
+inurl:"album.php?id="
+inurl:"portfolio.php?id="
+inurl:"project.php?id="
+inurl:"job.php?id="
+inurl:"career.php?id="
+inurl:"blog.php?id="
+inurl:"post.php?id="
+inurl:"forum.php?id="
+inurl:"topic.php?id="
+inurl:"thread.php?id="
+inurl:"comment.php?id="
+inurl:"message.php?id="
+
+# ── Different param names ──
+inurl:".php?pid="
+inurl:".php?cid="
+inurl:".php?catid="
+inurl:".php?cat_id="
+inurl:".php?product_id="
+inurl:".php?item_id="
+inurl:".php?article_id="
+inurl:".php?page_id="
+inurl:".php?nid="
+inurl:".php?newsid="
+inurl:".php?news_id="
+inurl:".php?sid="
+inurl:".php?tid="
+inurl:".php?uid="
+inurl:".php?oid="
+inurl:".php?order_id="
+inurl:".php?rec="
+inurl:".php?num="
+inurl:".php?no="
+inurl:".php?idx="
+inurl:".php?ref="
+inurl:".php?lang=" "shop"
+inurl:".php?do=view&id="
+inurl:".php?action=view&id="
+inurl:".php?cmd=item&id="
+inurl:".php?op=view&id="
+inurl:".php?section=" "store"
+inurl:".php?mod=" "products"
+
+# ── ASP / ASPX injectable ──
+inurl:".asp?id="
+inurl:".asp?pid="
+inurl:".asp?catid="
+inurl:".asp?productid="
+inurl:".aspx?id="
+inurl:".aspx?pid="
+inurl:".aspx?productid="
+inurl:".aspx?itemid="
+inurl:".aspx?orderid="
+inurl:"product.asp?id="
+inurl:"products.asp?id="
+inurl:"item.asp?id="
+inurl:"detail.asp?id="
+inurl:"shop.asp?id="
+inurl:"catalog.asp?id="
+inurl:"view.asp?id="
+inurl:"show.asp?id="
+inurl:"product.aspx?id="
+inurl:"products.aspx?id="
+inurl:"item.aspx?id="
+inurl:"detail.aspx?id="
+inurl:"shop.aspx?id="
+inurl:"catalog.aspx?id="
+
+# ── JSP injectable ──
+inurl:".jsp?id="
+inurl:".jsp?pid="
+inurl:".jsp?catid="
+inurl:"product.jsp?id="
+inurl:"item.jsp?id="
+inurl:"view.jsp?id="
+inurl:"detail.jsp?id="
+inurl:"show.jsp?id="
+inurl:"catalog.jsp?id="
+
+# ── CFM injectable ──
+inurl:".cfm?id="
+inurl:".cfm?pid="
+inurl:"product.cfm?id="
+inurl:"item.cfm?id="
+inurl:"view.cfm?id="
+inurl:"detail.cfm?id="
+inurl:"shop.cfm?id="
+
+# ── CGI injectable ──
+inurl:".cgi?id="
+inurl:"product.cgi?id="
+inurl:"view.cgi?id="
+inurl:"detail.cgi?id="
+
+# ══════════════════════════════════════════════════════════════
+# KNOWN VULNERABLE CMS / E-COMMERCE PLATFORMS
+# ══════════════════════════════════════════════════════════════
+
+# ── osCommerce (notoriously vulnerable) ──
+inurl:"product_info.php?products_id="
+inurl:"product_info.php?cPath="
+inurl:"products_new.php?cPath="
+inurl:"specials.php?products_id="
+inurl:"reviews.php?products_id="
+inurl:"popup_image.php?pID="
+inurl:"product_reviews.php?products_id="
+inurl:"product_reviews_write.php?products_id="
+"Powered by osCommerce" inurl:".php?products_id="
+"Powered by osCommerce" inurl:".php?cPath="
+
+# ── Zen Cart ──
+inurl:"index.php?main_page=product_info&products_id="
+inurl:"index.php?main_page=product_reviews&products_id="
+"Powered by Zen Cart" inurl:"products_id="
+"Powered by Zen Cart" inurl:"cPath="
+
+# ── CubeCart ──
+inurl:"index.php?_a=viewProd&productId="
+inurl:"index.php?_a=category&catId="
+"Powered by CubeCart" inurl:".php?productId="
+"Powered by CubeCart" inurl:".php?catId="
+
+# ── VirtueMart ──
+inurl:"index.php?option=com_virtuemart&page=shop.product_details&product_id="
+inurl:"index.php?option=com_virtuemart&Itemid="
+"VirtueMart" inurl:"product_id=" inurl:".php"
+
+# ── PrestaShop (older versions) ──
+inurl:"index.php?id_product=" "PrestaShop"
+inurl:"index.php?id_category=" "PrestaShop"
+inurl:"product.php?id_product="
+inurl:"category.php?id_category="
+
+# ── OpenCart (older versions) ──
+inurl:"index.php?route=product/product&product_id="
+inurl:"index.php?route=product/category&path="
+"Powered by OpenCart" inurl:"product_id="
+
+# ── Magento 1.x (end of life, often unpatched) ──
+inurl:"/catalog/product/view/id/"
+inurl:"/catalogsearch/result/?q="
+inurl:"index.php/catalog/product/view/id/"
+"Magento" inurl:"/catalog/product/view/id/"
+
+# ── WHMCS (stores payment info) ──
+inurl:"cart.php?a=confproduct&i=" "WHMCS"
+inurl:"clientarea.php?action=productdetails&id="
+inurl:"cart.php?a=add&pid="
+
+# ── Joomla e-commerce ──
+inurl:"index.php?option=com_hikashop&ctrl=product&task=show&cid="
+inurl:"index.php?option=com_phocacart&view=item&id="
+inurl:"index.php?option=com_j2store&view=products&task=view&id="
+
+# ── WordPress WooCommerce (when using raw PHP fallbacks) ──
+inurl:"/?add-to-cart=" inurl:".php"
+inurl:"/wp-content/" inurl:".php?id="
+inurl:"/wp-admin/admin-ajax.php?action=" "woocommerce"
+
+# ── Old shopping cart scripts ──
+inurl:"shopping_cart.php?id="
+inurl:"shoppingcart.php?id="
+inurl:"addtocart.php?id="
+inurl:"add_to_cart.php?id="
+inurl:"add_cart.php?idproduct="
+inurl:"viewcart.php?id="
+inurl:"basket.php?id="
+inurl:"wishlist.php?id="
+
+# ══════════════════════════════════════════════════════════════
+# COUNTRY-SPECIFIC — DEVELOPING WORLD (weaker WAF/security)
+# ══════════════════════════════════════════════════════════════
+
+# ── Brazil (.br) ──
+site:.com.br inurl:".php?id="
+site:.com.br inurl:"produto.php?id="
+site:.com.br inurl:"detalhes.php?id="
+site:.com.br inurl:"loja.php?id="
+site:.com.br inurl:".php?cod="
+site:.com.br inurl:"comprar.php?id="
+site:.com.br inurl:"visualizar.php?id="
+site:.com.br inurl:"item.php?id="
+
+# ── Mexico (.mx) ──
+site:.com.mx inurl:".php?id="
+site:.com.mx inurl:"producto.php?id="
+site:.com.mx inurl:"detalle.php?id="
+site:.com.mx inurl:"tienda.php?id="
+site:.gob.mx inurl:".php?id="
+
+# ── Colombia (.co) ──
+site:.com.co inurl:".php?id="
+site:.com.co inurl:"producto.php?id="
+
+# ── Argentina (.ar) ──
+site:.com.ar inurl:".php?id="
+site:.com.ar inurl:"producto.php?id="
+
+# ── Peru (.pe) ──
+site:.com.pe inurl:".php?id="
+site:.gob.pe inurl:".php?id="
+
+# ── Chile (.cl) ──
+site:.cl inurl:".php?id="
+site:.cl inurl:"producto.php?id="
+
+# ── Ecuador (.ec) ──
+site:.com.ec inurl:".php?id="
+
+# ── Venezuela (.ve) ──
+site:.com.ve inurl:".php?id="
+
+# ── India (.in) ──
+site:.co.in inurl:".php?id="
+site:.co.in inurl:"product.php?id="
+site:.co.in inurl:"shop.php?id="
+site:.co.in inurl:"item.php?id="
+site:.in inurl:".php?id=" "store"
+site:.in inurl:".php?id=" "shop"
+site:.in inurl:"view.php?id="
+
+# ── Pakistan (.pk) ──
+site:.com.pk inurl:".php?id="
+site:.com.pk inurl:"product.php?id="
+site:.pk inurl:".php?id=" "shop"
+site:.pk inurl:".php?id=" "order"
+
+# ── Bangladesh (.bd) ──
+site:.com.bd inurl:".php?id="
+site:.com.bd inurl:"product.php?id="
+
+# ── Sri Lanka (.lk) ──
+site:.lk inurl:".php?id="
+
+# ── Nepal (.np) ──
+site:.com.np inurl:".php?id="
+
+# ── Nigeria (.ng) ──
+site:.com.ng inurl:".php?id="
+site:.ng inurl:".php?id=" "store"
+site:.ng inurl:".php?id=" "shop"
+site:.ng inurl:"product.php?id="
+
+# ── Kenya (.ke) ──
+site:.co.ke inurl:".php?id="
+site:.co.ke inurl:"product.php?id="
+site:.co.ke inurl:"shop.php?id="
+
+# ── Ghana (.gh) ──
+site:.com.gh inurl:".php?id="
+
+# ── Uganda (.ug) ──
+site:.co.ug inurl:".php?id="
+
+# ── Tanzania (.tz) ──
+site:.co.tz inurl:".php?id="
+
+# ── Ethiopia (.et) ──
+site:.com.et inurl:".php?id="
+
+# ── South Africa (.za) ──
+site:.co.za inurl:".php?id="
+site:.co.za inurl:"product.php?id="
+site:.co.za inurl:"shop.php?id="
+site:.co.za inurl:".php?id=" "checkout"
+
+# ── Egypt (.eg) ──
+site:.com.eg inurl:".php?id="
+site:.eg inurl:"product.php?id="
+
+# ── Morocco (.ma) ──
+site:.ma inurl:".php?id="
+
+# ── Tunisia (.tn) ──
+site:.com.tn inurl:".php?id="
+
+# ── Philippines (.ph) ──
+site:.com.ph inurl:".php?id="
+site:.com.ph inurl:"product.php?id="
+site:.com.ph inurl:"shop.php?id="
+site:.ph inurl:".php?id=" "buy"
+
+# ── Indonesia (.id) ──
+site:.co.id inurl:".php?id="
+site:.co.id inurl:"product.php?id="
+site:.id inurl:".php?id=" "toko"
+site:.id inurl:".php?id=" "belanja"
+
+# ── Vietnam (.vn) ──
+site:.com.vn inurl:".php?id="
+site:.com.vn inurl:"product.php?id="
+site:.vn inurl:".php?id=" "mua"
+site:.vn inurl:"san-pham.php?id="
+
+# ── Thailand (.th) ──
+site:.co.th inurl:".php?id="
+site:.co.th inurl:"product.php?id="
+site:.th inurl:".php?id=" "buy"
+site:.th inurl:".php?id=" "shop"
+
+# ── Malaysia (.my) ──
+site:.com.my inurl:".php?id="
+site:.com.my inurl:"product.php?id="
+
+# ── Myanmar (.mm) ──
+site:.com.mm inurl:".php?id="
+
+# ── Cambodia (.kh) ──
+site:.com.kh inurl:".php?id="
+
+# ── Laos (.la) ──
+site:.la inurl:".php?id="
+
+# ── Turkey (.tr) ──
+site:.com.tr inurl:".php?id="
+site:.com.tr inurl:"urun.php?id="
+site:.com.tr inurl:"product.php?id="
+site:.com.tr inurl:"detay.php?id="
+
+# ── Iran (.ir) ──
+site:.ir inurl:".php?id="
+site:.ir inurl:"product.php?id="
+
+# ── Iraq (.iq) ──
+site:.iq inurl:".php?id="
+
+# ── Lebanon (.lb) ──
+site:.com.lb inurl:".php?id="
+
+# ── Jordan (.jo) ──
+site:.jo inurl:".php?id="
+
+# ── Saudi Arabia (.sa) ──
+site:.com.sa inurl:".php?id="
+site:.sa inurl:"product.php?id="
+
+# ── UAE (.ae) ──
+site:.ae inurl:".php?id="
+site:.ae inurl:"product.php?id="
+
+# ── Russia (.ru) ──
+site:.ru inurl:".php?id=" "магазин"
+site:.ru inurl:"product.php?id="
+site:.ru inurl:"tovar.php?id="
+site:.ru inurl:"katalog.php?id="
+
+# ── Ukraine (.ua) ──
+site:.com.ua inurl:".php?id="
+site:.ua inurl:"product.php?id="
+
+# ── Romania (.ro) ──
+site:.ro inurl:".php?id="
+site:.ro inurl:"produs.php?id="
+
+# ── Bulgaria (.bg) ──
+site:.bg inurl:".php?id="
+
+# ── Serbia (.rs) ──
+site:.rs inurl:".php?id="
+
+# ── Croatia (.hr) ──
+site:.hr inurl:".php?id="
+
+# ── Greece (.gr) ──
+site:.gr inurl:".php?id="
+site:.gr inurl:"product.php?id="
+
+# ── Italy (.it) ──
+site:.it inurl:"prodotto.php?id="
+site:.it inurl:"articolo.php?id="
+
+# ── Spain (.es) ──
+site:.es inurl:"producto.php?id="
+site:.es inurl:"detalle.php?id="
+site:.es inurl:"tienda.php?id="
+
+# ── Portugal (.pt) ──
+site:.pt inurl:"produto.php?id="
+site:.pt inurl:".php?id="
+
+# ── France (.fr) ──
+site:.fr inurl:"produit.php?id="
+site:.fr inurl:".php?id=" "boutique"
+
+# ── Germany (.de) ──
+site:.de inurl:"produkt.php?id="
+site:.de inurl:"artikel.php?id="
+
+# ── Poland (.pl) ──
+site:.pl inurl:".php?id=" "sklep"
+site:.pl inurl:"produkt.php?id="
+
+# ── Czech Republic (.cz) ──
+site:.cz inurl:".php?id="
+site:.cz inurl:"produkt.php?id="
+
+# ── Hungary (.hu) ──
+site:.hu inurl:".php?id="
+
+# ── Slovakia (.sk) ──
+site:.sk inurl:".php?id="
+
+# ══════════════════════════════════════════════════════════════
+# SQL ERROR MESSAGE DORKS — find already-erroring sites
+# ══════════════════════════════════════════════════════════════
+"You have an error in your SQL syntax" inurl:".php?id="
+"mysql_fetch_array()" inurl:".php?id="
+"mysql_fetch_assoc()" inurl:".php?id="
+"mysql_num_rows()" inurl:".php?id="
+"mysql_fetch_row()" inurl:".php?id="
+"Warning: mysql_" inurl:".php?"
+"Warning: mysqli_" inurl:".php?"
+"Unclosed quotation mark" inurl:".asp?"
+"ODBC SQL Server Driver" inurl:".asp?"
+"Microsoft OLE DB Provider" inurl:".asp?"
+"JET Database Engine" inurl:".asp?"
+"pg_query()" inurl:".php?"
+"pg_exec()" inurl:".php?"
+"supplied argument is not a valid MySQL" inurl:".php?"
+"ORA-01756" inurl:".php?"
+"ORA-00933" inurl:".php?"
+"Syntax error in query expression" inurl:".asp?"
+
+# ══════════════════════════════════════════════════════════════
+# E-COMMERCE + INJECTABLE URL COMBOS
+# ══════════════════════════════════════════════════════════════
+inurl:".php?id=" "add to cart"
+inurl:".php?id=" "buy now"
+inurl:".php?id=" "checkout"
+inurl:".php?id=" "shopping cart"
+inurl:".php?id=" "order now"
+inurl:".php?id=" "purchase"
+inurl:".php?id=" "payment"
+inurl:".php?id=" "visa" "mastercard"
+inurl:".php?id=" "credit card"
+inurl:".php?id=" "secure payment"
+inurl:".php?id=" "shipping"
+inurl:".php?id=" "delivery"
+inurl:".php?id=" "quantity"
+inurl:".php?id=" "price" "USD"
+inurl:".php?id=" "price" "EUR"
+inurl:".php?id=" "price" "GBP"
+inurl:".php?id=" intext:"add to basket"
+inurl:".php?id=" intext:"my cart"
+inurl:".php?id=" intext:"proceed to checkout"
+inurl:".asp?id=" "add to cart"
+inurl:".asp?id=" "buy now"
+inurl:".asp?id=" "checkout"
+inurl:".aspx?id=" "add to cart"
+inurl:".aspx?id=" "buy now"
+
+# ══════════════════════════════════════════════════════════════
+# ADMIN PANELS / PHPINFO / DEBUG EXPOSURE
+# ══════════════════════════════════════════════════════════════
+inurl:"admin.php?id="
+inurl:"admin/index.php?id="
+inurl:"administrator.php?id="
+inurl:"panel.php?id="
+inurl:"manage.php?id="
+inurl:"cms.php?id="
+inurl:"backend.php?id="
+
+# ── phpMyAdmin / database tooling exposed ──
+inurl:"phpmyadmin" intitle:"phpMyAdmin"
+inurl:"adminer.php" intitle:"Adminer"
+inurl:"dbadmin" intitle:"Database"
+intitle:"phpMyAdmin" "Welcome to phpMyAdmin"
+
+# ══════════════════════════════════════════════════════════════
+# NUMERIC PARAM VARIATIONS (common injection points)
+# ══════════════════════════════════════════════════════════════
+inurl:".php?id=1"
+inurl:".php?id=2"
+inurl:".php?id=3"
+inurl:".php?id=5"
+inurl:".php?id=10"
+inurl:".php?id=100"
+inurl:".php?cat=1"
+inurl:".php?cat=2"
+inurl:".php?category=1"
+inurl:".php?page=1"
+inurl:".asp?id=1"
+inurl:".asp?id=2"
+inurl:".aspx?id=1"
+inurl:".jsp?id=1"
+inurl:".cfm?id=1"
+
+# ══════════════════════════════════════════════════════════════
+# API / REST endpoints with injectable params
+# ══════════════════════════════════════════════════════════════
+inurl:"/api/product?id="
+inurl:"/api/products?id="
+inurl:"/api/order?id="
+inurl:"/api/user?id="
+inurl:"/api/item?id="
+inurl:"/api/v1/product?id="
+inurl:"/api/v1/order?id="
+inurl:"/api/v2/product?id="
+inurl:"rest/products?id="
+
+# ══════════════════════════════════════════════════════════════
+# SEARCH PAGES (often injectable)
+# ══════════════════════════════════════════════════════════════
+inurl:"search.php?q=" "store"
+inurl:"search.php?keyword=" "shop"
+inurl:"search.php?search=" "product"
+inurl:"buscar.php?q="
+inurl:"recherche.php?q="
+inurl:"suche.php?q="
+inurl:"cerca.php?q="
+inurl:"pesquisa.php?q="
+
+# ══════════════════════════════════════════════════════════════
+# DOUBLE-LAYERED — proven SQL error + e-comm patterns
+# ══════════════════════════════════════════════════════════════
+"You have an error in your SQL syntax" "add to cart"
+"mysql_fetch_array()" "shopping cart"
+"Warning: mysql_" "checkout"
+"Unclosed quotation mark" "buy now"
+"ODBC SQL Server Driver" "add to cart"
+"supplied argument is not a valid MySQL" "product"
+"mysql_num_rows()" "order"

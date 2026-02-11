@@ -1804,36 +1804,42 @@ class SQLiScanner:
                     error_result = await self.test_error_based(url, param_name, dbms, session)
                     if error_result:
                         results.append(error_result)
-                        continue
+                        break  # Got confirmed SQLi — save time for dumper
                     
                     # Union-based test
                     union_result = await self.test_union_based(url, param_name, dbms, session)
                     if union_result:
                         results.append(union_result)
-                        continue
+                        break  # Got confirmed SQLi — save time for dumper
                     
                     # Boolean-based test
                     boolean_result = await self.test_boolean_based(url, param_name, session)
                     if boolean_result:
                         results.append(boolean_result)
-                        continue
+                        break  # Got confirmed SQLi — save time for dumper
                     
                     # Time-based test (last resort)
                     time_result = await self.test_time_based(url, param_name, session)
                     if time_result:
                         results.append(time_result)
-                        continue
+                        break  # Got confirmed SQLi — save time for dumper
                     
                     # Stacked query test (MSSQL/PostgreSQL)
                     stacked_result = await self.test_stacked_queries(url, param_name, session)
                     if stacked_result:
                         results.append(stacked_result)
-                        continue
+                        break  # Got confirmed SQLi — save time for dumper
                     
                     # ORDER BY clause injection (for sort/order params)
                     orderby_result = await self.test_order_by_injection(url, param_name, session)
                     if orderby_result:
                         results.append(orderby_result)
+            
+            # If URL param injection already confirmed, skip slower injection points
+            # — the dumper needs those seconds more than we need cookie/header SQLi
+            if results:
+                logger.info(f"SQLi confirmed via URL params — skipping cookie/header/POST/JSON injection for {url[:60]}")
+                return results
             
             # ═══ 2. Cookie Injection ═══
             cookie_results = await self.test_cookie_injection(url, session, waf_name)

