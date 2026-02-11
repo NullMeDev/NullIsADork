@@ -586,7 +586,7 @@ class MadyDorkerPipeline:
         self._url_semaphore = asyncio.Semaphore(self.config.concurrent_url_limit)
 
         # Shared HTTP session for URL processing (high-concurrency connection pool)
-        self._shared_session: Optional[aiohttp.ClientSession] = None
+        self._shared_session = None
 
         # Soft-404 fingerprints per domain (M6: capped at 10k domains)
         self._soft404_cache: Dict[str, str] = {}
@@ -1274,7 +1274,7 @@ class MadyDorkerPipeline:
             if any(kw.lower() in text.lower() for kw in keywords):
                 await self._send_to_report_group(text)
 
-    async def _get_shared_session(self) -> aiohttp.ClientSession:
+    async def _get_shared_session(self):
         """Get or create the shared HTTP session with high-concurrency connection pool."""
         if self._shared_session is None or self._shared_session.closed:
             import aiohttp as _aio
