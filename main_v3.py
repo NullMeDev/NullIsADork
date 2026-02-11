@@ -4831,7 +4831,7 @@ async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /scan <url> command — comprehensive deep scan. Runs as background task."""
-    if not await require_owner(update): return
+    if not await require_auth(update): return
     if not context.args:
         await update.message.reply_text("Usage: /scan <url>")
         return
@@ -6123,7 +6123,7 @@ async def _do_scan(update: Update, url: str):
 
 async def cmd_deepscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /deepscan — alias for /scan (full domain scan)."""
-    if not await require_owner(update): return
+    if not await require_auth(update): return
     await cmd_scan(update, context)
 
 
@@ -6139,7 +6139,7 @@ async def cmd_authscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Uses Playwright (JS rendering) + cookie injection to access
     authenticated dashboards, admin panels, API endpoints.
     """
-    if not await require_owner(update): return
+    if not await require_auth(update): return
     if not context.args or len(context.args) < 2:
         await update.message.reply_text(
             "<b>🔐 Authenticated Scan</b>\n\n"
