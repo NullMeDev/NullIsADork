@@ -3252,7 +3252,7 @@ class MadyDorkerPipeline:
                 _proxy_url = None
                 if self.proxy_manager:
                     try:
-                        _pi = self.proxy_manager.get_proxy()
+                        _pi = await self.proxy_manager.get_proxy()
                         if _pi:
                             _proxy_url = _pi.url
                     except Exception as e:
