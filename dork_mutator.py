@@ -215,7 +215,15 @@ class DorkMutator:
                 variants.append(f'{dork} intext:"{term}"')
 
         random.shuffle(variants)
-        return self._dedupe(variants[:max_variants])
+        # Local dedup only — don't pollute _seen_hashes so batch-level dedup still works
+        seen_local = set()
+        deduped = []
+        for v in variants[:max_variants]:
+            h = self._hash(v)
+            if h not in seen_local:
+                seen_local.add(h)
+                deduped.append(v)
+        return deduped
 
     def mutate_batch(self, dorks: List[str], variants_per_dork: int = 5,
                      max_total: int = 3000) -> List[str]:

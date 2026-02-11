@@ -668,10 +668,20 @@ TEST_CARDS = {
     "4000056655665556",  # Stripe test
     "4000000000000002",  # Stripe decline test
     "5200828282828210",  # MC test
+    "5500000000000004",  # MC test
     "4000000000003220",  # Stripe 3DS test
     "4000000000009995",  # Stripe insufficient funds test
+    "4000000000000077",  # Stripe test
+    "4000000000000093",  # Stripe test
+    "4000000000000101",  # Stripe test
+    "4012888888881881",  # Visa test
+    "5425233430109903",  # MC test
+    "2223000048410010",  # MC 2-series test
+    "6250941006528599",  # UnionPay test
     "0000000000000000",  # Null
     "1234567890123456",  # Sequential
+    "1111111111111111",  # Repeated
+    "9999999999999999",  # Repeated
 }
 
 
@@ -1106,10 +1116,11 @@ class ConfigCredentialParser:
             return creds
 
         # Also look for connection strings
+        # Use (.+) for password to handle passwords containing @ (greedy backtracks to last @)
         conn_patterns = [
-            re.compile(r"mysql://([^:]+):([^@]+)@([^/]+)/(\w+)", re.I),
-            re.compile(r"postgres://([^:]+):([^@]+)@([^/]+)/(\w+)", re.I),
-            re.compile(r"mongodb://([^:]+):([^@]+)@([^/]+)", re.I),
+            re.compile(r"mysql://([^:]+):(.+)@([^@/]+(?::\d+)?)/(\w+)", re.I),
+            re.compile(r"postgres(?:ql)?://([^:]+):(.+)@([^@/]+(?::\d+)?)/(\w+)", re.I),
+            re.compile(r"mongodb(?:\+srv)?://([^:]+):(.+)@([^@/]+(?::\d+)?)", re.I),
             re.compile(r"Server=([^;]+);.*?Database=([^;]+);.*?User[^=]*=([^;]+);.*?Password=([^;]+)", re.I),
         ]
         for pattern in conn_patterns:

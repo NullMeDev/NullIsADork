@@ -3239,8 +3239,8 @@ class MadyDorkerPipeline:
                 # Take top 100 dorks and generate mutations
                 seed_dorks = dorks[:100]
                 mutated = self.dork_mutator.mutate_batch(seed_dorks, variants_per_dork=2)
-                regional = self.dork_mutator.generate_regional_dorks(seed_dorks[:30], tier="high_value")
-                cve_dorks = self.dork_mutator.generate_cve_dorks(max_per_cve=3)
+                regional = self.dork_mutator.generate_regional_dorks(seed_dorks[:30], max_count=500)
+                cve_dorks = self.dork_mutator.generate_cve_dorks(max_count=300)
 
                 # Merge mutated + regional + CVE dorks, deduplicate
                 new_dorks = set(dorks)
