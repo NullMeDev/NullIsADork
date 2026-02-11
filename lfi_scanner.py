@@ -46,6 +46,7 @@ class LFIResult:
     confidence: float = 0.0
     injection_point: str = "url" # url, post, cookie
     severity: str = "high"
+    waf_bypassed: str = ""       # WAF name if bypassed
 
 
 # ──────────────────────────────────────────────────────────────────

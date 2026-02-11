@@ -17,6 +17,21 @@ class TelegramNotifier:
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.api_base = f"https://api.telegram.org/bot{bot_token}"
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create a reusable aiohttp session."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30)
+            )
+        return self._session
+
+    async def close(self):
+        """Close the reusable session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
     
     async def send_message(
         self,
@@ -48,16 +63,15 @@ class TelegramNotifier:
         }
         
         try:
-            timeout = aiohttp.ClientTimeout(total=30)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, json=data) as response:
-                    if response.status == 200:
-                        logger.debug("Telegram message sent successfully")
-                        return True
-                    else:
-                        error = await response.text()
-                        logger.error(f"Telegram API error: {response.status} - {error}")
-                        return False
+            session = await self._get_session()
+            async with session.post(url, json=data) as response:
+                if response.status == 200:
+                    logger.debug("Telegram message sent successfully")
+                    return True
+                else:
+                    error = await response.text()
+                    logger.error(f"Telegram API error: {response.status} - {error}")
+                    return False
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")
             return False

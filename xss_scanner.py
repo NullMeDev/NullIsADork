@@ -402,7 +402,7 @@ class XSSScanner:
             result.context = self._detect_context(body, probe)
 
             # Detect encoding
-            if f"&lt;{probe}" in body or html.escape(probe) != probe:
+            if f"&lt;" in body2 or f"&gt;" in body2 or f"&amp;" in body2 or f"&quot;" in body2:
                 result.encoding_applied = "html_entity"
             elif quote(probe) in body and probe not in body:
                 result.encoding_applied = "url_encode"

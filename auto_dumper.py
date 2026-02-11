@@ -440,12 +440,17 @@ class AutoDumper:
         parsed.tables_dumped = list(dump_data.tables.keys())
         parsed.cards = dump_data.card_data
         parsed.credentials = dump_data.credentials
-        parsed.gateway_keys = [
-            {"col": list(k.keys())[0] if k else "unknown",
-             "value": list(k.values())[0] if k else "",
-             "source": "db_dump"}
-            for k in dump_data.gateway_keys
-        ]
+        parsed.gateway_keys = []
+        for k in dump_data.gateway_keys:
+            if isinstance(k, dict) and k.get("type"):
+                # Already structured (e.g. db_credential from ConfigCredentialParser)
+                parsed.gateway_keys.append(k)
+            else:
+                parsed.gateway_keys.append({
+                    "col": list(k.keys())[0] if k else "unknown",
+                    "value": list(k.values())[0] if k else "",
+                    "source": "db_dump",
+                })
         
         # Deep-scan every cell value
         await self._deep_parse_rows(dump_data, parsed)
@@ -486,7 +491,8 @@ class AutoDumper:
                                 card_entry["_prepaid"] = bin_info.get("prepaid", False)
                         except Exception:
                             pass
-                    verified_cards.append(card_entry)
+                        verified_cards.append(card_entry)
+                    # Cards without parseable number are excluded
                 
                 rejected = len(parsed.cards) - len(verified_cards)
                 if rejected > 0:

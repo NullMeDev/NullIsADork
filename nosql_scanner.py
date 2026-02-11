@@ -675,9 +675,10 @@ class NoSQLScanner:
 
         # Baseline: true condition
         try:
-            true_params = dict(params)
+            true_params = {k: (v[0] if isinstance(v, list) else v) for k, v in params.items()}
             true_params[f"{param}[$regex]"] = ".*"
-            del true_params[param]
+            if param in true_params:
+                del true_params[param]
             true_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path,
                                   parsed.params, urlencode(true_params), parsed.fragment))
 
@@ -690,7 +691,7 @@ class NoSQLScanner:
 
         # False condition
         try:
-            false_params = dict(params)
+            false_params = {k: (v[0] if isinstance(v, list) else v) for k, v in params.items()}
             false_params[f"{param}[$regex]"] = "^impossible_value_xyz_99999$"
             if param in false_params:
                 del false_params[param]
@@ -741,7 +742,7 @@ class NoSQLScanner:
             for ch in charset:
                 test_regex = f"^{re.escape(extracted + ch)}"
                 try:
-                    test_params = dict(params)
+                    test_params = {k: (v[0] if isinstance(v, list) else v) for k, v in params.items()}
                     test_params[f"{param}[$regex]"] = test_regex
                     if param in test_params:
                         del test_params[param]

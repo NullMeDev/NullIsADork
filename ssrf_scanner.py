@@ -339,7 +339,7 @@ class SSRFScanner:
                 elif provider == "azure":
                     headers["Metadata"] = "true"
 
-                async with session.get(test_url, ssl=False,
+                async with session.get(test_url, headers=headers, ssl=False,
                                       timeout=aiohttp.ClientTimeout(total=self.timeout),
                                       allow_redirects=False) as resp:
                     body = await resp.text(errors='replace')

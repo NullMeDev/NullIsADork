@@ -17,7 +17,7 @@ import asyncio
 import aiohttp
 from typing import Dict, List, Optional
 from dataclasses import dataclass
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, quote
 from loguru import logger
 
 
@@ -218,12 +218,13 @@ class CRLFScanner:
 
     def _inject_param(self, url: str, param: str, params: Dict, value: str) -> str:
         parsed = urlparse(url)
-        new_params = {}
+        parts = []
         for k, v in params.items():
             if k == param:
-                new_params[k] = value
+                parts.append(f"{quote(k, safe='')}={value}")  # Don't re-encode CRLF value
             else:
-                new_params[k] = v[0] if isinstance(v, list) else v
-        new_query = urlencode(new_params, doseq=False)
+                val = v[0] if isinstance(v, list) else v
+                parts.append(f"{quote(k, safe='')}={quote(str(val), safe='')}")
+        new_query = '&'.join(parts)
         return urlunparse((parsed.scheme, parsed.netloc, parsed.path,
                           parsed.params, new_query, parsed.fragment))
