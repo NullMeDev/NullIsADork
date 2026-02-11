@@ -21,6 +21,7 @@ class DorkerConfig:
     telegram_group_id: str = os.getenv(
         "DORKER_GROUP_ID", "-1003720958643"
     )  # Channel for ALL findings
+    owner_user_id: int = int(os.getenv("DORKER_OWNER_ID", "6710320744"))
 
     # =============== DORK GENERATOR ===============
     params_dir: str = os.path.join(os.path.dirname(__file__), "params")

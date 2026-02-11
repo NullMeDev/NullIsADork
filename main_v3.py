@@ -4067,6 +4067,74 @@ def get_pipeline(config: DorkerConfig = None) -> MadyDorkerPipeline:
     return pipeline
 
 
+# ═══════════════════════════ USER AUTH SYSTEM ═══════════════════════════
+
+def _get_owner_id() -> int:
+    """Return the configured owner user ID."""
+    p = get_pipeline()
+    return p.config.owner_user_id
+
+
+def _is_owner(user_id: int) -> bool:
+    """Check if a user is the owner."""
+    return user_id == _get_owner_id()
+
+
+def _is_authorized(user_id: int) -> bool:
+    """Check if a user is authorized (owner OR activated user)."""
+    if _is_owner(user_id):
+        return True
+    p = get_pipeline()
+    return p.db.is_user_activated(user_id)
+
+
+async def _deny_access(update: Update, registered: bool = False):
+    """Send access denied message."""
+    user_id = update.effective_user.id
+    if registered:
+        await update.message.reply_text(
+            "🔒 <b>Access Pending</b>\n\n"
+            f"Your User ID: <code>{user_id}</code>\n"
+            "Your registration is pending activation by an admin.\n"
+            "Please wait or contact the bot owner.",
+            parse_mode="HTML",
+        )
+    else:
+        await update.message.reply_text(
+            "🔒 <b>Access Denied</b>\n\n"
+            f"Your User ID: <code>{user_id}</code>\n"
+            "You must register first with /register\n"
+            "then wait for an admin to activate you.",
+            parse_mode="HTML",
+        )
+
+
+async def require_auth(update: Update) -> bool:
+    """Check if the user is authorized. Returns True if allowed, sends deny msg if not."""
+    user_id = update.effective_user.id
+    if _is_authorized(user_id):
+        return True
+    # Check if registered but not yet activated
+    p = get_pipeline()
+    users = p.db.get_registered_users()
+    is_registered = any(u["user_id"] == user_id for u in users)
+    await _deny_access(update, registered=is_registered)
+    return False
+
+
+async def require_owner(update: Update) -> bool:
+    """Check if the user is the owner. Returns True if allowed."""
+    user_id = update.effective_user.id
+    if _is_owner(user_id):
+        return True
+    await update.message.reply_text(
+        "⛔ <b>Owner Only</b>\n"
+        "This command is restricted to the bot owner.",
+        parse_mode="HTML",
+    )
+    return False
+
+
 def _build_main_menu():
     """Build the inline keyboard for the main menu."""
     return InlineKeyboardMarkup(
@@ -4170,6 +4238,10 @@ async def _send_menu(message, text: str, back_button: bool = True):
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline button presses for the main menu."""
     query = update.callback_query
+    user_id = query.from_user.id
+    if not _is_authorized(user_id):
+        await query.answer("⛔ Access denied. Use /register first.", show_alert=True)
+        return
     await query.answer()
     data = query.data
     header = _build_stats_header()
@@ -4221,6 +4293,16 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command — main menu with inline buttons."""
+    if not _is_authorized(update.effective_user.id):
+        user = update.effective_user
+        await update.message.reply_text(
+            "🔒 <b>MadyDorker v3.0 — Registration Required</b>\n\n"
+            f"Your User ID: <code>{user.id}</code>\n\n"
+            "Use /register to request access.\n"
+            "An admin must activate you before you can use the bot.",
+            parse_mode="HTML",
+        )
+        return
     header = _build_stats_header()
     text = header + "\nSelect a section below."
     await update.message.reply_text(
@@ -4230,6 +4312,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_dorkon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /dorkon command — start pipeline."""
+    if not await require_auth(update): return
     global pipeline_task
     p = get_pipeline()
     if p.running:
@@ -4278,6 +4361,7 @@ async def cmd_dorkon(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_dorkoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /dorkoff command — stop dorking pipeline."""
+    if not await require_auth(update): return
     global pipeline_task
     p = get_pipeline()
     if not p.running:
@@ -4314,6 +4398,7 @@ async def cmd_dorkoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /status command — live dashboard."""
+    if not await require_auth(update): return
     p = get_pipeline()
     stats = p.get_stats()
 
@@ -4357,6 +4442,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_cookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /cookies command — show ALL extracted cookies."""
+    if not await require_auth(update): return
     p = get_pipeline()
 
     text = "🍪 <b>Extracted Cookies</b>\n\n"
@@ -4441,6 +4527,7 @@ async def cmd_cookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_cookiehunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /cookiehunt <url> command — actively hunt a URL for B3 + gateway cookies."""
+    if not await require_auth(update): return
     p = get_pipeline()
 
     if not p.cookie_hunter:
@@ -4531,6 +4618,7 @@ async def cmd_cookiehunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_dorkstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /dorkstats command."""
+    if not await require_auth(update): return
     p = get_pipeline()
     gen_stats = p.generator.get_stats()
 
@@ -4554,6 +4642,7 @@ async def cmd_dorkstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_sqlistats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /sqlistats command — reads from DB (persists across restarts)."""
+    if not await require_auth(update): return
     p = get_pipeline()
 
     # Read from DB for persistence
@@ -4589,6 +4678,7 @@ async def cmd_sqlistats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_secrets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /secrets command — reads from DB (persists across restarts)."""
+    if not await require_auth(update): return
     p = get_pipeline()
 
     # Read from DB (persisted) not in-memory (lost on restart)
@@ -4629,6 +4719,7 @@ async def cmd_secrets(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_dumps(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /dumps command — reads from DB + filesystem."""
+    if not await require_auth(update): return
     p = get_pipeline()
 
     dump_dir = p.config.dumper_output_dir
@@ -4662,6 +4753,7 @@ async def cmd_dumps(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /categories command."""
+    if not await require_auth(update): return
     text = (
         "🎯 <b>Available Categories</b>\n"
         "\n"
@@ -4683,6 +4775,7 @@ async def cmd_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /target <category> command."""
+    if not await require_auth(update): return
     p = get_pipeline()
 
     if not context.args:
@@ -4719,6 +4812,7 @@ async def cmd_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stopscan command — cancel running scan/deepscan."""
+    if not await require_auth(update): return
     chat_id = update.effective_chat.id
     task = scan_tasks.get(chat_id)
 
@@ -4736,6 +4830,7 @@ async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /scan <url> command — comprehensive deep scan. Runs as background task."""
+    if not await require_auth(update): return
     if not context.args:
         await update.message.reply_text("Usage: /scan <url>")
         return
@@ -6027,6 +6122,7 @@ async def _do_scan(update: Update, url: str):
 
 async def cmd_deepscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /deepscan — alias for /scan (full domain scan)."""
+    if not await require_auth(update): return
     await cmd_scan(update, context)
 
 
@@ -6042,6 +6138,7 @@ async def cmd_authscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Uses Playwright (JS rendering) + cookie injection to access
     authenticated dashboards, admin panels, API endpoints.
     """
+    if not await require_auth(update): return
     if not context.args or len(context.args) < 2:
         await update.message.reply_text(
             "<b>🔐 Authenticated Scan</b>\n\n"
@@ -6354,6 +6451,7 @@ async def cmd_mass(update: Update, context: ContextTypes.DEFAULT_TYPE):
               url2
               url3
     """
+    if not await require_auth(update): return
     if not context.args:
         await update.message.reply_text(
             "<b>Usage:</b> /mass url1 url2 url3 ...\n\n"
@@ -6479,6 +6577,7 @@ async def cmd_mass(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /setgroup — set this chat as the report group for all findings."""
+    if not await require_auth(update): return
     p = get_pipeline()
     chat_id = update.effective_chat.id
     chat = update.effective_chat
@@ -6506,6 +6605,7 @@ async def cmd_setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /export — immediately generate and send an export .txt file."""
+    if not await require_auth(update): return
     p = get_pipeline()
 
     await update.message.reply_text("📁 Generating export...")
@@ -6542,6 +6642,7 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_firecrawl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show Firecrawl status and usage."""
+    if not await require_auth(update): return
     p = get_pipeline()
 
     if not p.config.firecrawl_enabled or not p.config.firecrawl_api_key:
@@ -6577,6 +6678,7 @@ async def cmd_firecrawl(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show captcha solver status, balances, and stats."""
+    if not await require_auth(update): return
     p = get_pipeline()
 
     if not p.captcha_solver or not p.captcha_solver.available:
@@ -6641,6 +6743,7 @@ async def cmd_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /proxy command — show proxy pool status and stats."""
+    if not await require_auth(update): return
     p = get_pipeline()
 
     if not p.proxy_manager or not p.proxy_manager.has_proxies:
@@ -6709,6 +6812,7 @@ async def cmd_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_browser(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /browser command — show headless browser engine stats."""
+    if not await require_auth(update): return
     p = get_pipeline()
 
     if not p.browser_manager:
@@ -6746,6 +6850,7 @@ async def cmd_browser(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_ecom(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /ecom command — show e-commerce checker stats."""
+    if not await require_auth(update): return
     p = get_pipeline()
     if not p.ecom_checker:
         await update.message.reply_text(
@@ -6758,6 +6863,7 @@ async def cmd_ecom(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_crawlstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /crawlstats command — show recursive crawler stats."""
+    if not await require_auth(update): return
     p = get_pipeline()
     if not p.crawler:
         await update.message.reply_text(
@@ -6781,6 +6887,7 @@ async def cmd_crawlstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_ports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /ports command — show port scanner stats."""
+    if not await require_auth(update): return
     p = get_pipeline()
     if not p.port_scanner:
         await update.message.reply_text(
@@ -6793,6 +6900,7 @@ async def cmd_ports(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_oob(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /oob command — show OOB SQLi injector stats."""
+    if not await require_auth(update): return
     p = get_pipeline()
     if not p.oob_injector:
         await update.message.reply_text(
@@ -6807,6 +6915,7 @@ async def cmd_oob(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_unionstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /unionstats command — show multi-DBMS union dumper stats."""
+    if not await require_auth(update): return
     p = get_pipeline()
     if not p.union_dumper:
         await update.message.reply_text(
@@ -6819,6 +6928,7 @@ async def cmd_unionstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /keys command — export all Stripe keys as .txt file attachment."""
+    if not await require_auth(update): return
     p = get_pipeline()
     if not p.key_validator:
         await update.message.reply_text("❌ API key validator is not enabled.")
@@ -6895,6 +7005,7 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_mlfilter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /mlfilter command — show ML false positive filter stats."""
+    if not await require_auth(update): return
     p = get_pipeline()
     if not p.ml_filter:
         await update.message.reply_text(
@@ -6907,6 +7018,7 @@ async def cmd_mlfilter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_hotreload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /hotreload command — reload scanner modules without restarting."""
+    if not await require_auth(update): return
     await update.message.reply_text("🔄 Hot-reloading modules...")
     try:
         p = get_pipeline()
@@ -6922,6 +7034,7 @@ async def cmd_hotreload(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /skip command — skip current dork batch and move to next cycle."""
+    if not await require_auth(update): return
     p = get_pipeline()
     if not p.running:
         await update.message.reply_text("❌ Pipeline is not running.")
@@ -6947,6 +7060,7 @@ async def cmd_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stores(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stores command — export Shopify stores as .txt file attachment."""
+    if not await require_auth(update): return
     p = get_pipeline()
     stores = p.db.get_shopify_stores(limit=500)
 
@@ -6999,6 +7113,7 @@ async def cmd_stores(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /del command — delete an export file from the server."""
+    if not await require_auth(update): return
     import re
 
     args = context.args
@@ -7074,6 +7189,7 @@ async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_skvalidate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /skvalidate command — on-demand validation of a Stripe SK key."""
+    if not await require_auth(update): return
     p = get_pipeline()
     if not p.key_validator:
         await update.message.reply_text("❌ Key validator is not enabled.")
@@ -7132,6 +7248,7 @@ async def cmd_skvalidate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_checkkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /checkkey command — validate ANY API key (auto-detects type)."""
+    if not await require_auth(update): return
     p = get_pipeline()
     if not p.key_validator:
         await update.message.reply_text("❌ Key validator is not enabled.")
@@ -7257,6 +7374,114 @@ async def cmd_checkkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Validation error: {e}")
 
 
+# ==================== REGISTRATION COMMANDS ====================
+
+async def cmd_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /register command — register for bot access (pending activation)."""
+    user = update.effective_user
+    user_id = user.id
+    # Owner is always authorized
+    if _is_owner(user_id):
+        await update.message.reply_text("👑 You are the owner — already authorized.")
+        return
+    p = get_pipeline()
+    already = p.db.is_user_activated(user_id)
+    if already:
+        await update.message.reply_text("✅ You are already registered and activated.")
+        return
+    # Register (or re-register) the user
+    p.db.register_user(user_id, username=user.username, first_name=user.first_name)
+    await update.message.reply_text(
+        f"📋 <b>Registration Submitted</b>\n\n"
+        f"Your User ID: <code>{user_id}</code>\n"
+        f"Username: @{user.username or 'N/A'}\n"
+        f"Name: {user.first_name or 'N/A'}\n\n"
+        f"⏳ Waiting for owner activation.\n"
+        f"Share your User ID with the bot owner to get activated.",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_activate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /activate <user_id> command — owner-only, activate a registered user."""
+    if not await require_owner(update):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /activate <user_id>")
+        return
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID. Must be a number.")
+        return
+    p = get_pipeline()
+    success = p.db.activate_user(target_id, activated_by=update.effective_user.id)
+    if success:
+        await update.message.reply_text(f"✅ User <code>{target_id}</code> has been activated.", parse_mode="HTML")
+    else:
+        await update.message.reply_text(
+            f"❌ User <code>{target_id}</code> not found.\n"
+            f"They must /register first.",
+            parse_mode="HTML",
+        )
+
+
+async def cmd_deactivate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /deactivate <user_id> command — owner-only, deactivate a user."""
+    if not await require_owner(update):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /deactivate <user_id>")
+        return
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID. Must be a number.")
+        return
+    if _is_owner(target_id):
+        await update.message.reply_text("❌ Cannot deactivate the owner.")
+        return
+    p = get_pipeline()
+    success = p.db.deactivate_user(target_id)
+    if success:
+        await update.message.reply_text(f"🚫 User <code>{target_id}</code> has been deactivated.", parse_mode="HTML")
+    else:
+        await update.message.reply_text(f"❌ User <code>{target_id}</code> not found.", parse_mode="HTML")
+
+
+async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /users command — owner-only, list all registered users."""
+    if not await require_owner(update):
+        return
+    p = get_pipeline()
+    users = p.db.get_registered_users()
+    if not users:
+        await update.message.reply_text("📋 No registered users yet.")
+        return
+    lines = ["<b>📋 Registered Users</b>\n"]
+    for u in users:
+        uid, uname, fname, activated, role, reg_at, act_at, act_by = u
+        status = "✅ Active" if activated else "⏳ Pending"
+        role_badge = "👑" if role == "owner" else "👤"
+        line = f"{role_badge} <code>{uid}</code> — @{uname or 'N/A'} ({fname or 'N/A'}) — {status}"
+        if role != "user":
+            line += f" [{role}]"
+        lines.append(line)
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /myid command — show your Telegram User ID."""
+    user = update.effective_user
+    await update.message.reply_text(
+        f"🆔 <b>Your Telegram Info</b>\n\n"
+        f"User ID: <code>{user.id}</code>\n"
+        f"Username: @{user.username or 'N/A'}\n"
+        f"Name: {user.first_name or 'N/A'}",
+        parse_mode="HTML",
+    )
+
+
   # ==================== ENTRY POINT ==
 
 
@@ -7339,6 +7564,19 @@ def main(config: DorkerConfig = None):
     app.add_handler(CommandHandler("del", cmd_del, filters=chat_filter))
     app.add_handler(CommandHandler("skvalidate", cmd_skvalidate, filters=chat_filter))
     app.add_handler(CommandHandler("checkkey", cmd_checkkey, filters=chat_filter))
+
+    # Registration / auth commands (no chat_filter — allow DMs)
+    app.add_handler(CommandHandler("register", cmd_register))
+    app.add_handler(CommandHandler("myid", cmd_myid))
+    # Owner-only registration management
+    app.add_handler(CommandHandler("activate", cmd_activate))
+    app.add_handler(CommandHandler("deactivate", cmd_deactivate))
+    app.add_handler(CommandHandler("users", cmd_users))
+
+    # Ensure owner is always registered & activated
+    _owner_p = get_pipeline(config)
+    _owner_p.db.ensure_owner(config.owner_user_id)
+    logger.info(f"Owner user {config.owner_user_id} ensured in registered_users.")
 
     # Auto-start pipeline on boot if configured
     if config.auto_start_pipeline:

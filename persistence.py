@@ -278,6 +278,17 @@ class DorkerDB:
             CREATE INDEX IF NOT EXISTS idx_failed_domain ON failed_urls(domain);
             CREATE INDEX IF NOT EXISTS idx_stripe_keys_domain ON stripe_keys(domain);
             CREATE INDEX IF NOT EXISTS idx_shopify_domain ON shopify_stores(domain);
+
+            CREATE TABLE IF NOT EXISTS registered_users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                activated INTEGER DEFAULT 0,
+                role TEXT DEFAULT 'user',
+                registered_at REAL,
+                activated_at REAL,
+                activated_by INTEGER
+            );
         """)
         conn.commit()
         logger.info(f"Database initialized at {self.db_path}")
@@ -287,6 +298,98 @@ class DorkerDB:
             if self._conn:
                 self._conn.close()
                 self._conn = None
+
+    # ═══════════════ USER REGISTRATION ═══════════════
+
+    def register_user(self, user_id: int, username: str = None,
+                      first_name: str = None) -> bool:
+        """Register a user (pending activation). Returns True if newly registered."""
+        now = time.time()
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    """INSERT INTO registered_users
+                       (user_id, username, first_name, activated, role, registered_at)
+                       VALUES (?, ?, ?, 0, 'user', ?)""",
+                    (user_id, username, first_name, now),
+                )
+                conn.commit()
+                return True
+            except Exception:
+                # Already exists
+                return False
+
+    def activate_user(self, user_id: int, activated_by: int) -> bool:
+        """Activate a registered user. Returns True if updated."""
+        now = time.time()
+        with self._lock:
+            conn = self._get_conn()
+            cur = conn.execute(
+                """UPDATE registered_users
+                   SET activated = 1, activated_at = ?, activated_by = ?
+                   WHERE user_id = ?""",
+                (now, activated_by, user_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def deactivate_user(self, user_id: int) -> bool:
+        """Deactivate a user. Returns True if updated."""
+        with self._lock:
+            conn = self._get_conn()
+            cur = conn.execute(
+                "UPDATE registered_users SET activated = 0 WHERE user_id = ?",
+                (user_id,),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def is_user_activated(self, user_id: int) -> bool:
+        """Check if a user is activated."""
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT activated FROM registered_users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            return bool(row and row["activated"])
+
+    def get_registered_users(self) -> list:
+        """Get all registered users."""
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """SELECT user_id, username, first_name, activated, role,
+                          registered_at, activated_at
+                   FROM registered_users ORDER BY registered_at"""
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def set_user_role(self, user_id: int, role: str) -> bool:
+        """Set user role (owner/admin/user)."""
+        with self._lock:
+            conn = self._get_conn()
+            cur = conn.execute(
+                "UPDATE registered_users SET role = ? WHERE user_id = ?",
+                (role, user_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def ensure_owner(self, owner_id: int):
+        """Ensure the owner is registered and activated."""
+        now = time.time()
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                """INSERT INTO registered_users
+                   (user_id, username, first_name, activated, role, registered_at, activated_at)
+                   VALUES (?, 'owner', 'Owner', 1, 'owner', ?, ?)
+                   ON CONFLICT(user_id) DO UPDATE SET activated = 1, role = 'owner'""",
+                (owner_id, now, now),
+            )
+            conn.commit()
 
     # ═══════════════ DOMAIN TRACKING ═══════════════
 
