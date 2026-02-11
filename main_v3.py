@@ -585,6 +585,9 @@ class MadyDorkerPipeline:
         # Concurrency controls
         self._url_semaphore = asyncio.Semaphore(self.config.concurrent_url_limit)
 
+        # Shared HTTP session for URL processing (high-concurrency connection pool)
+        self._shared_session: Optional[aiohttp.ClientSession] = None
+
         # Soft-404 fingerprints per domain (M6: capped at 10k domains)
         self._soft404_cache: Dict[str, str] = {}
         self._SOFT404_MAX = 10_000
@@ -1271,6 +1274,25 @@ class MadyDorkerPipeline:
             if any(kw.lower() in text.lower() for kw in keywords):
                 await self._send_to_report_group(text)
 
+    async def _get_shared_session(self) -> aiohttp.ClientSession:
+        """Get or create the shared HTTP session with high-concurrency connection pool."""
+        if self._shared_session is None or self._shared_session.closed:
+            import aiohttp as _aio
+            self._shared_session = _aio.ClientSession(
+                timeout=_aio.ClientTimeout(total=self.config.validation_timeout),
+                connector=_aio.TCPConnector(
+                    ssl=False,
+                    limit=0,              # Unlimited total connections
+                    limit_per_host=10,    # Max 10 per target host (polite)
+                    ttl_dns_cache=300,
+                    enable_cleanup_closed=True,
+                ),
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                },
+            )
+        return self._shared_session
+
     async def process_url(self, url: str) -> Dict:
         """Process a single URL through the full pipeline.
 
@@ -1323,16 +1345,9 @@ class MadyDorkerPipeline:
 
         import aiohttp
 
-        timeout = aiohttp.ClientTimeout(total=self.config.validation_timeout)
-
         try:
+            session = await self._get_shared_session()
             async with self._url_semaphore:
-                async with aiohttp.ClientSession(
-                    timeout=timeout,
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    },
-                ) as session:
                     # Step 0: Soft-404 detection
                     if self.config.soft404_detection:
                         try:
@@ -3409,7 +3424,6 @@ class MadyDorkerPipeline:
         if _precheck:
             try:
                 import aiohttp
-                _pre_timeout = aiohttp.ClientTimeout(total=2)
                 _proxy_url = None
                 if self.proxy_manager:
                     try:
@@ -3418,7 +3432,8 @@ class MadyDorkerPipeline:
                             _proxy_url = _pi.url
                     except Exception as e:
                         logger.debug(f"getting proxy URL for precheck: {e}")
-                async with aiohttp.ClientSession(timeout=_pre_timeout) as _s:
+                _s = await self._get_shared_session()
+                async with asyncio.timeout(2):
                     async with _s.head(url, allow_redirects=True, ssl=False, proxy=_proxy_url) as _r:
                         pass  # Just checking connectivity
             except Exception as _pre_err:
@@ -4129,6 +4144,12 @@ class MadyDorkerPipeline:
                 await self.key_validator.close()
             except Exception as e:
                 logger.debug(f"KeyValidator close error: {e}")
+        # Close shared HTTP session
+        if self._shared_session and not self._shared_session.closed:
+            try:
+                await self._shared_session.close()
+            except Exception:
+                pass
         logger.info("Pipeline stop requested")
 
     async def _status_loop(self):

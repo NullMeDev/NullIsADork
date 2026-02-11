@@ -113,18 +113,20 @@ def build_card_config() -> DorkerConfig:
     # ═══════════════════════════════════════════════════════════
     # MASSIVE PARALLELISM — ~1000 proxies, 16 cores, 30GB RAM
     # ═══════════════════════════════════════════════════════════
-    config.concurrent_url_limit = 1000      # ~1 per proxy — dump extractions need sustained bandwidth
-    config.max_concurrent_validations = 1000
-    config.dork_batch_size = 100            # 100 dorks searched in parallel per batch (was 60)
+    config.concurrent_url_limit = 1500      # 16 cores × 30GB can handle massive concurrency
+    config.max_concurrent_validations = 1500
+    config.sqli_max_concurrent = 300        # 300 concurrent SQLi tests (was 150)
+    config.waf_max_concurrent = 500         # Fast WAF detection in parallel
+    config.dork_batch_size = 250            # 250 dorks searched in parallel per batch (was 100)
 
     # ═══════════════════════════════════════════════════════════
     # CYCLING — burn through dorks, maximize URL throughput
     # ═══════════════════════════════════════════════════════════
-    config.search_delay_min = 0.05
-    config.search_delay_max = 0.3
+    config.search_delay_min = 0.01
+    config.search_delay_max = 0.1
     config.cycle_delay = 1
-    config.dorks_per_cycle = 1500
-    config.cycle_max_urls = 15000           # Process 15K URLs per cycle
+    config.dorks_per_cycle = 5000
+    config.cycle_max_urls = 50000           # Process 50K URLs per cycle
     config.cycle_max_time = 3600
     config.results_per_dork = 100
 

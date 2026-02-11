@@ -307,8 +307,8 @@ class SearchEngine:
         if self._session and not self._session.closed:
             return self._session
         self._session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=30),
-            connector=aiohttp.TCPConnector(ssl=False, limit=10),
+            timeout=aiohttp.ClientTimeout(total=20),
+            connector=aiohttp.TCPConnector(ssl=False, limit=50),
         )
         return self._session
 
@@ -3750,8 +3750,8 @@ class MultiSearch:
         self.search_count = 0
         self.engine_names = engines or list(ENGINE_REGISTRY.keys())
         self.max_pages = max_pages
-        self.health = EngineHealth(cooldown=300)
-        self.rate_limiter = AdaptiveRateLimiter(base_min=3, base_max=8)
+        self.health = EngineHealth(cooldown=120)
+        self.rate_limiter = AdaptiveRateLimiter(base_min=0.1, base_max=0.5)
         self.dork_scorer = DorkScorer()
         self._session: Optional[aiohttp.ClientSession] = None
         
@@ -3774,8 +3774,14 @@ class MultiSearch:
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=30),
-                connector=aiohttp.TCPConnector(ssl=False, limit=20, ttl_dns_cache=600),
+                timeout=aiohttp.ClientTimeout(total=20),
+                connector=aiohttp.TCPConnector(
+                    ssl=False,
+                    limit=300,           # 300 concurrent connections (was 20)
+                    limit_per_host=30,   # 30 per host to avoid single-host flooding
+                    ttl_dns_cache=600,
+                    enable_cleanup_closed=True,
+                ),
             )
         return self._session
 
