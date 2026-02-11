@@ -309,6 +309,22 @@ class DorkerDB:
             CREATE INDEX IF NOT EXISTS idx_payment_gateway ON payment_sites(gateway);
             CREATE INDEX IF NOT EXISTS idx_payment_active ON payment_sites(active);
             CREATE INDEX IF NOT EXISTS idx_payment_confidence ON payment_sites(confidence);
+
+            CREATE TABLE IF NOT EXISTS payment_dork_scores (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                scores_json TEXT,
+                updated_at REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS payment_checkpoint (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                cycle INTEGER NOT NULL DEFAULT 0,
+                phase TEXT,
+                idx INTEGER NOT NULL DEFAULT 0,
+                total INTEGER NOT NULL DEFAULT 0,
+                dork_scores TEXT,
+                updated_at REAL
+            );
         """)
         conn.commit()
         logger.info(f"Database initialized at {self.db_path}")
@@ -525,6 +541,64 @@ class DorkerDB:
         with self._lock:
             conn = self._get_conn()
             return conn.execute("SELECT COUNT(*) FROM payment_sites WHERE active = 1").fetchone()[0]
+
+    # ═══════════════ PAYMENT DORK SCORES ═══════════════
+
+    def save_payment_dork_scores(self, scores_data: dict):
+        """Save payment dork effectiveness scores."""
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute("""
+                INSERT INTO payment_dork_scores (id, scores_json, updated_at)
+                VALUES (1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET scores_json = ?, updated_at = ?
+            """, (json.dumps(scores_data), time.time(),
+                  json.dumps(scores_data), time.time()))
+            conn.commit()
+
+    def get_payment_dork_scores(self) -> Optional[dict]:
+        """Get saved payment dork scores."""
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute("SELECT scores_json FROM payment_dork_scores WHERE id = 1").fetchone()
+            if row and row[0]:
+                try:
+                    return json.loads(row[0])
+                except Exception:
+                    pass
+        return None
+
+    # ═══════════════ PAYMENT CHECKPOINT ═══════════════
+
+    def save_payment_checkpoint(self, cycle: int, phase: str, index: int,
+                                total: int, dork_scores: str = ""):
+        """Save payment discovery checkpoint for resume."""
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute("""
+                INSERT INTO payment_checkpoint (id, cycle, phase, idx, total, dork_scores, updated_at)
+                VALUES (1, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    cycle = ?, phase = ?, idx = ?, total = ?, dork_scores = ?, updated_at = ?
+            """, (cycle, phase, index, total, dork_scores, time.time(),
+                  cycle, phase, index, total, dork_scores, time.time()))
+            conn.commit()
+
+    def get_payment_checkpoint(self) -> Optional[Dict]:
+        """Get last payment discovery checkpoint."""
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute("SELECT * FROM payment_checkpoint WHERE id = 1").fetchone()
+            if row:
+                return dict(row)
+        return None
+
+    def clear_payment_checkpoint(self):
+        """Clear payment checkpoint."""
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute("DELETE FROM payment_checkpoint WHERE id = 1")
+            conn.commit()
 
     # ═══════════════ DOMAIN TRACKING ═══════════════
 

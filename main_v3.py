@@ -3842,33 +3842,41 @@ class MadyDorkerPipeline:
                 logger.error(f"Export loop error: {e}")
 
     async def _payment_discovery_loop(self):
-        """Autonomous payment site discovery — runs every pay_discovery_interval seconds."""
-        _interval = getattr(self.config, 'pay_discovery_interval', 7200)  # Default: 2 hours
+        """Autonomous payment site discovery v2 — adaptive interval, all 10 phases."""
+        _base_interval = getattr(self.config, 'pay_discovery_interval', 7200)
         _initial_delay = 300  # 5 min delay to let pipeline warm up first
-        
+
         await asyncio.sleep(_initial_delay)
-        
+
         while self.running:
             try:
-                logger.info("[PayDiscover] 🎯 Starting autonomous discovery cycle...")
-                
+                logger.info("[PayDiscover] 🎯 Starting autonomous discovery cycle v2...")
+
                 async def _progress(msg):
                     await self._send_progress(msg)
-                
-                # Run full discovery (dorks + CT + tech)
+
+                # All 10 phases: dorks, ct, tech, verify, backlinks, directories,
+                #                 wayback, sitemaps, deep_checkout, form_analysis
+                all_methods = [
+                    "dorks", "ct", "tech", "verify",
+                    "backlinks", "directories",
+                    "wayback", "sitemaps", "deep_checkout", "form_analysis",
+                ]
+
                 results = await self.payment_discoverer.run_full_discovery(
-                    methods=["dorks", "ct", "tech"],
+                    methods=all_methods,
                     report_callback=_progress,
                 )
-                
+
                 if results:
-                    # Persist to DB
+                    # Persist all discoveries to DB
+                    known = set(self.db.get_payment_site_domains())
                     new_count = 0
                     for site in results:
                         try:
-                            known = self.db.get_payment_site_domains()
                             if site.domain not in known:
                                 new_count += 1
+                                known.add(site.domain)
                             self.db.save_payment_site(
                                 domain=site.domain,
                                 url=site.url,
@@ -3880,68 +3888,59 @@ class MadyDorkerPipeline:
                             )
                         except Exception as e:
                             logger.debug(f"[PayDiscover] DB save error: {e}")
-                    
+
                     # Refresh priority domain cache
                     self._payment_domains = self.db.get_payment_site_domains()
-                    
-                    # Run backlink expansion on new high-confidence sites
-                    high_conf = [s for s in results if s.confidence >= 0.7]
-                    if high_conf and hasattr(self.payment_discoverer, 'discover_via_backlinks'):
-                        try:
-                            seed_urls = [s.url for s in high_conf[:20]]
-                            await self.payment_discoverer.discover_via_backlinks(
-                                seed_urls, report_callback=_progress
-                            )
-                            # Persist backlink discoveries too
-                            for site in self.payment_discoverer.discovered.values():
-                                if site.domain not in self._payment_domains:
-                                    self.db.save_payment_site(
-                                        domain=site.domain, url=site.url,
-                                        gateway=site.gateway, method=site.method,
-                                        confidence=site.confidence,
-                                        has_params=site.has_params,
-                                        html_matches=site.html_matches,
-                                    )
-                            self._payment_domains = self.db.get_payment_site_domains()
-                        except Exception as e:
-                            logger.debug(f"[PayDiscover] Backlink expansion error: {e}")
-                    
-                    # Run store directories periodically
-                    if hasattr(self.payment_discoverer, 'discover_via_store_directories'):
-                        try:
-                            await self.payment_discoverer.discover_via_store_directories(
-                                report_callback=_progress
-                            )
-                            for site in self.payment_discoverer.discovered.values():
-                                if site.domain not in self._payment_domains:
-                                    self.db.save_payment_site(
-                                        domain=site.domain, url=site.url,
-                                        gateway=site.gateway, method=site.method,
-                                        confidence=site.confidence,
-                                        has_params=site.has_params,
-                                        html_matches=site.html_matches,
-                                    )
-                            self._payment_domains = self.db.get_payment_site_domains()
-                        except Exception as e:
-                            logger.debug(f"[PayDiscover] Store directory error: {e}")
+
+                    # Inject high-value checkout URLs into scanner queue
+                    high_value = self.payment_discoverer.get_high_value_sites(min_value=0.5)
+                    if high_value and hasattr(self, '_priority_queue'):
+                        injected = 0
+                        for site in high_value[:50]:
+                            for url in (site.checkout_urls + site.form_actions):
+                                if '?' in url or '=' in url:
+                                    try:
+                                        self._priority_queue.put_nowait({
+                                            'url': url,
+                                            'source': 'payment_checkout',
+                                            'priority': int(site.value_score * 100),
+                                        })
+                                        injected += 1
+                                    except Exception:
+                                        pass
+                        if injected:
+                            logger.info(f"[PayDiscover] Injected {injected} checkout URLs into scanner queue")
+
+                    # Calculate adaptive interval for next run
+                    _interval = self.payment_discoverer.get_adaptive_interval(_base_interval)
 
                     total = self.db.payment_site_count()
+                    sites_with_forms = sum(1 for s in results if s.form_actions)
+                    avg_value = sum(s.value_score for s in results) / max(len(results), 1)
+                    yield_rate = self.payment_discoverer.dork_scorer.get_yield_rate()
+
                     await self._send_progress(
-                        f"🎯 <b>Auto-Discovery Complete</b>\n\n"
+                        f"🎯 <b>Auto-Discovery v2 Complete</b>\n\n"
                         f"💳 New sites: <b>{new_count}</b>\n"
-                        f"📦 Total in DB: <b>{total}</b>\n"
-                        f"⏰ Next run in {_interval // 3600}h {(_interval % 3600) // 60}m"
+                        f"📦 Total DB: <b>{total}</b>\n"
+                        f"📝 With forms: <b>{sites_with_forms}</b>\n"
+                        f"💎 Avg value: <b>{avg_value:.0%}</b>\n"
+                        f"📈 Yield rate: <b>{yield_rate:.1%}</b>\n"
+                        f"⏰ Next in {_interval // 3600}h {(_interval % 3600) // 60}m"
                     )
-                
+                else:
+                    _interval = self.payment_discoverer.get_adaptive_interval(_base_interval)
+
                 logger.info(f"[PayDiscover] Cycle done. Next in {_interval}s. "
                            f"Total payment sites: {self.db.payment_site_count()}")
-                
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"[PayDiscover] Loop error: {e}", exc_info=True)
-            
-            # Wait for next discovery cycle
+                _interval = _base_interval
+
+            # Adaptive wait for next discovery cycle
             await asyncio.sleep(_interval)
 
     async def _write_export(self) -> Optional[str]:
