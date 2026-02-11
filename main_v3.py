@@ -4443,7 +4443,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_cookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /cookies command — show ALL extracted cookies."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
 
     text = "🍪 <b>Extracted Cookies</b>\n\n"
@@ -4619,7 +4619,7 @@ async def cmd_cookiehunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_dorkstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /dorkstats command."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     gen_stats = p.generator.get_stats()
 
@@ -4643,7 +4643,7 @@ async def cmd_dorkstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_sqlistats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /sqlistats command — reads from DB (persists across restarts)."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
 
     # Read from DB for persistence
@@ -4679,7 +4679,7 @@ async def cmd_sqlistats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_secrets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /secrets command — reads from DB (persists across restarts)."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
 
     # Read from DB (persisted) not in-memory (lost on restart)
