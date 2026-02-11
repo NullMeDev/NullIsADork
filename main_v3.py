@@ -1436,6 +1436,9 @@ class MadyDorkerPipeline:
                                 logger.info(
                                     f"Skipping {url} — {waf_info.risk_level} protection ({waf_info.waf or waf_info.bot_protection})"
                                 )
+                                # Mark WAF-blocked URLs as processed so they don't get retried —
+                                # Cloudflare/Imperva/DataDome won't disappear between cycles
+                                _processing_succeeded = True
                                 return result
                         except Exception as e:
                             logger.debug(f"WAF detection failed for {url}: {e}")
