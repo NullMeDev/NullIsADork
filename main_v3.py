@@ -4293,8 +4293,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command — main menu with inline buttons."""
-    if not _is_authorized(update.effective_user.id):
-        user = update.effective_user
+    user = update.effective_user
+    logger.info(f"[CMD] /start from user {user.id} (@{user.username}) in chat {update.effective_chat.id} (type={update.effective_chat.type})")
+    if not _is_authorized(user.id):
         await update.message.reply_text(
             "🔒 <b>MadyDorker v3.0 — Registration Required</b>\n\n"
             f"Your User ID: <code>{user.id}</code>\n\n"
@@ -7380,6 +7381,7 @@ async def cmd_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /register command — register for bot access (pending activation)."""
     user = update.effective_user
     user_id = user.id
+    logger.info(f"[CMD] /register from user {user_id} (@{user.username}) in chat {update.effective_chat.id}")
     # Owner is always authorized
     if _is_owner(user_id):
         await update.message.reply_text("👑 You are the owner — already authorized.")
@@ -7526,8 +7528,9 @@ def main(config: DorkerConfig = None):
         filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP
     )
 
-    app.add_handler(CommandHandler("start", cmd_start, filters=chat_filter))
-    app.add_handler(CommandHandler("help", cmd_start, filters=chat_filter))
+    # /start and /help work everywhere (no chat_filter) — needed for registration flow
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_start))
     app.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu_"))
     app.add_handler(CommandHandler("dorkon", cmd_dorkon, filters=chat_filter))
     app.add_handler(CommandHandler("dorkoff", cmd_dorkoff, filters=chat_filter))
@@ -7589,6 +7592,11 @@ def main(config: DorkerConfig = None):
             pipeline_task = asyncio.create_task(p.start())
 
         app.post_init = post_init
+
+    # Global error handler — logs unhandled exceptions
+    async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        logger.error(f"Unhandled exception: {context.error}", exc_info=context.error)
+    app.add_error_handler(_error_handler)
 
     logger.info("Bot handlers registered, starting polling...")
     app.run_polling(drop_pending_updates=True)
