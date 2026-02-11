@@ -78,7 +78,14 @@ class TelegramReporter:
         self._last_send = 0
         
         if HAS_TELEGRAM:
-            self.bot = Bot(token=bot_token)
+            from telegram.request import HTTPXRequest
+            request = HTTPXRequest(
+                connect_timeout=20.0,
+                read_timeout=30.0,
+                write_timeout=30.0,
+                pool_timeout=10.0,
+            )
+            self.bot = Bot(token=bot_token, request=request)
         else:
             self.bot = None
             self.api_url = f"https://api.telegram.org/bot{bot_token}"
@@ -131,6 +138,7 @@ class TelegramReporter:
                 
                 self._last_send = asyncio.get_running_loop().time()
                 self.stats.messages_sent += 1
+                logger.info(f"Telegram message sent (#{self.stats.messages_sent})")
                 return msg
             
             except RetryAfter as e:
@@ -138,7 +146,15 @@ class TelegramReporter:
                 logger.debug(f"Telegram 429 — sleeping {e.retry_after}s (attempt {attempt+1}/3)")
                 await asyncio.sleep(e.retry_after)
                 continue
+            except asyncio.TimeoutError:
+                logger.warning(f"Telegram send timed out (attempt {attempt+1}/3)")
+                await asyncio.sleep(2 * (attempt + 1))
+                continue
             except Exception as e:
+                if "timed out" in str(e).lower():
+                    logger.warning(f"Telegram send timed out (attempt {attempt+1}/3): {e}")
+                    await asyncio.sleep(2 * (attempt + 1))
+                    continue
                 logger.error(f"Failed to send Telegram message: {e}")
                 self.stats.errors += 1
                 return None
@@ -242,6 +258,7 @@ class TelegramReporter:
 
                 self._last_send = asyncio.get_running_loop().time()
                 self.stats.messages_sent += 1
+                logger.info(f"Telegram document sent (#{self.stats.messages_sent})")
                 return msg
 
             except RetryAfter as e:
