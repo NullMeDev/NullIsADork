@@ -4313,7 +4313,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_dorkon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /dorkon command — start pipeline."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     global pipeline_task
     p = get_pipeline()
     if p.running:
@@ -4362,7 +4362,7 @@ async def cmd_dorkon(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_dorkoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /dorkoff command — stop dorking pipeline."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     global pipeline_task
     p = get_pipeline()
     if not p.running:
@@ -4776,7 +4776,7 @@ async def cmd_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /target <category> command."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
 
     if not context.args:
@@ -4813,7 +4813,7 @@ async def cmd_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stopscan command — cancel running scan/deepscan."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     chat_id = update.effective_chat.id
     task = scan_tasks.get(chat_id)
 
@@ -4831,7 +4831,7 @@ async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /scan <url> command — comprehensive deep scan. Runs as background task."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     if not context.args:
         await update.message.reply_text("Usage: /scan <url>")
         return
@@ -6123,7 +6123,7 @@ async def _do_scan(update: Update, url: str):
 
 async def cmd_deepscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /deepscan — alias for /scan (full domain scan)."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     await cmd_scan(update, context)
 
 
@@ -6139,7 +6139,7 @@ async def cmd_authscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Uses Playwright (JS rendering) + cookie injection to access
     authenticated dashboards, admin panels, API endpoints.
     """
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     if not context.args or len(context.args) < 2:
         await update.message.reply_text(
             "<b>🔐 Authenticated Scan</b>\n\n"
@@ -6452,7 +6452,7 @@ async def cmd_mass(update: Update, context: ContextTypes.DEFAULT_TYPE):
               url2
               url3
     """
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     if not context.args:
         await update.message.reply_text(
             "<b>Usage:</b> /mass url1 url2 url3 ...\n\n"
@@ -6578,7 +6578,7 @@ async def cmd_mass(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /setgroup — set this chat as the report group for all findings."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     chat_id = update.effective_chat.id
     chat = update.effective_chat
@@ -7019,7 +7019,7 @@ async def cmd_mlfilter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_hotreload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /hotreload command — reload scanner modules without restarting."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     await update.message.reply_text("🔄 Hot-reloading modules...")
     try:
         p = get_pipeline()
@@ -7035,7 +7035,7 @@ async def cmd_hotreload(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /skip command — skip current dork batch and move to next cycle."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
     if not p.running:
         await update.message.reply_text("❌ Pipeline is not running.")
