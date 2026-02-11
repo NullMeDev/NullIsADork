@@ -2647,6 +2647,8 @@ class MadyDorkerPipeline:
                         )
                         # Filter out the original URL (already tested above)
                         extra_targets = [u for u in discovered_param_urls if u != url]
+                        # Decode HTML entities in crawl-discovered URLs
+                        extra_targets = [html_module.unescape(u) for u in extra_targets]
 
                         # Skip URLs whose param values contain full URLs (causes SSRF-like hangs)
                         def _safe_param_url(u):
@@ -3387,6 +3389,8 @@ class MadyDorkerPipeline:
         self, url: str, results_list: list, findings_counter: list
     ):
         """Process a URL with error handling for concurrent use."""
+        # Decode HTML entities in URLs from any source (search, crawl, payment injection)
+        url = html_module.unescape(url)
         _timeout = getattr(self.config, "url_process_timeout", 120)
 
         # ── Fast pre-check: HEAD request with 2s timeout ──
