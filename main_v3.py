@@ -4720,7 +4720,7 @@ async def cmd_secrets(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_dumps(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /dumps command — reads from DB + filesystem."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
 
     dump_dir = p.config.dumper_output_dir
@@ -6606,7 +6606,7 @@ async def cmd_setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /export — immediately generate and send an export .txt file."""
-    if not await require_auth(update): return
+    if not await require_owner(update): return
     p = get_pipeline()
 
     await update.message.reply_text("📁 Generating export...")
