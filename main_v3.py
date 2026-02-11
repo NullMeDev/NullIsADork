@@ -2676,7 +2676,10 @@ class MadyDorkerPipeline:
 
                         if extra_targets:
                             extra_targets = extra_targets[:crawl_sqli_limit]
-                            for extra_url in extra_targets:
+
+                            # ── Parallel crawl-discovered SQLi testing ──
+                            async def _test_crawl_sqli(extra_url):
+                                """Test a single crawl-discovered URL for SQLi and auto-dump."""
                                 try:
                                     extra_sqli = await asyncio.wait_for(
                                         self.sqli_scanner.scan(
@@ -2685,10 +2688,25 @@ class MadyDorkerPipeline:
                                             waf_name=waf_name,
                                             protection_info=waf_info,
                                         ),
-                                        timeout=20,  # Was 45s — premium proxy is faster
+                                        timeout=15,
                                     )
-                                    if extra_sqli:
-                                        for sqli in extra_sqli:
+                                    return (extra_url, extra_sqli)
+                                except asyncio.TimeoutError:
+                                    return (extra_url, None)
+                                except Exception:
+                                    return (extra_url, None)
+
+                            # Fire all crawl SQLi tests in parallel (bounded by scanner semaphore)
+                            crawl_tasks = [_test_crawl_sqli(u) for u in extra_targets]
+                            crawl_results = await asyncio.gather(*crawl_tasks, return_exceptions=True)
+
+                            for cr in crawl_results:
+                                if isinstance(cr, Exception) or cr is None:
+                                    continue
+                                extra_url, extra_sqli = cr
+                                if not extra_sqli:
+                                    continue
+                                for sqli in extra_sqli:
                                             vuln_record = {
                                                 "url": extra_url,
                                                 "param": sqli.parameter,
@@ -2760,14 +2778,6 @@ class MadyDorkerPipeline:
                                                         logger.info(f"Crawl-discovered dump: {extra_url[:50]} → {parsed.total_rows} rows, {len(parsed.cards)} cards")
                                                 except Exception as e:
                                                     logger.debug(f"Crawl-discovered dump failed: {e}")
-                                except asyncio.TimeoutError:
-                                    logger.warning(
-                                        f"Crawl-discovered SQLi test timed out for {extra_url}"
-                                    )
-                                except Exception as e:
-                                    logger.debug(
-                                        f"Crawl-discovered SQLi test failed for {extra_url}: {e}"
-                                    )
 
                     # Step 7: ML False Positive Filter on SQLi results (v3.14)
                     if self.ml_filter and result.get("sqli"):

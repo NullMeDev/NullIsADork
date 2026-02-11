@@ -60,7 +60,7 @@ class EngineHealth:
     - Throttled status when result count drops below threshold
     """
 
-    def __init__(self, cooldown: float = 300, blocked_cooldown: float = 900):
+    def __init__(self, cooldown: float = 120, blocked_cooldown: float = 600):
         self.cooldown = cooldown
         self.blocked_cooldown = blocked_cooldown
         self._success: Dict[str, int] = defaultdict(int)
@@ -69,9 +69,9 @@ class EngineHealth:
         self._cooldown_until: Dict[str, float] = {}
         self._status: Dict[str, EngineStatus] = {}
         self._requests: Dict[str, int] = defaultdict(int)
-        # Per-engine delay params (adaptive)
-        self._base_delay_min: float = 1.0
-        self._base_delay_max: float = 3.0
+        # Per-engine delay params (adaptive) — tuned for speed
+        self._base_delay_min: float = 0.3
+        self._base_delay_max: float = 1.0
         # Exponential backoff for persistently blocked engines
         self._block_count: Dict[str, int] = defaultdict(int)
 
@@ -140,16 +140,16 @@ class EngineHealth:
         From DVParser EngineManager pattern."""
         status = self.get_status(engine)
         if status == EngineStatus.BLOCKED:
-            return random.uniform(30, 60)  # Long delay for blocked engines
+            return 0.0  # Skip instantly — blocked engines are checked in is_available()
         if status == EngineStatus.THROTTLED:
-            return random.uniform(5, 10)   # Medium delay for throttled
+            return random.uniform(1.0, 2.0)  # Brief delay for throttled
 
         fail_rate = 1.0 - self.success_rate(engine)
-        # Scale delay: 0% fail = base, 50% fail = 3x base, 100% fail = 6x base
-        multiplier = 1.0 + (fail_rate * 5.0)
+        # Scale delay: 0% fail = base, 50% fail = 1.5x base, 100% fail = 2x base
+        multiplier = 1.0 + (fail_rate * 1.0)
         delay_min = self._base_delay_min * multiplier
         delay_max = self._base_delay_max * multiplier
-        return random.uniform(delay_min, min(delay_max, 30.0))
+        return random.uniform(delay_min, min(delay_max, 3.0))
 
     def sorted_engines(self, names: List[str]) -> List[str]:
         available = [n for n in names if self.is_available(n)]
@@ -3870,7 +3870,7 @@ class MultiSearch:
                                 await self.proxy_manager.report_success(proxy_info, latency)
                             if len(all_results) >= num_results:
                                 break
-                            await asyncio.sleep(random.uniform(1, 2))
+                            await asyncio.sleep(random.uniform(0.3, 0.8))
                         else:
                             if name not in engine_results:
                                 engine_results[name] = 0
@@ -3924,9 +3924,12 @@ class MultiSearch:
 
                 if len(all_results) >= num_results:
                     break
-                # Per-engine adaptive delay (DVParser pattern)
-                engine_delay = self.health.get_delay_for_engine(name)
-                await asyncio.sleep(engine_delay)
+                # Per-engine adaptive delay — only for engines that returned nothing
+                if name not in engine_results or engine_results[name] == 0:
+                    engine_delay = self.health.get_delay_for_engine(name)
+                    await asyncio.sleep(engine_delay)
+                else:
+                    await asyncio.sleep(0.1)  # Got results — move fast
 
             # Firecrawl fallback: if all engines returned 0 and FC is fallback-only
             if not all_results and self.firecrawl_as_fallback and self.firecrawl_api_key:

@@ -264,9 +264,9 @@ class DorkerConfig:
 
     # =============== SQL INJECTION SCANNER ===============
     sqli_enabled: bool = True
-    sqli_timeout: int = 15
-    sqli_max_concurrent: int = 100
-    sqli_delay: int = 5  # For time-based injection
+    sqli_timeout: int = 12
+    sqli_max_concurrent: int = 150
+    sqli_delay: int = 3  # For time-based injection (3s sufficient to distinguish from jitter)
     sqli_techniques: List[str] = field(
         default_factory=lambda: ["error", "union", "boolean", "time"]
     )
@@ -321,9 +321,9 @@ class DorkerConfig:
 
     # =============== MULTI-DBMS UNION DUMPER (v3.12) ===============
     union_dump_enabled: bool = True
-    union_dump_max_tables: int = 60  # Max tables to dump per target
-    union_dump_max_rows: int = 1000  # Max rows per table
-    union_dump_timeout: float = 15.0  # Timeout per request
+    union_dump_max_tables: int = 20  # Max tables to dump per target (prioritized)
+    union_dump_max_rows: int = 500  # Max rows per table
+    union_dump_timeout: float = 12.0  # Timeout per request
     union_dump_max_columns_per_table: int = 60
 
     # =============== API KEY VALIDATION (v3.13) ===============

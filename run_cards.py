@@ -29,10 +29,10 @@ def build_card_config() -> DorkerConfig:
     # ═══════════════════════════════════════════════════════════
     config.sqli_enabled = True              # Detect SQL injection points
     config.dumper_enabled = True            # Auto-dump via DIOS/error-based
-    config.dumper_blind_enabled = True      # Blind boolean/time-based extraction
+    config.dumper_blind_enabled = False     # Disabled — far too slow (hours per target)
     config.union_dump_enabled = True        # Union-based column extraction
     config.auto_dump_nosql = True           # NoSQL injection dumps too
-    config.deep_crawl_sqli_limit = 15       # Test up to 15 param URLs per domain for SQLi
+    config.deep_crawl_sqli_limit = 5        # Test up to 5 crawl URLs in parallel (was 15 serial)
 
     # ═══════════════════════════════════════════════════════════
     # DISABLE everything that doesn't find cards
@@ -94,7 +94,7 @@ def build_card_config() -> DorkerConfig:
     # ═══════════════════════════════════════════════════════════
     # TIMEOUTS — SQLi testing needs more time than simple crawl
     # ═══════════════════════════════════════════════════════════
-    config.url_process_timeout = 360        # 6min — SQLi detect (~15s) + enum (~15s) + dump cards/payments (~300s) + DIOS/privs (~30s)
+    config.url_process_timeout = 120        # 2min — SQLi detect (~10s) + enum (~10s) + dump (~60s) = 80s realistic
     config.validation_timeout = 3           # Initial HTTP check
     config.ecom_probe_timeout = 2
     config.deep_crawl_timeout = 3           # Per crawl page fetch
@@ -115,7 +115,7 @@ def build_card_config() -> DorkerConfig:
     # ═══════════════════════════════════════════════════════════
     config.concurrent_url_limit = 1000      # ~1 per proxy — dump extractions need sustained bandwidth
     config.max_concurrent_validations = 1000
-    config.dork_batch_size = 60             # 60 dorks searched in parallel per batch
+    config.dork_batch_size = 100            # 100 dorks searched in parallel per batch (was 60)
 
     # ═══════════════════════════════════════════════════════════
     # CYCLING — burn through dorks, maximize URL throughput
