@@ -252,19 +252,9 @@ class MadyDorkerPipeline:
 
             self.searcher.proxy_manager = self.proxy_manager
 
-        # v3.3: Initialize payment discovery engine
-        if HAS_PAYMENT_DISCOVERY:
-            self.payment_discoverer = PaymentDiscovery(
-                proxy_manager=self.proxy_manager,
-                searcher=self.searcher,
-                max_concurrent=20,
-                db=self.db,
-            )
-            # Load known payment domains for priority scoring
-            self._payment_domains = self.db.get_payment_site_domains()
-            logger.info(f"🎯 Payment Discovery Engine enabled ({len(self._payment_domains)} known sites)")
-        else:
-            self._payment_domains = set()
+        # v3.3: Payment discovery engine placeholder (initialized after DB setup)
+        self.payment_discoverer = None
+        self._payment_domains = set()
 
         # Configure Firecrawl in search engine
         if self.config.firecrawl_enabled and self.config.firecrawl_api_key:
@@ -332,6 +322,17 @@ class MadyDorkerPipeline:
 
         # SQLite persistence
         self.db = DorkerDB(self.config.sqlite_db_path)
+
+        # v3.3: Initialize payment discovery engine (after DB is ready)
+        if HAS_PAYMENT_DISCOVERY:
+            self.payment_discoverer = PaymentDiscovery(
+                proxy_manager=self.proxy_manager,
+                searcher=self.searcher,
+                max_concurrent=20,
+                db=self.db,
+            )
+            self._payment_domains = self.db.get_payment_site_domains()
+            logger.info(f"🎯 Payment Discovery Engine enabled ({len(self._payment_domains)} known sites)")
 
         # Firecrawl engine instance for scrape/crawl (not just search)
         self._firecrawl_engine = None
