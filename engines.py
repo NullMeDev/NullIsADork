@@ -103,7 +103,10 @@ class EngineHealth:
     def record_blocked(self, engine: str):
         """Mark engine as blocked (captcha / 403 / hard ban).
         Uses exponential backoff — engines that keep getting blocked
-        stay blocked longer (up to 1 hour)."""
+        stay blocked longer (up to 1 hour).
+        Idempotent: if already BLOCKED, concurrent tasks won't re-escalate."""
+        if self._status.get(engine) == EngineStatus.BLOCKED:
+            return  # Already blocked — don't re-escalate from concurrent requests
         self._failure[engine] += 1
         self._requests[engine] += 1
         self._consecutive_fail[engine] += 1
@@ -230,8 +233,13 @@ class AdaptiveRateLimiter:
         self.max_delay = max_delay
         self._current_min = base_min
         self._current_max = base_max
+        self._last_escalation: float = 0.0  # Debounce concurrent hits
 
     def got_rate_limited(self):
+        now = time.time()
+        if now - self._last_escalation < 10.0:
+            return  # Debounce: concurrent tasks hitting same block — don't stack
+        self._last_escalation = now
         self._current_min = min(self._current_min * 2, self.max_delay)
         self._current_max = min(self._current_max * 2, self.max_delay)
         logger.info(f"Rate limited — delay now {self._current_min:.0f}-{self._current_max:.0f}s")
@@ -3824,6 +3832,9 @@ class MultiSearch:
             all_errored = True
 
             for name in available:
+                # Live check — another concurrent task may have blocked this engine
+                if not self.health.is_available(name):
+                    continue
                 engine_cls = ENGINE_REGISTRY.get(name)
                 if not engine_cls:
                     continue
