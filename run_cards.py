@@ -60,7 +60,7 @@ def build_card_config() -> DorkerConfig:
     config.cookie_extraction_enabled = False # Session cookies = noise
     config.ecom_checker_enabled = False     # Ecom platform detection = noise
     config.key_validation_enabled = False   # Gateway key validation = noise
-    config.secret_extraction_enabled = True  # API keys in source — NOW ENABLED
+    config.secret_extraction_enabled = False # Disabled — was flooding Telegram feed
 
     # ── Keep useful features ──
     config.deep_crawl_enabled = True        # Crawl to find param URLs for SQLi
