@@ -7393,15 +7393,94 @@ async def cmd_register(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     # Register (or re-register) the user
     p.db.register_user(user_id, username=user.username, first_name=user.first_name)
+    # Tell the user to wait
     await update.message.reply_text(
-        f"📋 <b>Registration Submitted</b>\n\n"
-        f"Your User ID: <code>{user_id}</code>\n"
-        f"Username: @{user.username or 'N/A'}\n"
-        f"Name: {user.first_name or 'N/A'}\n\n"
-        f"⏳ Waiting for owner activation.\n"
-        f"Share your User ID with the bot owner to get activated.",
+        "📋 <b>Registration Submitted</b>\n\n"
+        "⏳ The owner has been notified.\n"
+        "You'll receive a message once you're approved.",
         parse_mode="HTML",
     )
+    # Send rich approval request to the owner via DM
+    owner_id = _get_owner_id()
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Approve", callback_data=f"reg_approve_{user_id}"),
+            InlineKeyboardButton("❌ Deny", callback_data=f"reg_deny_{user_id}"),
+        ]
+    ])
+    try:
+        await context.bot.send_message(
+            chat_id=owner_id,
+            text=(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "  🆕 <b>New Registration Request</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"  👤 <b>Name:</b> {user.first_name or 'N/A'} {user.last_name or ''}\n"
+                f"  📛 <b>Username:</b> @{user.username or 'N/A'}\n"
+                f"  🆔 <b>User ID:</b> <code>{user_id}</code>\n"
+                f"  💬 <b>From Chat:</b> <code>{update.effective_chat.id}</code>\n\n"
+                "  Tap below to approve or deny access."
+            ),
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify owner about registration: {e}")
+
+
+async def reg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle Approve/Deny button presses for registration requests."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not _is_owner(user_id):
+        await query.answer("⛔ Only the owner can do this.", show_alert=True)
+        return
+    data = query.data  # reg_approve_12345 or reg_deny_12345
+    action, target_id_str = data.rsplit("_", 1)
+    try:
+        target_id = int(target_id_str)
+    except ValueError:
+        await query.answer("❌ Invalid user ID.", show_alert=True)
+        return
+    p = get_pipeline()
+    if "approve" in action:
+        success = p.db.activate_user(target_id, activated_by=user_id)
+        if success:
+            await query.answer("✅ User approved!")
+            await query.edit_message_text(
+                query.message.text_html + "\n\n✅ <b>APPROVED</b>",
+                parse_mode="HTML",
+            )
+            # Notify the user they've been approved
+            try:
+                await context.bot.send_message(
+                    chat_id=target_id,
+                    text=(
+                        "🎉 <b>Access Granted!</b>\n\n"
+                        "Your registration has been approved.\n"
+                        "Use /start to access the bot menu."
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass  # User may have blocked the bot
+        else:
+            await query.answer("❌ User not found in DB — they may need to /register again.", show_alert=True)
+    else:  # deny
+        p.db.deactivate_user(target_id)
+        await query.answer("🚫 User denied.")
+        await query.edit_message_text(
+            query.message.text_html + "\n\n🚫 <b>DENIED</b>",
+            parse_mode="HTML",
+        )
+        # Notify the user they've been denied
+        try:
+            await context.bot.send_message(
+                chat_id=target_id,
+                text="❌ Your registration request was denied.",
+            )
+        except Exception:
+            pass
 
 
 async def cmd_activate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -7532,6 +7611,7 @@ def main(config: DorkerConfig = None):
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_start))
     app.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu_"))
+    app.add_handler(CallbackQueryHandler(reg_callback, pattern=r"^reg_(approve|deny)_"))
     app.add_handler(CommandHandler("dorkon", cmd_dorkon, filters=chat_filter))
     app.add_handler(CommandHandler("dorkoff", cmd_dorkoff, filters=chat_filter))
     app.add_handler(CommandHandler("stopscan", cmd_stopscan, filters=chat_filter))
