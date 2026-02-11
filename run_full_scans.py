@@ -217,8 +217,8 @@ async def full_scan(url: str, config: DorkerConfig, scan_idx: int, total: int):
                                         page_secs = secret_extractor.extract_from_text(bp.html, bp.url)
                                         if page_secs:
                                             all_secrets.extend(page_secs)
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logger.debug(f"extending secrets from scan: {e}")
                             discovered_param_urls.update(flare_result.param_urls)
                             crawl_result = flare_result
                             total_pages_found = flare_result.total_fetched

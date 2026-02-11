@@ -812,8 +812,8 @@ class RecursiveCrawler:
             finally:
                 if own:
                     await _session.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"closing session after robots.txt: {e}")
         return disallowed
 
     # ─────────────────────────────────────────────

@@ -796,8 +796,8 @@ class XSSScanner:
                                           timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
                         await resp.read()  # Just send it
                     logger.debug(f"[XSS-Blind] Injected into {pname} on {url[:50]}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"XSS blind injection: {e}")
                 await asyncio.sleep(0.2)
 
     # ──────────────────────────────────────────────────────────

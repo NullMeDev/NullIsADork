@@ -1,6 +1,26 @@
+# Core
 aiohttp>=3.9.0
 beautifulsoup4>=4.12.0
 loguru>=0.7.0
+python-telegram-bot>=22.0
+playwright>=1.40.0
+
+# Database drivers
 aiomysql>=0.2.0
 asyncpg>=0.29.0
 motor>=3.3.0
+pymongo>=4.6.0
+
+# Browser / Stealth
+playwright-stealth>=1.0.6
+
+# CAPTCHA solving
+nopecha>=1.0.4
+
+# HTTP extras
+yarl>=1.9.0
+
+# Optional (uncomment if needed)
+# anticaptchaofficial>=1.0.26
+# 2captcha-python>=1.2.5
+# firecrawl-py>=0.0.16

@@ -565,7 +565,8 @@ class ProxyPool:
                         proxy.alive = False
                         proxy.last_checked = time.time()
                         return False
-        except Exception:
+        except Exception as e:
+            logger.debug(f"NoSQL/proxy exception: {e}")
             proxy.alive = False
             proxy.last_checked = time.time()
             return False

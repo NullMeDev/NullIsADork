@@ -354,7 +354,8 @@ class NoSQLScanner:
                 baseline_body = await resp.text(errors='replace')
                 baseline_status = resp.status
                 baseline_len = len(baseline_body)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"NoSQL/proxy exception: {e}")
             return results
 
         for pname in param_names:
@@ -534,7 +535,8 @@ class NoSQLScanner:
                         ))
                         break
 
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"NoSQL/proxy exception: {e}")
                     continue
 
         return results
@@ -553,7 +555,8 @@ class NoSQLScanner:
         from bs4 import BeautifulSoup
         try:
             soup = BeautifulSoup(html_body, 'html.parser')
-        except Exception:
+        except Exception as e:
+            logger.debug(f"NoSQL/proxy exception: {e}")
             return results
 
         # Find login forms
@@ -593,7 +596,8 @@ class NoSQLScanner:
                                        timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
                     baseline = await resp.text(errors='replace')
                     baseline_status = resp.status
-        except Exception:
+        except Exception as e:
+            logger.debug(f"NoSQL/proxy exception: {e}")
             return results
 
         # Test auth bypass payloads
@@ -686,7 +690,8 @@ class NoSQLScanner:
                                   timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
                 true_body = await resp.text(errors='replace')
                 true_len = len(true_body)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"NoSQL/proxy exception: {e}")
             return None
 
         # False condition
@@ -702,7 +707,8 @@ class NoSQLScanner:
                                   timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
                 false_body = await resp.text(errors='replace')
                 false_len = len(false_body)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"NoSQL/proxy exception: {e}")
             return None
 
         # If true and false responses differ significantly → blind NoSQL
@@ -762,7 +768,8 @@ class NoSQLScanner:
                         logger.debug(f"[NoSQL] Extracted: {extracted}")
                         break
 
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"NoSQL/proxy exception: {e}")
                     continue
 
             if not found_char:

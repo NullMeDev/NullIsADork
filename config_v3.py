@@ -14,14 +14,12 @@ class DorkerConfig:
     """Configuration for MadyDorker v3.0."""
 
     # =============== TELEGRAM ===============
-    telegram_bot_token: str = os.getenv(
-        "DORKER_BOT_TOKEN", "8187477232:AAFKPHOiLduYeYr5sqLf-0C5grtPI9OzXzE"
-    )
-    telegram_chat_id: str = os.getenv("DORKER_CHAT_ID", "-1003720958643")
-    telegram_group_id: str = os.getenv(
-        "DORKER_GROUP_ID", "-1003720958643"
-    )  # Channel for ALL findings
-    owner_user_id: int = int(os.getenv("DORKER_OWNER_ID", "6710320744"))
+    # SECURITY: All credentials MUST be set via environment variables.
+    # No hardcoded tokens/IDs — source code exposure = bot compromise.
+    telegram_bot_token: str = os.getenv("DORKER_BOT_TOKEN", "")
+    telegram_chat_id: str = os.getenv("DORKER_CHAT_ID", "")
+    telegram_group_id: str = os.getenv("DORKER_GROUP_ID", "")  # Channel for ALL findings
+    owner_user_id: int = int(os.getenv("DORKER_OWNER_ID", "0"))
 
     # =============== DORK GENERATOR ===============
     params_dir: str = os.path.join(os.path.dirname(__file__), "params")
@@ -216,9 +214,7 @@ class DorkerConfig:
     # =============== CAPTCHA SOLVER ===============
     captcha_enabled: bool = True
     captcha_twocaptcha_key: str = os.getenv("TWOCAPTCHA_API_KEY", "")
-    captcha_nopecha_key: str = os.getenv(
-        "NOPECHA_API_KEY", "sub_1PrBQ7CRwBwvt6ptAKlQl20U"
-    )
+    captcha_nopecha_key: str = os.getenv("NOPECHA_API_KEY", "")
     captcha_anticaptcha_key: str = os.getenv("ANTICAPTCHA_API_KEY", "")
     captcha_provider_order: List[str] = field(
         default_factory=lambda: ["nopecha", "2captcha", "anticaptcha"]

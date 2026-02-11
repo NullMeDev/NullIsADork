@@ -211,6 +211,6 @@ class CORSScanner:
                         confidence=0.90,
                         severity="high",
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"CORS scan result: {e}")
         return None

@@ -608,8 +608,8 @@ class PaymentDiscovery:
                 if scores_data:
                     self.dork_scorer.from_dict(scores_data)
                     logger.info(f"[PayDiscover] Restored dork scores for {len(self.dork_scorer._uses)} dorks")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"restoring dork scores from DB: {e}")
 
         # Domain value scorer
         self.value_scorer = DomainValueScorer()
@@ -714,8 +714,8 @@ class PaymentDiscovery:
             proxy = await self.proxy_manager.get_proxy()
             if proxy:
                 return str(proxy.url) if hasattr(proxy, "url") else str(proxy)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"getting proxy URL: {e}")
         return None
 
     async def _fetch(self, url: str, timeout: int = None) -> Optional[str]:
@@ -734,8 +734,8 @@ class PaymentDiscovery:
                             ct = resp.headers.get("content-type", "")
                             if "text" in ct or "html" in ct or "json" in ct or "xml" in ct:
                                 return await resp.text(errors="replace")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"fetching page text: {e}")
         return None
 
     def _save_checkpoint(self, phase: str, index: int, total: int):
@@ -753,8 +753,8 @@ class PaymentDiscovery:
         if self.db and hasattr(self.db, 'get_payment_checkpoint'):
             try:
                 return self.db.get_payment_checkpoint()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"getting payment checkpoint: {e}")
         return None
 
     # ---------------------------------------------------------
@@ -852,8 +852,8 @@ class PaymentDiscovery:
         if self.db and hasattr(self.db, 'save_payment_dork_scores'):
             try:
                 self.db.save_payment_dork_scores(self.dork_scorer.to_dict())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"saving payment dork scores: {e}")
         return list(self.discovered.values())
 
     # ---------------------------------------------------------
@@ -1001,8 +1001,8 @@ class PaymentDiscovery:
                     for url in urls:
                         if self._is_new_domain(url):
                             self._add_site(url, gw_name, "tech_search", 0.75)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"adding site from tech search: {e}")
 
         batch_size = 5
         for i in range(0, len(tech_dorks), batch_size):
@@ -1137,8 +1137,8 @@ class PaymentDiscovery:
                                     has_params = "?" in url and "=" in url
                                     conf = 0.6 if has_params else 0.45
                                     self._add_site(url, "Unknown (Wayback)", "wayback", conf)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"adding site from Wayback: {e}")
                 await asyncio.sleep(random.uniform(0.5, 1.5))
 
         batch_size = 5
@@ -1203,8 +1203,8 @@ class PaymentDiscovery:
                     for url in url_pattern.findall(sm_content):
                         if any(kw in url.lower() for kw in payment_keywords):
                             interesting_urls.append(url)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"appending URLs from sitemap: {e}")
 
             # 3. Common API endpoints
             api_paths = [
@@ -1226,8 +1226,8 @@ class PaymentDiscovery:
                             ) as resp:
                                 if resp.status in (200, 301, 302, 403):
                                     interesting_urls.append(url)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"appending URLs from probing: {e}")
 
             # Update discovered sites
             for url in interesting_urls:
@@ -1410,8 +1410,8 @@ class PaymentDiscovery:
                                         depth_map[elink] = current_depth + 1
                                     break
                             self.stats["urls_checked"] += 1
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"incrementing urls_checked stat: {e}")
                 except Exception as e:
                     logger.debug(f"[PayDiscover] Backlink error: {e}")
 
@@ -1483,8 +1483,8 @@ class PaymentDiscovery:
                                     gw_name = name
                                     break
                             self._add_site(url, gw_name, "directory_dork", 0.70)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"adding site from directory dork: {e}")
 
             batch_size = 5
             for i in range(0, len(DIRECTORY_DORKS), batch_size):
@@ -1544,8 +1544,8 @@ class PaymentDiscovery:
             if checkpoint.get("dork_scores"):
                 try:
                     self.dork_scorer.from_dict(json.loads(checkpoint["dork_scores"]))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"restoring dork scores checkpoint: {e}")
 
         logger.info(f"[PayDiscover] Full discovery v2: methods={all_methods}")
 
@@ -1626,8 +1626,8 @@ class PaymentDiscovery:
             if self.db and hasattr(self.db, 'clear_payment_checkpoint'):
                 try:
                     self.db.clear_payment_checkpoint()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"clearing payment checkpoint: {e}")
 
         elapsed = time.time() - start_time
         results = sorted(

@@ -250,8 +250,8 @@ def _is_search_domain(url: str) -> bool:
         for sd in SEARCH_DOMAINS:
             if host.endswith(sd):
                 return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"checking search domain: {e}")
     return False
 
 def _dedup(urls: List[str]) -> List[str]:
@@ -397,18 +397,18 @@ class BrowserManager:
         try:
             if self._context:
                 await self._context.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"closing browser context: {e}")
         try:
             if self._browser:
                 await self._browser.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"closing browser: {e}")
         try:
             if self._playwright:
                 await self._playwright.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"stopping playwright: {e}")
         self._context = None
         self._browser = None
         self._playwright = None
@@ -521,8 +521,8 @@ class BrowserManager:
                 if page:
                     try:
                         await page.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"closing page after error: {e}")
 
     async def search_multi_engine(self, query: str, num_results: int = 15,
                                    engines: Optional[List[str]] = None,
@@ -693,8 +693,8 @@ class BrowserManager:
                     if resp.status == 200:
                         data = await resp.json()
                         return data.get("msg") == "FlareSolverr is ready!"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"checking FlareSolverr readiness: {e}")
         return False
 
     async def _inject_flaresolverr_cookies(self, page: 'Page', flare_result: Dict, domain: str):
@@ -849,8 +849,8 @@ class BrowserManager:
                                             if checkbox:
                                                 await checkbox.click()
                                                 await asyncio.sleep(3)
-                                        except Exception:
-                                            pass
+                                        except Exception as e:
+                                            logger.debug(f"clicking CF checkbox: {e}")
                                 
                                 for sel in ['input[type="checkbox"]', '.cf-turnstile',
                                             '#challenge-form input[type="submit"]']:
@@ -859,10 +859,10 @@ class BrowserManager:
                                         if el and await el.is_visible():
                                             await el.click()
                                             await asyncio.sleep(2)
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
+                                    except Exception as e:
+                                        logger.debug(f"clicking bypass element: {e}")
+                            except Exception as e:
+                                logger.debug(f"CF bypass block: {e}")
                             
                             wait_time = 5 + attempt * 3 + random.uniform(1, 3)
                             await asyncio.sleep(wait_time)
@@ -984,8 +984,8 @@ class BrowserManager:
                         """)
                         if perf_headers:
                             crawl_page.response_headers = perf_headers
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"setting performance headers: {e}")
 
                     # Extract links, forms, scripts using the same parser as RecursiveCrawler
                     if html and depth < max_depth:
@@ -1042,8 +1042,8 @@ class BrowserManager:
             if page:
                 try:
                     await page.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"closing page after crawl: {e}")
 
         result.elapsed = time.time() - start_time
 
@@ -1264,8 +1264,8 @@ async def flaresolverr_crawl(
                     "cmd": "sessions.destroy",
                     "session": session_id,
                 }, timeout=aiohttp.ClientTimeout(total=10))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"destroying FlareSolverr session: {e}")
 
     result.elapsed = time.time() - start_time
 
@@ -1507,8 +1507,8 @@ async def spa_extract(
                     result.internal_links.append(link)
                     if lp.query:
                         result.param_urls.append(link)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"extracting param URLs from links: {e}")
         
         # Extract cookies
         browser_cookies = await context.cookies()
@@ -1653,8 +1653,8 @@ async def spa_extract_with_flaresolverr(
                             result.internal_links.append(href)
                             if lp.query:
                                 result.param_urls.append(href)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"extracting param URLs from href: {e}")
                 
                 # Framework detection
                 if "__NEXT_DATA__" in html or "_next/static" in html:
@@ -1675,8 +1675,8 @@ async def spa_extract_with_flaresolverr(
                 try:
                     payload = {"cmd": "sessions.destroy", "session": flare_session}
                     await session.post(flare_url, json=payload)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"destroying FlareSolverr session cleanup: {e}")
     
     except Exception as e:
         result.error = str(e)

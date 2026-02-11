@@ -277,14 +277,14 @@ class OOBCallbackServer:
             writer.write(response.encode())
             await writer.drain()
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"HTTP handler response: {e}")
         finally:
             try:
                 writer.close()
                 await writer.wait_closed()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"closing writer: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -575,8 +575,8 @@ class OOBInjector:
                     "time": time.time(),
                     "source": "oob_sqli",
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"appending OOB finding: {e}")
 
         # Report
         if self.reporter:
@@ -596,8 +596,8 @@ class OOBInjector:
 
             try:
                 await self.reporter.send_message(text)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"sending reporter message: {e}")
 
         return result
 
@@ -683,8 +683,8 @@ class OOBInjector:
                         timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:
                         await resp.read()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"sending OOB trigger request: {e}")
 
                 result.payloads_sent += 1
 

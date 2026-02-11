@@ -264,8 +264,8 @@ class Dorker:
             try:
                 domain = urlparse(url).netloc.lower()
                 self._mark_domain_seen(domain)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to mark domain seen: {e}")
         
         return valid_sites
     
@@ -328,8 +328,8 @@ class Dorker:
                 
                 try:
                     await self.notifier.send_error(f"Dork error: {str(e)[:200]}")
-                except:
-                    pass
+                except Exception as e2:
+                    logger.debug(f"Failed to send dork error notification: {e2}")
                 await asyncio.sleep(5)
         
         # Save state after cycle
@@ -407,8 +407,8 @@ class Dorker:
                 
                 try:
                     await self.notifier.send_error(f"Critical error: {str(e)}")
-                except:
-                    pass
+                except Exception as e2:
+                    logger.debug(f"Failed to send critical error notification: {e2}")
                 
                 # Exponential backoff on repeated errors
                 wait_time = min(60 * cycle_errors, 600)  # Max 10 min

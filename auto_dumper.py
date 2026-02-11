@@ -406,8 +406,8 @@ class AutoDumper:
             if _domain in self._failed_domains:
                 logger.info(f"[AutoDump] Skipping {_domain} — previously failed")
                 return parsed
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"checking failed domains: {e}")
         
         # ── Step 1: Execute dump via best available method ──
         dump_data = None
@@ -530,8 +530,8 @@ class AutoDumper:
                 from urllib.parse import urlparse as _urlparse2
                 _fd = _urlparse2(url).netloc.lower().split(":")[0]
                 self._failed_domains.add(_fd)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"adding to failed domains: {e}")
             return parsed
         
         # ── Step 3: Deep-parse all dumped rows ──
@@ -588,8 +588,8 @@ class AutoDumper:
                                 card_entry["_country"] = bin_info.get("country", "")
                                 card_entry["_card_type"] = bin_info.get("type", "")
                                 card_entry["_prepaid"] = bin_info.get("prepaid", False)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"BIN lookup for card: {e}")
                         verified_cards.append(card_entry)
                     # Cards without parseable number are excluded
                 
@@ -698,8 +698,8 @@ class AutoDumper:
             from urllib.parse import urlparse as _urlparse3
             _sd = _urlparse3(url).netloc.lower().split(":")[0]
             self._dumped_domains.add(_sd)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"adding to dumped domains: {e}")
         
         return parsed
 

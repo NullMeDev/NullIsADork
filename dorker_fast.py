@@ -498,7 +498,7 @@ class SiteValidator:
             if domain.startswith("www."):
                 domain = domain[4:]
             return domain
-        except:
+        except Exception:
             return ""
     
     def _should_skip(self, domain: str) -> bool:
@@ -795,8 +795,8 @@ class FastDorker:
                 with open(found_path) as f:
                     self.found_sites = json.load(f)
                 logger.info(f"Loaded {len(self.found_sites)} found sites")
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to load found sites: {e}")
     
     def _save_state(self):
         """Save current state."""
@@ -818,7 +818,7 @@ class FastDorker:
             if domain.startswith("www."):
                 domain = domain[4:]
             return domain
-        except:
+        except Exception:
             return ""
     
     def _is_new_domain(self, url: str) -> bool:

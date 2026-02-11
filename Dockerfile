@@ -16,9 +16,12 @@ RUN mkdir -p /data
 ENV PYTHONUNBUFFERED=1
 ENV DORKER_BOT_TOKEN=""
 ENV DORKER_CHAT_ID=""
+ENV DORKER_GROUP_ID=""
+ENV DORKER_OWNER_ID=""
+ENV NOPECHA_API_KEY=""
 
 # Data persistence
 VOLUME ["/data"]
 
-# Default command
-CMD ["python", "dorker.py", "--config", "/data/config.json"]
+# Default command (M7: was dorker.py, now main_v3.py)
+CMD ["python", "main_v3.py"]

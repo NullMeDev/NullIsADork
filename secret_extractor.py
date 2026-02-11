@@ -584,8 +584,8 @@ class SecretExtractor:
                     platform_info = self.detect_platform(main_html)
                     endpoints_info = self.discover_endpoints(main_html, base)
                     sqli_candidates = self.get_sqli_candidates(endpoints_info, base)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"getting SQLi candidates: {e}")
             
             # 2. Scan payment-related paths
             for path in self.PAYMENT_PATHS:
@@ -612,8 +612,8 @@ class SecretExtractor:
                                     for ep in pay_endpoints[key]:
                                         if ep not in endpoints_info.get(key, []):
                                             endpoints_info.setdefault(key, []).append(ep)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"adding payment endpoints: {e}")
             
             # 3. Scan endpoint discovery paths (login, API, etc.)
             for path in self.ENDPOINT_PATHS:
@@ -641,8 +641,8 @@ class SecretExtractor:
                             elif resp.status == 403:
                                 # Exists but forbidden — still interesting
                                 pass
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"probing hidden endpoints: {e}")
             
             # 4. Discover JS files with gateway references from original page
             try:
@@ -659,10 +659,10 @@ class SecretExtractor:
                         try:
                             js_secrets = await self.extract_from_url(script_url, session)
                             all_secrets.extend(js_secrets)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                        except Exception as e:
+                            logger.debug(f"extracting secrets from JS URL: {e}")
+            except Exception as e:
+                logger.debug(f"JS analysis block: {e}")
             
             # Refresh sqli candidates with all discovered endpoints
             sqli_candidates = self.get_sqli_candidates(endpoints_info, base)

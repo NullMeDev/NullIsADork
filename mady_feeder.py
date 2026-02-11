@@ -814,8 +814,8 @@ class MadyFeeder:
                 with open(self.scraped_keys_path, 'r') as f:
                     data = json.load(f)
                     total_in_mady = len(data)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to load scraped keys count: {e}")
         
         targets = set()
         for cid in self.config.feed_chat_ids:

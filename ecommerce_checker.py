@@ -900,8 +900,8 @@ class EcommerceChecker:
                             body = await resp.text(errors="replace")
                             if len(body) > 100_000:
                                 body = body[:100_000]
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"reading response body: {e}")
 
                         if not body:
                             continue

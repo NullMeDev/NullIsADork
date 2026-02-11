@@ -595,8 +595,8 @@ class LFIScanner:
                                 confidence=0.95,
                                 severity="critical",
                             )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"LFI scan result: {e}")
 
             # php://expect — look for command output
             elif wrapper_type == "php_expect":

@@ -651,24 +651,24 @@ class SQLiScanner:
         for encoder in waf_info.get("encodings", []):
             try:
                 encoded.append(encoder(payload))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"WAF encoder fallback: {e}")
         # Always add generic evasions too
         for name, func in self.EVASION_TECHNIQUES.items():
             try:
                 encoded.append(func(payload))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"evasion technique fallback: {e}")
         # v3.2: Advanced WAF bypass (Unicode normalization + comment injection)
         if HAS_ADVANCED:
             try:
                 encoded.extend(WAFBypassArsenal.unicode_normalization_bypass(payload))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"unicode normalization bypass: {e}")
             try:
                 encoded.extend(WAFBypassArsenal.comment_injection_variants(payload))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"comment injection bypass: {e}")
         return list(set(encoded))
 
     # ══════════════════════════ COOKIE EXTRACTION ══════════════════════════

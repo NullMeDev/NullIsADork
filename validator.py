@@ -95,7 +95,7 @@ class SiteValidator:
             if domain.startswith("www."):
                 domain = domain[4:]
             return domain
-        except:
+        except Exception:
             return ""
     
     def _should_skip(self, domain: str) -> bool:

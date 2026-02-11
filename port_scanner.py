@@ -338,8 +338,8 @@ class PortScanner:
                         service=port.service,
                         banner=port.banner[:500] if port.banner else None,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"saving port scan to DB: {e}")
 
         # Report high-value ports
         if self.reporter and dedup_key not in self._reported:
@@ -471,11 +471,11 @@ class PortScanner:
                 try:
                     writer.close()
                     await writer.wait_closed()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"closing writer: {e}")
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"port scan outer except: {e}")
 
         return result
 
@@ -518,8 +518,8 @@ class PortScanner:
                     except Exception:
                         break
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"service detection: {e}")
 
         return banner[:1024]  # Cap banner length
 
